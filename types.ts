@@ -81,12 +81,32 @@ export interface ChannelPrinciple {
   text: string;
 }
 
+export interface ChannelLink {
+  id: string;
+  title: string;
+  url: string;
+  icon?: string; // e.g., 'doc', 'sheet', 'video'
+}
+
+export interface ChannelNote {
+  id: string;
+  authorId: string;
+  date: string;
+  text: string;
+  pinned?: boolean;
+}
+
+export type ChannelTag = 'Inbound' | 'Outbound';
+
 export interface Channel {
   id: string;
   name: string;
   campaignId: string;
   bets: Bet[];
   principles: ChannelPrinciple[];
+  tags: ChannelTag[];
+  links?: ChannelLink[]; // SOPs, Docs
+  notes?: ChannelNote[]; // Team remarks
 }
 
 export interface OperatingPrinciple {

@@ -1,7 +1,9 @@
+
 import React from 'react';
 import { useOnboarding } from '../hooks/useOnboarding';
 import { PrinciplesCanvas } from './PrinciplesCanvas';
 import { RoadmapSandbox } from './RoadmapSandbox';
+import { ChannelSetupModal } from './ChannelSetupModal';
 import { Icons } from '../constants';
 import { useStore } from '../store';
 
@@ -9,7 +11,7 @@ export const OnboardingWizard: React.FC = () => {
   const { state, actions } = useOnboarding();
   const { currentUser } = useStore();
 
-  const { step, loading, formData, buckets, editingBucket, tempBucketName, principlesByCategory, campaign } = state;
+  const { step, loading, formData, buckets, editingBucket, tempBucketName, principlesByCategory, campaign, showChannelModal } = state;
   
   const TOTAL_STEPS = 5;
 
@@ -71,6 +73,15 @@ export const OnboardingWizard: React.FC = () => {
 
         {/* Background Ambient Effects */}
         <div className="absolute bottom-0 left-0 w-full h-32 bg-gradient-to-t from-[#09090b] to-transparent pointer-events-none z-30"></div>
+
+        {/* MODAL OVERLAY */}
+        {showChannelModal && (
+            <ChannelSetupModal 
+                existingChannels={campaign?.channels || []}
+                onComplete={actions.handleChannelSetupComplete}
+                onBack={() => actions.setShowChannelModal(false)}
+            />
+        )}
       </div>
     );
   }

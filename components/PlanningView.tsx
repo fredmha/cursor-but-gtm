@@ -29,7 +29,8 @@ export const PlanningView: React.FC = () => {
        name,
        campaignId: campaign.id,
        bets: [],
-       principles: []
+       principles: [],
+       tags: []
     });
   };
 
@@ -181,7 +182,7 @@ export const PlanningView: React.FC = () => {
                  <button
                    onClick={() => handleAddBet(channel.id)}
                    className="w-full py-3 border border-dashed border-zinc-800 hover:border-zinc-600 hover:bg-white/[0.02] text-zinc-500 hover:text-zinc-300 rounded-lg flex items-center justify-center gap-2 transition-all font-bold text-xs uppercase tracking-wide"
-                 >
+                   >
                    <Icons.Plus className="w-3.5 h-3.5" />
                    Add Strategy Bet
                  </button>

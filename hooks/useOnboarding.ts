@@ -2,14 +2,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useStore } from '../store';
 import { generateChannelsAndBets } from '../services/geminiService';
-import { Campaign, OperatingPrinciple } from '../types';
+import { Campaign, OperatingPrinciple, Channel } from '../types';
 
 export const useOnboarding = () => {
-  const { setCampaign, updateCampaign, importAIPlan, campaign, addChannel } = useStore();
+  const { setCampaign, updateCampaign, importAIPlan, campaign, addChannel, updateChannel, deleteChannel } = useStore();
   
   // --- Core State ---
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [showChannelModal, setShowChannelModal] = useState(false);
   
   const [formData, setFormData] = useState<{
     quarter: string;
@@ -81,13 +82,8 @@ export const useOnboarding = () => {
       setStep(2);
     } else if (step === 2) {
        updateStore('Onboarding');
-       // Initialize some default channels if empty
-       if (!campaign?.channels || campaign.channels.length === 0) {
-           addChannel({ id: crypto.randomUUID(), name: 'THEMES', campaignId: campaign?.id || '', bets: [], principles: [] });
-           addChannel({ id: crypto.randomUUID(), name: 'LAUNCHES', campaignId: campaign?.id || '', bets: [], principles: [] });
-           addChannel({ id: crypto.randomUUID(), name: 'LINKEDIN', campaignId: campaign?.id || '', bets: [], principles: [] });
-       }
-       setStep(3); // Go to Roadmap Sandbox
+       // INTERCEPT: Show Channel Setup Modal instead of going directly to step 3
+       setShowChannelModal(true);
     } else if (step === 3) {
        updateStore('Onboarding');
        setStep(4); // Go to AI Strategy
@@ -102,6 +98,47 @@ export const useOnboarding = () => {
     } else {
       updateStore('Planning');
     }
+  };
+
+  const handleChannelSetupComplete = (channels: Partial<Channel>[]) => {
+      // 1. Remove existing channels if they are not in the new list (simplified sync)
+      // For simplicity, we can just clear and re-add or diff.
+      // Let's rely on store actions.
+      
+      if (campaign) {
+          // A bit brutal but ensures sync. In a real app we'd diff.
+          // Since we are in onboarding, clearing is acceptable or we can just update.
+          // Let's update existing and add new.
+          
+          const existingIds = campaign.channels.map(c => c.id);
+          const newIds = channels.map(c => c.id);
+
+          // Delete removed
+          existingIds.forEach(id => {
+              if (!newIds.includes(id)) {
+                  deleteChannel(id);
+              }
+          });
+
+          // Add or Update
+          channels.forEach(c => {
+              if (existingIds.includes(c.id!)) {
+                  updateChannel(c.id!, { name: c.name, tags: c.tags });
+              } else {
+                  addChannel({
+                      id: c.id || crypto.randomUUID(),
+                      name: c.name!,
+                      campaignId: campaign.id,
+                      bets: [],
+                      principles: [],
+                      tags: c.tags || []
+                  });
+              }
+          });
+      }
+
+      setShowChannelModal(false);
+      setStep(3);
   };
 
   const handleBack = () => {
@@ -222,13 +259,16 @@ export const useOnboarding = () => {
       editingBucket,
       tempBucketName,
       principlesByCategory,
-      campaign
+      campaign,
+      showChannelModal
     },
     actions: {
       setStep,
       setFormData,
       handleNext,
       handleBack,
+      handleChannelSetupComplete,
+      setShowChannelModal,
       addPrinciple,
       updatePrinciple,
       removePrinciple,

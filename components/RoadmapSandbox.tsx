@@ -1,10 +1,10 @@
 
-
 import React, { useState, useMemo } from 'react';
 import { useStore } from '../store';
 import { Icons, PRIORITIES } from '../constants';
-import { RoadmapItem, User, OperatingPrinciple, Priority, Bet, Status, TicketStatus } from '../types';
+import { RoadmapItem, User, OperatingPrinciple, Priority, Bet, Status, TicketStatus, ChannelTag, Project } from '../types';
 import { ProjectDashboard } from './ProjectDashboard';
+import { ChannelDashboard } from './ChannelDashboard';
 
 interface RoadmapSandboxProps {
   onNext?: () => void;
@@ -15,6 +15,92 @@ const WEEK_WIDTH = 200;
 const LEFT_PANEL_WIDTH = 340; 
 
 // --- COMPONENTS ---
+
+// STRATEGY HORIZON COMPONENT
+const StrategyHorizon: React.FC<{
+    projects: Project[];
+    users: User[];
+    campaignStart: Date;
+    onProjectClick: (projectId: string) => void;
+    weekCount: number;
+}> = ({ projects, users, campaignStart, onProjectClick, weekCount }) => {
+    
+    return (
+        <div className="min-w-max bg-[#09090b] border-b border-zinc-800 relative z-30">
+            <div className="flex">
+                {/* Header Label */}
+                <div className="shrink-0 border-r border-zinc-800 bg-[#09090b] p-3 flex flex-col justify-center" style={{ width: LEFT_PANEL_WIDTH }}>
+                    <div className="flex items-center gap-2 text-indigo-400">
+                        <Icons.Target className="w-4 h-4" />
+                        <span className="text-xs font-bold uppercase tracking-wider">Strategy Horizon</span>
+                    </div>
+                    <p className="text-[9px] text-zinc-500 mt-1">Timeline of Major Initiatives</p>
+                </div>
+
+                {/* Gantt Area */}
+                <div className="relative flex-1 h-24 bg-zinc-900/10">
+                    {/* Vertical Week Lines (Background) */}
+                    <div className="absolute inset-0 flex pointer-events-none">
+                         {Array.from({ length: weekCount }).map((_, i) => (
+                             <div key={i} className="border-r border-white/5 h-full" style={{ width: WEEK_WIDTH }}></div>
+                         ))}
+                    </div>
+
+                    {/* Project Bars */}
+                    {projects.map(project => {
+                         if (!project.startDate || !project.targetDate) return null;
+                         
+                         const start = new Date(project.startDate);
+                         const end = new Date(project.targetDate);
+                         const campaignS = new Date(campaignStart);
+                         
+                         // Calculate Position
+                         const diffTime = Math.abs(start.getTime() - campaignS.getTime());
+                         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+                         const startOffsetPixels = (diffDays / 7) * WEEK_WIDTH;
+                         
+                         const durationTime = Math.abs(end.getTime() - start.getTime());
+                         const durationDays = Math.ceil(durationTime / (1000 * 60 * 60 * 24));
+                         const widthPixels = Math.max((durationDays / 7) * WEEK_WIDTH, 50); // Min width
+
+                         const lead = users.find(u => u.id === project.ownerId);
+
+                         // Color based on status
+                         const colorClass = project.status === 'On Track' ? 'bg-emerald-500' : project.status === 'At Risk' ? 'bg-amber-500' : project.status === 'Off Track' ? 'bg-red-500' : 'bg-zinc-500';
+
+                         return (
+                             <div 
+                                key={project.id}
+                                onClick={() => onProjectClick(project.id)}
+                                className="absolute top-4 h-12 rounded-lg bg-zinc-800 border border-zinc-700 hover:border-zinc-500 shadow-lg cursor-pointer group transition-all flex items-center px-3 gap-3 hover:-translate-y-0.5"
+                                style={{ left: startOffsetPixels, width: widthPixels }}
+                             >
+                                 <div className={`w-1.5 h-full absolute left-0 top-0 bottom-0 rounded-l-lg ${colorClass}`}></div>
+                                 <div className="pl-1 overflow-hidden">
+                                     <div className="text-xs font-bold text-white truncate">{project.name}</div>
+                                     <div className="text-[9px] text-zinc-400 font-mono truncate">
+                                         {start.toLocaleDateString(undefined, {month: 'short', day:'numeric'})} - {end.toLocaleDateString(undefined, {month: 'short', day:'numeric'})}
+                                     </div>
+                                 </div>
+                                 {lead && (
+                                     <div className={`w-6 h-6 rounded-full ${lead.color} flex items-center justify-center text-[8px] text-white font-bold ml-auto shrink-0 ring-2 ring-[#09090b]`}>
+                                         {lead.initials}
+                                     </div>
+                                 )}
+                             </div>
+                         )
+                    })}
+                    
+                    {projects.length === 0 && (
+                        <div className="absolute inset-0 flex items-center justify-center text-zinc-600 text-xs italic">
+                            No active projects with timeline data.
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
 
 const ContextSidebar: React.FC<{
   isOpen: boolean;
@@ -91,13 +177,20 @@ const NorthStarHeader: React.FC<{
   </header>
 );
 
-// --- MODALS ---
+// --- MODALS (Reused) ---
+// Note: In a real refactor, these should be separate files. Keeping here for scope.
 
 const ChannelCreationModal: React.FC<{
   onClose: () => void;
-  onSave: (name: string) => void;
+  onSave: (name: string, tags: ChannelTag[]) => void;
 }> = ({ onClose, onSave }) => {
   const [name, setName] = useState('');
+  const [tags, setTags] = useState<ChannelTag[]>([]);
+
+  const toggleTag = (tag: ChannelTag) => {
+    if (tags.includes(tag)) setTags(tags.filter(t => t !== tag));
+    else setTags([...tags, tag]);
+  };
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
@@ -113,13 +206,37 @@ const ChannelCreationModal: React.FC<{
             placeholder="e.g. LinkedIn, Blog, Outbound"
             value={name}
             onChange={e => setName(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && name && onSave(name)}
+            onKeyDown={e => e.key === 'Enter' && name && onSave(name, tags)}
           />
+
+          <label className="text-[10px] uppercase font-bold text-zinc-500 mb-1.5 block">Tags</label>
+          <div className="flex gap-2 mb-6">
+            <button 
+                onClick={() => toggleTag('Inbound')}
+                className={`px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wider border transition-all ${
+                    tags.includes('Inbound') 
+                    ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30' 
+                    : 'bg-zinc-950 text-zinc-600 border-zinc-800 hover:border-zinc-700'
+                }`}
+            >
+                Inbound
+            </button>
+            <button 
+                onClick={() => toggleTag('Outbound')}
+                className={`px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wider border transition-all ${
+                    tags.includes('Outbound') 
+                    ? 'bg-orange-500/10 text-orange-400 border-orange-500/30' 
+                    : 'bg-zinc-950 text-zinc-600 border-zinc-800 hover:border-zinc-700'
+                }`}
+            >
+                Outbound
+            </button>
+          </div>
 
           <div className="flex justify-end gap-2 mt-4">
              <button onClick={onClose} className="px-4 py-2 text-xs text-zinc-400 hover:text-white">Cancel</button>
              <button 
-                onClick={() => onSave(name)} 
+                onClick={() => onSave(name, tags)} 
                 disabled={!name} 
                 className="px-6 py-2 bg-white text-black text-xs font-bold rounded hover:bg-zinc-200 disabled:opacity-50"
              >
@@ -454,6 +571,8 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
   const [activeTicket, setActiveTicket] = useState<{ item: Partial<RoadmapItem>, bets: Bet[] } | null>(null);
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   const [expandedBets, setExpandedBets] = useState<Record<string, boolean>>({});
+  const [activeDashboardChannel, setActiveDashboardChannel] = useState<string | null>(null);
+  const [activeDashboardProject, setActiveDashboardProject] = useState<string | null>(null);
 
   // --- DATA ---
   const weeks = useMemo(() => {
@@ -481,13 +600,16 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
 
   // --- ACTIONS ---
   
-  const handleSaveChannel = (name: string) => {
+  const handleSaveChannel = (name: string, tags: ChannelTag[]) => {
       addChannel({
           id: crypto.randomUUID(),
           name: name,
           campaignId: campaign?.id || '',
           bets: [],
-          principles: []
+          principles: [],
+          tags: tags,
+          links: [],
+          notes: []
       });
       setShowChannelModal(false);
   };
@@ -602,6 +724,15 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
                  </div>
              </div>
 
+             {/* STRATEGY HORIZON (Projects) */}
+             <StrategyHorizon 
+                projects={projects}
+                users={users}
+                campaignStart={campaign?.startDate ? new Date(campaign.startDate) : new Date()}
+                onProjectClick={setActiveDashboardProject}
+                weekCount={weeks.length}
+             />
+
              {/* LANES CONTAINER */}
              <div className="min-w-max pb-32">
                  {channels.map(channel => {
@@ -615,13 +746,32 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
                              {/* LEFT SIDEBAR (Controls) */}
                              <div className="shrink-0 border-r border-white/5 bg-zinc-900/10 p-4 flex flex-col" style={{ width: LEFT_PANEL_WIDTH }}>
                                  
-                                <div className="flex items-center justify-between mb-3 group/header">
-                                    <div className="flex items-center gap-2">
+                                <div 
+                                    className="flex flex-col mb-3 group/header cursor-pointer hover:bg-white/5 p-2 -m-2 rounded transition-colors"
+                                    onClick={() => setActiveDashboardChannel(channel.id)}
+                                >
+                                    <div className="flex items-center gap-2 mb-1">
                                         <div className="p-1 rounded bg-indigo-500/10 text-indigo-400"><Icons.Zap className="w-3.5 h-3.5" /></div>
                                         <span className="font-bold text-sm text-zinc-200">{channel.name}</span>
                                         {bets.length > 0 && <span className="text-[10px] text-zinc-600 font-mono ml-2">{bets.length} Bets</span>}
+                                        <Icons.Layout className="w-3 h-3 text-zinc-600 ml-auto opacity-0 group-hover/header:opacity-100" />
                                     </div>
-                                    {/* Action to rename or delete channel could go here */}
+                                    
+                                    {/* TAGS DISPLAY */}
+                                    <div className="flex gap-1.5 ml-7">
+                                        {channel.tags?.map(tag => (
+                                            <span 
+                                                key={tag} 
+                                                className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
+                                                    tag === 'Inbound' 
+                                                    ? 'bg-cyan-500/10 text-cyan-500' 
+                                                    : 'bg-orange-500/10 text-orange-500'
+                                                }`}
+                                            >
+                                                {tag}
+                                            </span>
+                                        ))}
+                                    </div>
                                 </div>
 
                                  {/* Bet Stack */}
@@ -761,6 +911,34 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
               onSave={handleSaveTicket}
               onDelete={deleteRoadmapItem}
           />
+      )}
+      
+      {/* CHANNEL DASHBOARD MODAL */}
+      {activeDashboardChannel && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="absolute inset-0" onClick={() => setActiveDashboardChannel(null)}></div>
+            <div className="w-[90vw] h-[85vh] bg-[#09090b] border border-zinc-800 rounded-xl shadow-2xl relative z-10 overflow-hidden">
+                <ChannelDashboard 
+                    channelId={activeDashboardChannel} 
+                    isModal={true}
+                    onClose={() => setActiveDashboardChannel(null)}
+                />
+            </div>
+        </div>
+      )}
+
+      {/* PROJECT DASHBOARD MODAL */}
+      {activeDashboardProject && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="absolute inset-0" onClick={() => setActiveDashboardProject(null)}></div>
+            <div className="w-[90vw] h-[85vh] bg-[#09090b] border border-zinc-800 rounded-xl shadow-2xl relative z-10 overflow-hidden">
+                <ProjectDashboard 
+                    projectId={activeDashboardProject} 
+                    isModal={true}
+                    onClose={() => setActiveDashboardProject(null)}
+                />
+            </div>
+        </div>
       )}
 
     </div>
