@@ -1,0 +1,768 @@
+
+
+import React, { useState, useMemo } from 'react';
+import { useStore } from '../store';
+import { Icons, PRIORITIES } from '../constants';
+import { RoadmapItem, User, OperatingPrinciple, Priority, Bet, Status, TicketStatus } from '../types';
+import { ProjectDashboard } from './ProjectDashboard';
+
+interface RoadmapSandboxProps {
+  onNext?: () => void;
+  onBack?: () => void;
+}
+
+const WEEK_WIDTH = 200;
+const LEFT_PANEL_WIDTH = 340; 
+
+// --- COMPONENTS ---
+
+const ContextSidebar: React.FC<{
+  isOpen: boolean;
+  setIsOpen: (v: boolean) => void;
+  groupedPrinciples: Record<string, OperatingPrinciple[]>;
+}> = ({ isOpen, setIsOpen, groupedPrinciples }) => (
+  <div className={`border-r border-white/5 bg-[#09090b] flex flex-col transition-all duration-300 ${isOpen ? 'w-72' : 'w-12'} z-30 shrink-0`}>
+    <div className="h-10 border-b border-white/5 flex items-center justify-between px-3 bg-zinc-900/20">
+      {isOpen && <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Strategy Context</span>}
+      <button onClick={() => setIsOpen(!isOpen)} className="p-1 text-zinc-500 hover:text-white transition-colors" title="Toggle Sidebar">
+        <Icons.Layout className="w-4 h-4" />
+      </button>
+    </div>
+    {isOpen && (
+      <div className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
+        {Object.keys(groupedPrinciples).length === 0 && (
+            <div className="text-zinc-600 text-[10px] italic">No principles defined.</div>
+        )}
+        {Object.entries(groupedPrinciples).map(([cat, principles]) => (
+          <div key={cat}>
+            <h4 className="text-[10px] font-bold text-pink-500 font-mono uppercase mb-2 flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-pink-500"></span> {cat}
+            </h4>
+            <div className="space-y-2">
+              {(principles as OperatingPrinciple[]).map(p => (
+                <div key={p.id} className="group relative bg-zinc-900/50 border border-white/5 rounded p-2 hover:border-zinc-700 transition-colors">
+                  <div className="text-xs font-medium text-zinc-300 mb-1">{p.title || "Untitled Principle"}</div>
+                  <div className="text-[10px] text-zinc-500 leading-snug line-clamp-2 group-hover:line-clamp-none transition-all">
+                    {p.description}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    )}
+  </div>
+);
+
+const NorthStarHeader: React.FC<{
+  campaignName?: string;
+  objective?: string;
+  onBack?: () => void;
+  onNext?: () => void;
+}> = ({ campaignName, objective, onBack, onNext }) => (
+  <header className="h-14 border-b border-white/5 flex items-center justify-between px-6 bg-[#09090b]/90 backdrop-blur-xl z-40 shrink-0 sticky top-0">
+    <div className="flex items-center gap-4">
+      <div className="w-8 h-8 bg-indigo-500/10 rounded-lg flex items-center justify-center border border-indigo-500/20 shadow-[0_0_15px_rgba(99,102,241,0.1)]">
+        <Icons.Target className="w-4 h-4 text-indigo-400" />
+      </div>
+      <div>
+        <div className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider mb-0.5">North Star Objective</div>
+        <div className="text-sm font-bold text-white leading-none truncate max-w-xl" title={objective}>{objective}</div>
+      </div>
+    </div>
+    <div className="flex items-center gap-6">
+      <div className="text-right hidden md:block">
+        <div className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider mb-0.5">Execution Cycle</div>
+        <div className="text-xs font-bold text-zinc-300">{campaignName}</div>
+      </div>
+      {onNext && onBack && (
+        <>
+            <div className="h-6 w-px bg-zinc-800 hidden md:block"></div>
+            <div className="flex gap-2">
+                <button onClick={onBack} className="px-3 py-1.5 text-xs font-medium text-zinc-400 hover:text-white rounded hover:bg-zinc-800 transition-colors">Back</button>
+                <button onClick={onNext} className="px-4 py-1.5 text-xs font-bold text-black bg-white hover:bg-zinc-200 rounded transition-colors flex items-center gap-2 shadow-lg shadow-white/5">
+                Next Step <Icons.ChevronRight className="w-3 h-3" />
+                </button>
+            </div>
+        </>
+      )}
+    </div>
+  </header>
+);
+
+// --- MODALS ---
+
+const ChannelCreationModal: React.FC<{
+  onClose: () => void;
+  onSave: (name: string) => void;
+}> = ({ onClose, onSave }) => {
+  const [name, setName] = useState('');
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+       <div className="absolute inset-0" onClick={onClose}></div>
+       <div className="w-[450px] bg-[#09090b] border border-zinc-800 rounded-xl shadow-2xl relative z-10 p-6">
+          <h3 className="text-lg font-bold text-white mb-2">Add Distribution Channel</h3>
+          <p className="text-xs text-zinc-500 mb-6">Create a row for a specific channel (e.g. SEO, Social, Email) or function.</p>
+          
+          <label className="text-[10px] uppercase font-bold text-zinc-500 mb-1.5 block">Channel Name</label>
+          <input 
+            autoFocus
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white mb-4 focus:border-indigo-500 focus:outline-none placeholder-zinc-700"
+            placeholder="e.g. LinkedIn, Blog, Outbound"
+            value={name}
+            onChange={e => setName(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && name && onSave(name)}
+          />
+
+          <div className="flex justify-end gap-2 mt-4">
+             <button onClick={onClose} className="px-4 py-2 text-xs text-zinc-400 hover:text-white">Cancel</button>
+             <button 
+                onClick={() => onSave(name)} 
+                disabled={!name} 
+                className="px-6 py-2 bg-white text-black text-xs font-bold rounded hover:bg-zinc-200 disabled:opacity-50"
+             >
+                Create Channel
+             </button>
+          </div>
+       </div>
+    </div>
+  );
+};
+
+const BetCreationModal: React.FC<{
+  channelId: string;
+  onClose: () => void;
+  onSave: (bet: Partial<Bet>) => void;
+  projects?: any[];
+}> = ({ channelId, onClose, onSave, projects = [] }) => {
+  const [data, setData] = useState({ description: '', hypothesis: '', successCriteria: '', projectId: '' });
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="absolute inset-0" onClick={onClose}></div>
+      <div className="w-[500px] bg-[#09090b] border border-zinc-800 rounded-xl shadow-2xl overflow-hidden ring-1 ring-white/10 relative z-10">
+        <div className="bg-zinc-900/50 border-b border-zinc-800 p-4 flex justify-between items-center">
+            <div className="flex items-center gap-2">
+                <Icons.Zap className="w-4 h-4 text-indigo-400" />
+                <span className="text-xs font-bold text-zinc-200 uppercase tracking-wider">Define Strategic Bet</span>
+            </div>
+            <button onClick={onClose}><Icons.XCircle className="w-5 h-5 text-zinc-500 hover:text-white" /></button>
+        </div>
+        <div className="p-6 space-y-5">
+            <div>
+                <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">The Bet (Action)</label>
+                <input 
+                    autoFocus
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white focus:border-indigo-500 focus:outline-none placeholder-zinc-700"
+                    placeholder="e.g. Cold Email: CFO Sequence"
+                    value={data.description}
+                    onChange={e => setData({...data, description: e.target.value})}
+                />
+            </div>
+            
+            {projects.length > 0 && (
+                <div>
+                    <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">Link to Project (Optional)</label>
+                    <select
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white focus:border-indigo-500 focus:outline-none text-sm"
+                        value={data.projectId}
+                        onChange={e => setData({...data, projectId: e.target.value})}
+                    >
+                        <option value="">No Project</option>
+                        {projects.map(p => (
+                            <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                    </select>
+                </div>
+            )}
+
+            <div>
+                <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">Success Criteria</label>
+                <input 
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white focus:border-indigo-500 focus:outline-none placeholder-zinc-700 font-mono text-sm"
+                    placeholder="e.g. >15% Reply Rate"
+                    value={data.successCriteria}
+                    onChange={e => setData({...data, successCriteria: e.target.value})}
+                />
+            </div>
+            <div>
+                <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">The Hypothesis (Why?)</label>
+                <textarea 
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white focus:border-indigo-500 focus:outline-none h-20 resize-none text-sm text-zinc-300 placeholder-zinc-700 leading-relaxed"
+                    placeholder="We believe that..."
+                    value={data.hypothesis}
+                    onChange={e => setData({...data, hypothesis: e.target.value})}
+                />
+            </div>
+        </div>
+        <div className="p-4 border-t border-zinc-800 bg-zinc-900/30 flex justify-end gap-2">
+            <button onClick={onClose} className="px-4 py-2 text-xs text-zinc-400 hover:text-white">Cancel</button>
+            <button 
+                disabled={!data.description}
+                onClick={() => onSave(data)}
+                className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg disabled:opacity-50 transition-colors shadow-lg shadow-indigo-900/20"
+            >
+                Place Bet
+            </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const TicketModal: React.FC<{
+  item: Partial<RoadmapItem>;
+  bets: Bet[];
+  users: User[];
+  projects: any[];
+  onClose: () => void;
+  onSave: (item: Partial<RoadmapItem>) => void;
+  onDelete: (id: string) => void;
+}> = ({ item: initialItem, bets, users, projects, onClose, onSave, onDelete }) => {
+  const [item, setItem] = useState<Partial<RoadmapItem>>(initialItem);
+
+  const toggleUser = (userId: string) => {
+    const current = item.ownerIds || [];
+    if (current.includes(userId)) {
+      setItem({ ...item, ownerIds: current.filter(id => id !== userId) });
+    } else {
+      setItem({ ...item, ownerIds: [...current, userId] });
+    }
+  };
+
+  const isFormValid = () => {
+    if (!item.title) return false;
+    // Strict Linkage: Ticket MUST belong to a Bet.
+    if (bets.length > 0 && !item.linkedBetId) return false;
+    return true;
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+       <div className="absolute inset-0" onClick={onClose}></div>
+       <div className="w-[600px] bg-[#09090b] border border-zinc-800 rounded-xl shadow-2xl flex flex-col relative overflow-hidden ring-1 ring-white/10 z-10">
+          
+          <div className="h-14 border-b border-zinc-800 flex items-center justify-between px-6 bg-zinc-900/50">
+             <div className="flex items-center gap-2">
+                <Icons.FileText className="w-4 h-4 text-zinc-400" />
+                <span className="text-xs font-bold text-zinc-200">Edit Ticket</span>
+             </div>
+             <button onClick={onClose}><Icons.XCircle className="w-5 h-5 text-zinc-500 hover:text-white transition-colors"/></button>
+          </div>
+
+          <div className="p-6 space-y-6 overflow-y-auto max-h-[70vh]">
+              <div>
+                 <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2 block">Item Title</label>
+                 <input 
+                    autoFocus
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-4 text-lg font-bold text-white placeholder-zinc-700 focus:outline-none focus:border-zinc-600 transition-colors"
+                    placeholder="What needs to happen?"
+                    value={item.title || ''}
+                    onChange={(e) => setItem({...item, title: e.target.value})}
+                    onKeyDown={(e) => e.key === 'Enter' && isFormValid() && onSave(item)}
+                 />
+              </div>
+              
+              <div>
+                 <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2 block">Description</label>
+                 <textarea 
+                    className="w-full h-24 bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-sm text-zinc-300 placeholder-zinc-700 focus:outline-none focus:border-zinc-600 resize-none leading-relaxed"
+                    placeholder="Add context, details, or acceptance criteria..."
+                    value={item.description || ''}
+                    onChange={(e) => setItem({...item, description: e.target.value})}
+                 />
+              </div>
+
+              {bets.length > 0 && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2 block">Strategic Link (Bet) <span className="text-red-500">*</span></label>
+                    <select 
+                        className={`w-full bg-zinc-950 border rounded-lg p-3 text-white text-sm focus:outline-none focus:border-indigo-500 ${!item.linkedBetId ? 'border-red-500/50' : 'border-zinc-800'}`}
+                        value={item.linkedBetId || ''}
+                        onChange={(e) => {
+                             // Auto-inherit project ID from bet
+                             const bet = bets.find(b => b.id === e.target.value);
+                             setItem({...item, linkedBetId: e.target.value, projectId: bet?.projectId});
+                        }}
+                    >
+                        <option value="" disabled>Select a Bet (Required)</option>
+                        {bets.map(b => (
+                            <option key={b.id} value={b.id}>{b.description}</option>
+                        ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2 block">Project Link (Optional)</label>
+                    <select 
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white text-sm focus:outline-none"
+                        value={item.projectId || ''}
+                        onChange={(e) => setItem({...item, projectId: e.target.value})}
+                    >
+                        <option value="">No Project</option>
+                        {projects.map(p => (
+                            <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-6">
+                 <div>
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2 block">Assigned Owner</label>
+                    <div className="flex flex-wrap gap-2">
+                        {users.map(u => (
+                            <button 
+                                key={u.id}
+                                onClick={() => toggleUser(u.id)}
+                                className={`h-8 px-3 rounded-full border flex items-center justify-center gap-2 transition-all ${item.ownerIds?.includes(u.id) ? `border-white/20 bg-zinc-800 text-white` : 'border-zinc-800 bg-zinc-900 text-zinc-500 hover:border-zinc-700'}`}
+                            >
+                                <div className={`w-2 h-2 rounded-full ${u.color}`}></div>
+                                <span className="text-xs font-medium">{u.initials}</span>
+                            </button>
+                        ))}
+                    </div>
+                 </div>
+                 <div>
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2 block">Priority Level</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {PRIORITIES.map(p => (
+                         <button 
+                            key={p.value}
+                            onClick={() => setItem({...item, priority: p.value})}
+                            className={`px-2 py-1.5 rounded text-[10px] font-bold uppercase tracking-wider border transition-all ${item.priority === p.value ? `bg-zinc-800 border-zinc-600 text-white` : 'bg-zinc-950 border-zinc-800 text-zinc-600 hover:border-zinc-700'}`}
+                         >
+                            {p.value}
+                         </button>
+                      ))}
+                    </div>
+                 </div>
+              </div>
+
+              <div>
+                 <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2 block">Timeline Duration</label>
+                 <div className="bg-zinc-900/50 p-4 rounded-lg border border-zinc-800">
+                   <div className="flex items-center gap-4">
+                      <input 
+                          type="range" min="1" max="8" 
+                          value={item.durationWeeks || 1}
+                          onChange={(e) => setItem({...item, durationWeeks: parseInt(e.target.value)})}
+                          className="flex-1 accent-indigo-500 h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer hover:accent-indigo-400"
+                      />
+                      <span className="text-sm font-mono text-zinc-300 w-12 text-right font-bold">{item.durationWeeks || 1}wk</span>
+                   </div>
+                 </div>
+              </div>
+          </div>
+
+          <div className="p-4 border-t border-zinc-800 bg-zinc-900/30 flex justify-between items-center">
+              {item.id ? (
+                  <button onClick={() => onDelete(item.id!)} className="text-xs text-red-500 hover:text-red-400 hover:bg-red-500/10 px-3 py-1.5 rounded transition-colors flex items-center gap-1.5">
+                    <Icons.Trash className="w-3.5 h-3.5"/> Delete
+                  </button>
+              ) : <div></div>}
+              <div className="flex gap-3">
+                 <button onClick={onClose} className="px-4 py-2 text-xs text-zinc-400 hover:text-white font-medium">Cancel</button>
+                 <button 
+                    onClick={() => onSave(item)} 
+                    disabled={!isFormValid()} 
+                    className="px-6 py-2 bg-white text-black text-xs font-bold rounded hover:bg-zinc-200 disabled:opacity-50 transition-colors shadow-lg shadow-white/5"
+                 >
+                    Save
+                 </button>
+              </div>
+          </div>
+       </div>
+    </div>
+  );
+};
+
+const RoadmapCard: React.FC<{
+    item: RoadmapItem;
+    users: User[];
+    projects: any[];
+    isDragging: boolean;
+    onDragStart: (e: React.DragEvent, id: string) => void;
+    onClick: () => void;
+}> = ({ item, users, projects, isDragging, onDragStart, onClick }) => {
+    const left = item.weekIndex * WEEK_WIDTH;
+    const width = (item.durationWeeks || 1) * WEEK_WIDTH;
+    const priority = PRIORITIES.find(p => p.value === item.priority);
+    const linkedProject = projects.find(p => p.id === item.projectId);
+
+    return (
+        <div
+            draggable
+            onDragStart={(e) => onDragStart(e, item.id)}
+            onClick={(e) => { e.stopPropagation(); onClick(); }}
+            className={`absolute top-2 bottom-2 rounded-md bg-zinc-800 border border-zinc-700/50 hover:border-zinc-500 hover:bg-zinc-700 hover:shadow-xl transition-all cursor-move flex flex-col justify-center px-3 shadow-md z-20 group ${isDragging ? 'opacity-50 ring-2 ring-indigo-500 scale-95' : ''}`}
+            style={{ left: left + 4, width: width - 8 }}
+        >
+            <div className={`absolute left-0 top-0 bottom-0 w-1 rounded-l-md ${item.type === 'NOTE' ? 'bg-pink-500' : 'bg-indigo-500'}`}></div>
+            <div className="pl-2">
+                <div className="flex items-center gap-2 mb-1.5">
+                    <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider leading-none truncate flex-1">{item.linkedBetId ? 'TICKET' : 'NOTE'}</span>
+                    {linkedProject && (
+                        <div className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 text-[8px] font-bold uppercase tracking-wide border border-emerald-500/20 truncate max-w-[80px]">
+                            {linkedProject.name}
+                        </div>
+                    )}
+                    {item.priority && item.priority !== 'None' && (
+                        <Icons.Flag className={`w-3 h-3 ${priority?.color}`} />
+                    )}
+                </div>
+                <span className="text-xs font-semibold text-zinc-200 truncate block leading-tight">{item.title}</span>
+                {(item.ownerIds && item.ownerIds.length > 0) && (
+                    <div className="flex -space-x-1.5 mt-2">
+                        {item.ownerIds.slice(0, 3).map(uid => {
+                            const u = users.find(user => user.id === uid);
+                            if (!u) return null;
+                            return (
+                                <div key={uid} className={`w-4 h-4 rounded-full ${u.color} border border-zinc-800 flex items-center justify-center text-[6px] text-white ring-1 ring-[#09090b]`}>
+                                    {u.initials}
+                                </div>
+                            )
+                        })}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
+// --- MAIN COMPONENT ---
+
+export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }) => {
+  const { 
+    campaign, 
+    addBet,
+    addRoadmapItem, 
+    addChannel,
+    updateChannel,
+    updateRoadmapItem,
+    deleteRoadmapItem,
+    currentUser,
+    users
+  } = useStore();
+
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [showChannelModal, setShowChannelModal] = useState(false);
+  const [activeBetCreation, setActiveBetCreation] = useState<string | null>(null);
+  const [activeTicket, setActiveTicket] = useState<{ item: Partial<RoadmapItem>, bets: Bet[] } | null>(null);
+  const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
+  const [expandedBets, setExpandedBets] = useState<Record<string, boolean>>({});
+
+  // --- DATA ---
+  const weeks = useMemo(() => {
+    const start = campaign?.startDate ? new Date(campaign.startDate) : new Date();
+    const w = [];
+    for(let i=0; i<12; i++) {
+        const d = new Date(start);
+        d.setDate(d.getDate() + (i*7));
+        w.push(d);
+    }
+    return w;
+  }, [campaign?.startDate]);
+
+  const groupedPrinciples = useMemo(() => {
+    return (campaign?.principles || []).reduce((acc, p) => {
+      const cat = p.category || 'GENERAL';
+      if (!acc[cat]) acc[cat] = [];
+      acc[cat].push(p);
+      return acc;
+    }, {} as Record<string, OperatingPrinciple[]>);
+  }, [campaign?.principles]);
+
+  const channels = campaign?.channels || [];
+  const projects = campaign?.projects || [];
+
+  // --- ACTIONS ---
+  
+  const handleSaveChannel = (name: string) => {
+      addChannel({
+          id: crypto.randomUUID(),
+          name: name,
+          campaignId: campaign?.id || '',
+          bets: [],
+          principles: []
+      });
+      setShowChannelModal(false);
+  };
+
+  const handleDeleteBet = (channelId: string, betId: string) => {
+      if (!confirm('Are you sure you want to delete this bet?')) return;
+      const channel = channels.find(c => c.id === channelId);
+      if (!channel) return;
+      const newBets = channel.bets.filter(b => b.id !== betId);
+      updateChannel(channelId, { bets: newBets });
+  };
+
+  const handleSaveBet = (betData: Partial<Bet>) => {
+      if (!activeBetCreation) return;
+      addBet(activeBetCreation, {
+          id: crypto.randomUUID(),
+          description: betData.description!,
+          hypothesis: betData.hypothesis || '',
+          successCriteria: betData.successCriteria || 'TBD',
+          status: Status.Active,
+          channelId: activeBetCreation,
+          projectId: betData.projectId, // Link to project
+          tickets: [],
+          ownerId: currentUser.id,
+          timeboxWeeks: 2,
+          startDate: new Date().toISOString()
+      });
+      setActiveBetCreation(null);
+  };
+
+  const handleSaveTicket = (item: Partial<RoadmapItem>) => {
+      if (!activeTicket) return;
+      
+      const newItem = { ...item };
+
+      if (newItem.id) {
+          updateRoadmapItem(newItem.id, newItem);
+      } else {
+          addRoadmapItem({
+              id: crypto.randomUUID(),
+              channelId: newItem.channelId!,
+              weekIndex: newItem.weekIndex!,
+              title: newItem.title!,
+              description: newItem.description || '',
+              type: newItem.linkedBetId ? 'CONTENT' : 'NOTE',
+              label: 'Ticket',
+              durationWeeks: newItem.durationWeeks || 1,
+              ownerIds: newItem.ownerIds || [currentUser.id],
+              priority: newItem.priority || 'Medium',
+              linkedBetId: newItem.linkedBetId,
+              projectId: newItem.projectId
+          });
+      }
+      setActiveTicket(null);
+  };
+
+  const handleDragStart = (e: React.DragEvent, id: string) => {
+      setDraggedItemId(id);
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', id);
+  };
+
+  const handleDrop = (e: React.DragEvent, channelId: string, weekIndex: number) => {
+      e.preventDefault();
+      if (!draggedItemId) return;
+      
+      const updates: Partial<RoadmapItem> = {
+          channelId,
+          weekIndex
+      };
+      updateRoadmapItem(draggedItemId, updates);
+      setDraggedItemId(null);
+  };
+
+  const toggleBet = (id: string) => {
+      setExpandedBets(prev => ({...prev, [id]: !prev[id]}));
+  }
+
+  return (
+    <div className="h-full w-full flex flex-col relative bg-[#09090b] font-sans text-zinc-100 select-none">
+      
+      <NorthStarHeader 
+         campaignName={campaign?.name} 
+         objective={campaign?.objective} 
+         onBack={onBack} 
+         onNext={onNext}
+      />
+
+      <div className="flex flex-1 overflow-hidden relative">
+         
+         <ContextSidebar 
+            isOpen={isSidebarOpen} 
+            setIsOpen={setIsSidebarOpen} 
+            groupedPrinciples={groupedPrinciples} 
+         />
+
+         {/* MAIN ROADMAP GRID */}
+         <div className="flex-1 overflow-auto bg-[#09090b] relative custom-scrollbar flex flex-col">
+             
+             {/* TIMELINE HEADER */}
+             <div className="flex sticky top-0 z-40 bg-[#09090b] min-w-max border-b border-white/5 shadow-md shadow-black/50">
+                 <div className="shrink-0 border-r border-white/5 bg-[#09090b] p-3 flex items-end pb-3" style={{ width: LEFT_PANEL_WIDTH }}>
+                     <span className="text-[10px] font-mono font-bold text-zinc-500 uppercase">Channels & Strategy</span>
+                 </div>
+                 <div className="flex">
+                     {weeks.map((date, i) => (
+                         <div key={i} className="shrink-0 border-r border-white/5 p-2 flex flex-col justify-center items-center bg-[#09090b]" style={{ width: WEEK_WIDTH }}>
+                             <span className="text-[10px] text-zinc-600 font-mono uppercase mb-1">Week {i+1}</span>
+                             <span className="text-xs text-zinc-400 font-bold">{date.toLocaleDateString(undefined, {month:'short', day:'numeric'})}</span>
+                         </div>
+                     ))}
+                 </div>
+             </div>
+
+             {/* LANES CONTAINER */}
+             <div className="min-w-max pb-32">
+                 {channels.map(channel => {
+                     // Filter items for this channel
+                     const laneItems = (campaign?.roadmapItems || []).filter(i => i.channelId === channel.id);
+                     const bets = channel.bets.filter(b => b.status !== Status.Killed);
+
+                     return (
+                         <div key={channel.id} className="flex min-h-[160px] border-b border-white/5 relative bg-[#09090b] group/lane">
+                             
+                             {/* LEFT SIDEBAR (Controls) */}
+                             <div className="shrink-0 border-r border-white/5 bg-zinc-900/10 p-4 flex flex-col" style={{ width: LEFT_PANEL_WIDTH }}>
+                                 
+                                <div className="flex items-center justify-between mb-3 group/header">
+                                    <div className="flex items-center gap-2">
+                                        <div className="p-1 rounded bg-indigo-500/10 text-indigo-400"><Icons.Zap className="w-3.5 h-3.5" /></div>
+                                        <span className="font-bold text-sm text-zinc-200">{channel.name}</span>
+                                        {bets.length > 0 && <span className="text-[10px] text-zinc-600 font-mono ml-2">{bets.length} Bets</span>}
+                                    </div>
+                                    {/* Action to rename or delete channel could go here */}
+                                </div>
+
+                                 {/* Bet Stack */}
+                                 <div className="flex-1 space-y-2 mb-3">
+                                     {bets.length === 0 && (
+                                         <div className="p-3 border border-dashed border-zinc-800 rounded bg-zinc-900/30 text-center">
+                                             <span className="text-[10px] text-zinc-500 block mb-2">No active strategy.</span>
+                                             <button 
+                                                onClick={() => setActiveBetCreation(channel.id)}
+                                                className="text-[10px] font-bold text-indigo-400 hover:underline"
+                                             >
+                                                + Add Strategy Bet
+                                             </button>
+                                         </div>
+                                     )}
+                                     
+                                     {bets.length > 0 && (
+                                          <button 
+                                            onClick={() => setActiveBetCreation(channel.id)}
+                                            className="w-full py-1.5 border border-dashed border-zinc-800 text-[10px] text-zinc-500 hover:text-white rounded hover:bg-zinc-800 transition-colors uppercase font-bold"
+                                          >
+                                            + Add Bet
+                                          </button>
+                                     )}
+
+                                     {bets.map(bet => {
+                                         const isExpanded = expandedBets[bet.id];
+                                         const completedTickets = bet.tickets.filter(t => t.status === TicketStatus.Done).length;
+                                         
+                                         return (
+                                             <div key={bet.id} className={`group/bet border rounded transition-all ${isExpanded ? 'bg-zinc-800/50 border-zinc-700' : 'bg-zinc-900/30 border-zinc-800 hover:border-zinc-700'}`}>
+                                                 <div 
+                                                    onClick={() => toggleBet(bet.id)}
+                                                    className="p-2.5 cursor-pointer flex items-start gap-2"
+                                                 >
+                                                     <div className={`mt-0.5 w-1.5 h-1.5 rounded-full shrink-0 ${bet.status === Status.Active ? 'bg-emerald-500' : 'bg-zinc-600'}`}></div>
+                                                     <div className="flex-1 min-w-0">
+                                                         <div className="text-xs font-medium text-zinc-300 leading-snug truncate">{bet.description}</div>
+                                                         <div className="flex items-center gap-2 mt-1">
+                                                             <span className="text-[9px] text-zinc-600 font-mono">{completedTickets}/{bet.tickets.length} Tasks</span>
+                                                         </div>
+                                                     </div>
+                                                     <div className="opacity-0 group-hover/bet:opacity-100 transition-opacity">
+                                                         <button onClick={(e) => { e.stopPropagation(); handleDeleteBet(channel.id, bet.id); }} className="text-zinc-600 hover:text-red-500 p-1">
+                                                             <Icons.Trash className="w-3 h-3" />
+                                                         </button>
+                                                     </div>
+                                                 </div>
+                                             </div>
+                                         )
+                                     })}
+                                 </div>
+                             </div>
+
+                             {/* RIGHT SIDE (Grid) */}
+                             <div className="flex relative">
+                                 {weeks.map((_, i) => (
+                                     <div 
+                                         key={i} 
+                                         className="border-r border-white/5 h-full relative group/cell hover:bg-white/[0.02] transition-colors"
+                                         style={{ width: WEEK_WIDTH }}
+                                         onDragOver={(e) => e.preventDefault()}
+                                         onDrop={(e) => handleDrop(e, channel.id, i)}
+                                         onClick={() => {
+                                             const defaultBetId = bets.length > 0 ? bets[0].id : undefined;
+                                             // If default bet has a project, inherit it
+                                             const bet = bets.find(b => b.id === defaultBetId);
+                                             setActiveTicket({ 
+                                                 item: { channelId: channel.id, weekIndex: i, title: '', linkedBetId: defaultBetId, projectId: bet?.projectId }, 
+                                                 bets: bets 
+                                             })
+                                         }}
+                                     >
+                                         <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/cell:opacity-100 pointer-events-none">
+                                             <div className="w-6 h-6 rounded bg-zinc-800 border border-zinc-700 flex items-center justify-center text-zinc-400">
+                                                 <Icons.Plus className="w-3 h-3" />
+                                             </div>
+                                         </div>
+                                     </div>
+                                 ))}
+
+                                 {/* Render Items */}
+                                 {laneItems.map(item => (
+                                     <RoadmapCard 
+                                         key={item.id} 
+                                         item={item} 
+                                         users={users} 
+                                         projects={projects}
+                                         isDragging={draggedItemId === item.id}
+                                         onDragStart={handleDragStart}
+                                         onClick={() => setActiveTicket({ item, bets })}
+                                     />
+                                 ))}
+                             </div>
+                         </div>
+                     );
+                 })}
+
+                 {/* ADD CHANNEL BUTTON */}
+                 <div className="p-4 bg-[#09090b] sticky left-0 w-full border-t border-white/5">
+                     <button 
+                        onClick={() => setShowChannelModal(true)}
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg border border-dashed border-zinc-700 text-zinc-500 hover:text-zinc-300 hover:border-zinc-500 hover:bg-zinc-900 transition-all text-xs font-bold uppercase tracking-wider"
+                     >
+                         <Icons.Plus className="w-4 h-4" />
+                         Add Distribution Channel
+                     </button>
+                 </div>
+             </div>
+         </div>
+      </div>
+      
+      {/* MODALS */}
+      {showChannelModal && (
+          <ChannelCreationModal 
+             onClose={() => setShowChannelModal(false)} 
+             onSave={handleSaveChannel} 
+          />
+      )}
+
+      {activeBetCreation && (
+          <BetCreationModal 
+              channelId={activeBetCreation}
+              onClose={() => setActiveBetCreation(null)}
+              onSave={handleSaveBet}
+              projects={projects}
+          />
+      )}
+
+      {activeTicket && (
+          <TicketModal 
+              item={activeTicket.item}
+              bets={activeTicket.bets}
+              users={users}
+              projects={projects}
+              onClose={() => setActiveTicket(null)}
+              onSave={handleSaveTicket}
+              onDelete={deleteRoadmapItem}
+          />
+      )}
+
+    </div>
+  );
+};

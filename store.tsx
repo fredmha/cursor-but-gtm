@@ -1,0 +1,537 @@
+
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import { Campaign, Channel, Bet, Ticket, TicketStatus, Status, User, Priority, RoadmapItem, Project, ProjectUpdate } from './types';
+
+// Mock Users
+export const MOCK_USERS: User[] = [
+  { id: 'u1', name: 'Founder', initials: 'FD', color: 'bg-indigo-500' },
+  { id: 'u2', name: 'Growth Lead', initials: 'GL', color: 'bg-emerald-500' },
+  { id: 'u3', name: 'Engineer', initials: 'EN', color: 'bg-purple-500' },
+  { id: 'u4', name: 'Designer', initials: 'DS', color: 'bg-pink-500' },
+];
+
+interface StoreState {
+  campaign: Campaign | null;
+  users: User[];
+  currentUser: User;
+  setCampaign: (campaign: Campaign) => void;
+  updateCampaign: (updates: Partial<Campaign>) => void;
+  
+  // Execution Actions
+  addChannel: (channel: Channel) => void;
+  updateChannel: (channelId: string, updates: Partial<Channel>) => void;
+  deleteChannel: (channelId: string) => void;
+  addChannelPrinciple: (channelId: string, text: string) => void;
+  deleteChannelPrinciple: (channelId: string, principleId: string) => void;
+  
+  addProject: (project: Project) => void;
+  updateProject: (projectId: string, updates: Partial<Project>) => void;
+  addProjectUpdate: (projectId: string, update: ProjectUpdate) => void;
+
+  addBet: (channelId: string, bet: Bet) => void;
+  updateBet: (channelId: string, betId: string, updates: Partial<Bet>) => void;
+  
+  addTicket: (channelId: string, betId: string, ticket: Ticket) => void;
+  updateTicket: (channelId: string, betId: string, ticketId: string, updates: Partial<Ticket>) => void;
+  deleteTicket: (channelId: string, betId: string, ticketId: string) => void;
+  
+  // Roadmap Actions
+  addRoadmapItem: (item: RoadmapItem) => void;
+  updateRoadmapItem: (itemId: string, updates: Partial<RoadmapItem>) => void;
+  deleteRoadmapItem: (itemId: string) => void;
+  moveRoadmapItem: (itemId: string, newChannelId: string, newWeekIndex: number) => void;
+
+  importAIPlan: (channelsData: any[]) => void;
+  switchUser: (userId: string) => void;
+  reset: () => void;
+}
+
+const StoreContext = createContext<StoreState | undefined>(undefined);
+
+export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [users] = useState<User[]>(MOCK_USERS);
+  const [currentUser, setCurrentUser] = useState<User>(MOCK_USERS[0]);
+
+  const [campaign, setCampaignState] = useState<Campaign | null>(() => {
+    const saved = localStorage.getItem('gtm-os-campaign');
+    if (!saved) return null;
+    
+    // MIGRATION LOGIC ON LOAD
+    const data = JSON.parse(saved);
+    
+    // Ensure all channels have principles array
+    if (data.channels) {
+        data.channels = data.channels.map((c: any) => ({
+            ...c,
+            principles: c.principles || []
+        }));
+    }
+
+    if (data.roadmapLanes) {
+       console.log("Migrating Legacy Data...");
+       
+       const newProjects: Project[] = [];
+       const newChannels: Channel[] = [];
+       const generalChannelId = crypto.randomUUID() as any;
+       let generalChannelCreated = false;
+
+       const getGeneralChannel = () => {
+           if (!generalChannelCreated) {
+               newChannels.push({
+                   id: generalChannelId,
+                   name: "General",
+                   campaignId: data.id,
+                   bets: [],
+                   principles: []
+               });
+               generalChannelCreated = true;
+           }
+           return generalChannelId;
+       };
+
+       // 1. Process Channels (Old "Project Channels" become Projects)
+       (data.channels || []).forEach((c: any) => {
+           if (c.type === 'PROJECT') {
+               const projectId = crypto.randomUUID() as any;
+               newProjects.push({
+                   id: projectId,
+                   name: c.name,
+                   description: c.description || '',
+                   status: c.status || 'On Track',
+                   priority: c.priority || 'Medium',
+                   ownerId: c.leadId || null,
+                   startDate: c.startDate,
+                   targetDate: c.targetDate,
+                   updates: c.updates || []
+               });
+
+               // Move Bets to General, but link to Project
+               c.bets.forEach((b: any) => {
+                   b.projectId = projectId;
+                   b.channelId = getGeneralChannel();
+                   b.tickets.forEach((t: any) => {
+                       t.projectId = projectId;
+                       t.channelId = b.channelId;
+                   });
+                   // Push bet to General Channel
+                   const gen = newChannels.find(ch => ch.id === generalChannelId);
+                   if (gen) gen.bets.push(b);
+               });
+           } else {
+               // Keep as Channel
+               // Ensure Bets have channelId
+               c.bets.forEach((b: any) => {
+                   b.channelId = c.id;
+                   b.tickets.forEach((t: any) => {
+                       t.channelId = c.id;
+                   });
+               });
+               newChannels.push({
+                   id: c.id,
+                   name: c.name,
+                   campaignId: data.id,
+                   bets: c.bets,
+                   principles: c.principles || []
+               });
+           }
+       });
+
+       // 2. Process Roadmap Items
+       // Map old laneId to channelId
+       const newRoadmapItems: RoadmapItem[] = [];
+       (data.roadmapItems || []).forEach((item: any) => {
+           const lane = data.roadmapLanes.find((l: any) => l.id === item.laneId);
+           let targetChannelId = getGeneralChannel();
+           
+           if (lane && lane.linkedChannelId) {
+                const stillChannel = newChannels.find(nc => nc.id === lane.linkedChannelId);
+                
+                if (stillChannel) {
+                    targetChannelId = stillChannel.id;
+                }
+           } else if (lane && lane.type === 'STATIC') {
+               // Static lanes -> General Channel
+               targetChannelId = getGeneralChannel();
+           }
+
+           newRoadmapItems.push({
+               ...item,
+               channelId: targetChannelId,
+               laneId: undefined // Remove old prop
+           });
+       });
+       
+       const { roadmapLanes: _ignore, ...restData } = data;
+       const migratedCampaign: Campaign = {
+           ...restData,
+           channels: newChannels,
+           projects: newProjects,
+           roadmapItems: newRoadmapItems,
+       };
+       return migratedCampaign;
+    }
+
+    return data;
+  });
+
+  useEffect(() => {
+    if (campaign) {
+      localStorage.setItem('gtm-os-campaign', JSON.stringify(campaign));
+    } else {
+      localStorage.removeItem('gtm-os-campaign');
+    }
+  }, [campaign]);
+
+  const setCampaign = (c: Campaign) => setCampaignState(c);
+
+  const updateCampaign = (updates: Partial<Campaign>) => {
+    if (!campaign) return;
+    setCampaignState(prev => prev ? ({ ...prev, ...updates }) : null);
+  };
+
+  const addChannel = (channel: Channel) => {
+    if (!campaign) return;
+    setCampaignState(prev => prev ? ({
+      ...prev,
+      channels: [...prev.channels, { ...channel, principles: channel.principles || [] }]
+    }) : null);
+  };
+
+  const updateChannel = (channelId: string, updates: Partial<Channel>) => {
+    if (!campaign) return;
+    setCampaignState(prev => prev ? ({
+      ...prev,
+      channels: prev.channels.map(c => c.id === channelId ? { ...c, ...updates } : c)
+    }) : null);
+  };
+
+  const deleteChannel = (channelId: string) => {
+    if (!campaign) return;
+    const newChannels = campaign.channels.filter(c => c.id !== channelId);
+    // Cleanup roadmap items linked to this channel to prevent ghost rows
+    const newRoadmapItems = (campaign.roadmapItems || []).filter(i => i.channelId !== channelId);
+    
+    setCampaignState(prev => prev ? ({
+      ...prev,
+      channels: newChannels,
+      roadmapItems: newRoadmapItems
+    }) : null);
+  };
+
+  const addChannelPrinciple = (channelId: string, text: string) => {
+    if (!campaign) return;
+    const principle = { id: crypto.randomUUID(), text };
+    setCampaignState(prev => prev ? ({
+      ...prev,
+      channels: prev.channels.map(c => 
+        c.id === channelId ? { ...c, principles: [...(c.principles || []), principle] } : c
+      )
+    }) : null);
+  };
+
+  const deleteChannelPrinciple = (channelId: string, principleId: string) => {
+    if (!campaign) return;
+    setCampaignState(prev => prev ? ({
+      ...prev,
+      channels: prev.channels.map(c => 
+        c.id === channelId ? { ...c, principles: (c.principles || []).filter(p => p.id !== principleId) } : c
+      )
+    }) : null);
+  };
+
+  const addProject = (project: Project) => {
+    if (!campaign) return;
+    setCampaignState(prev => prev ? ({
+      ...prev,
+      projects: [...(prev.projects || []), project]
+    }) : null);
+  };
+
+  const updateProject = (projectId: string, updates: Partial<Project>) => {
+    if (!campaign) return;
+    setCampaignState(prev => prev ? ({
+      ...prev,
+      projects: (prev.projects || []).map(p => p.id === projectId ? { ...p, ...updates } : p)
+    }) : null);
+  };
+
+  const addProjectUpdate = (projectId: string, update: ProjectUpdate) => {
+    if (!campaign) return;
+    setCampaignState(prev => prev ? ({
+      ...prev,
+      projects: (prev.projects || []).map(p => p.id === projectId ? {
+        ...p,
+        updates: [update, ...(p.updates || [])]
+      } : p)
+    }) : null);
+  };
+
+  const addBet = (channelId: string, bet: Bet) => {
+    if (!campaign) return;
+    setCampaignState(prev => prev ? ({
+      ...prev,
+      channels: prev.channels.map(c => 
+        c.id === channelId ? { ...c, bets: [...c.bets, bet] } : c
+      )
+    }) : null);
+  };
+
+  const updateBet = (channelId: string, betId: string, updates: Partial<Bet>) => {
+    if (!campaign) return;
+
+    // MIRROR: Update linked RoadmapItem
+    let newRoadmapItems = [...(campaign.roadmapItems || [])];
+    const linkedItemIndex = newRoadmapItems.findIndex(i => i.linkedBetId === betId && i.type === 'BET');
+    
+    if (linkedItemIndex !== -1) {
+        const item = newRoadmapItems[linkedItemIndex];
+        const updatedItem = { ...item };
+        if (updates.description) updatedItem.title = updates.description;
+        if (updates.status) updatedItem.status = updates.status;
+        newRoadmapItems[linkedItemIndex] = updatedItem;
+    }
+
+    setCampaignState(prev => prev ? ({
+      ...prev,
+      channels: prev.channels.map(c => 
+        c.id === channelId ? {
+          ...c,
+          bets: c.bets.map(b => b.id === betId ? { ...b, ...updates } : b)
+        } : c
+      ),
+      roadmapItems: newRoadmapItems
+    }) : null);
+  };
+
+  const addTicket = (channelId: string, betId: string, ticket: Ticket) => {
+    if (!campaign) return;
+    const shortId = `T-${Math.floor(Math.random() * 1000)}`;
+    const finalTicket = { ...ticket, shortId, channelId }; // Ensure channelId is set
+
+    // MIRROR: Automatically create a RoadmapItem
+    let newRoadmapItems = [...(campaign.roadmapItems || [])];
+    
+    // Create Roadmap Item for visibility
+    const newItemId = crypto.randomUUID();
+    const newItem: RoadmapItem = {
+        id: newItemId,
+        channelId: channelId,
+        weekIndex: 0,
+        durationWeeks: 1,
+        title: ticket.title,
+        description: ticket.description,
+        type: 'CONTENT',
+        linkedBetId: betId,
+        ticketId: ticket.id,
+        projectId: ticket.projectId,
+        status: ticket.status === TicketStatus.Done ? Status.Completed : Status.Active,
+        ownerIds: ticket.assigneeId ? [ticket.assigneeId] : [],
+        priority: ticket.priority,
+        label: 'Task'
+    };
+    newRoadmapItems.push(newItem);
+    finalTicket.roadmapItemId = newItemId;
+
+    setCampaignState(prev => prev ? ({
+      ...prev,
+      roadmapItems: newRoadmapItems,
+      channels: prev.channels.map(c => 
+        c.id === channelId ? {
+          ...c,
+          bets: c.bets.map(b => b.id === betId ? { ...b, tickets: [...b.tickets, finalTicket] } : b)
+        } : c
+      )
+    }) : null);
+  };
+
+  const updateTicket = (channelId: string, betId: string, ticketId: string, updates: Partial<Ticket>) => {
+    if (!campaign) return;
+    
+    let newRoadmapItems = [...(campaign.roadmapItems || [])];
+    const rItemIndex = newRoadmapItems.findIndex(i => i.ticketId === ticketId);
+    
+    if (rItemIndex !== -1) {
+         const rItem = newRoadmapItems[rItemIndex];
+         let updatedRItem = { ...rItem };
+         let changed = false;
+
+         if (updates.status) {
+             if (updates.status === TicketStatus.Done) {
+                 updatedRItem.status = Status.Completed;
+                 changed = true;
+             } else if (rItem.status === Status.Completed) {
+                 updatedRItem.status = Status.Active;
+                 changed = true;
+             }
+         }
+         
+         if (updates.title) {
+             updatedRItem.title = updates.title;
+             changed = true;
+         }
+
+         if (updates.assigneeId) {
+             updatedRItem.ownerIds = [updates.assigneeId];
+             changed = true;
+         }
+
+         if (changed) {
+             newRoadmapItems[rItemIndex] = updatedRItem;
+         }
+    }
+
+    setCampaignState(prev => prev ? ({
+      ...prev,
+      roadmapItems: newRoadmapItems,
+      channels: prev.channels.map(c => 
+        c.id === channelId ? {
+          ...c,
+          bets: c.bets.map(b => b.id === betId ? {
+            ...b,
+            tickets: b.tickets.map(t => t.id === ticketId ? { ...t, ...updates } : t)
+          } : b)
+        } : c
+      )
+    }) : null);
+  };
+
+  const deleteTicket = (channelId: string, betId: string, ticketId: string) => {
+    if (!campaign) return;
+    const newRoadmapItems = (campaign.roadmapItems || []).filter(i => i.ticketId !== ticketId);
+
+    setCampaignState(prev => prev ? ({
+      ...prev,
+      roadmapItems: newRoadmapItems,
+      channels: prev.channels.map(c => 
+        c.id === channelId ? {
+          ...c,
+          bets: c.bets.map(b => b.id === betId ? {
+            ...b,
+            tickets: b.tickets.filter(t => t.id !== ticketId)
+          } : b)
+        } : c
+      )
+    }) : null);
+  };
+
+  const addRoadmapItem = (item: RoadmapItem) => {
+    if (!campaign) return;
+    let newItem = { ...item };
+    // Logic for linking to Ticket skipped for brevity but can be added if needed
+    setCampaignState(prev => prev ? ({
+      ...prev,
+      roadmapItems: [...(prev.roadmapItems || []), newItem]
+    }) : null);
+  };
+
+  const updateRoadmapItem = (itemId: string, updates: Partial<RoadmapItem>) => {
+    if (!campaign) return;
+    setCampaignState(prev => prev ? ({
+      ...prev,
+      roadmapItems: (prev.roadmapItems || []).map(i => i.id === itemId ? { ...i, ...updates } : i)
+    }) : null);
+  };
+
+  const moveRoadmapItem = (itemId: string, newChannelId: string, newWeekIndex: number) => {
+    updateRoadmapItem(itemId, { channelId: newChannelId, weekIndex: newWeekIndex });
+  };
+
+  const deleteRoadmapItem = (itemId: string) => {
+    if (!campaign) return;
+    const item = campaign.roadmapItems.find(i => i.id === itemId);
+    let newChannels = [...campaign.channels];
+
+    if (item && item.ticketId) {
+         newChannels = newChannels.map(c => ({
+             ...c,
+             bets: c.bets.map(b => ({
+                 ...b,
+                 tickets: b.tickets.filter(t => t.id !== item.ticketId)
+             }))
+         }));
+    }
+
+    setCampaignState(prev => prev ? ({
+      ...prev,
+      channels: newChannels,
+      roadmapItems: (prev.roadmapItems || []).filter(i => i.id !== itemId)
+    }) : null);
+  };
+
+  const importAIPlan = (channelsData: any[]) => {
+    if (!campaign) return;
+    const newChannels: Channel[] = channelsData.map((c: any) => ({
+      id: crypto.randomUUID(),
+      name: c.name,
+      campaignId: campaign.id,
+      bets: c.bets.map((b: any) => ({
+        id: crypto.randomUUID(),
+        description: b.description,
+        hypothesis: b.hypothesis,
+        successCriteria: 'Define success metric',
+        status: Status.Draft,
+        channelId: '', // Set in loop below
+        tickets: [],
+        ownerId: currentUser.id,
+        timeboxWeeks: 2
+      })),
+      principles: []
+    }));
+    
+    newChannels.forEach(c => {
+      c.bets.forEach(b => b.channelId = c.id);
+    });
+
+    setCampaignState(prev => prev ? ({
+      ...prev,
+      channels: [...prev.channels, ...newChannels]
+    }) : null);
+  };
+
+  const switchUser = (userId: string) => {
+    const user = users.find(u => u.id === userId);
+    if (user) setCurrentUser(user);
+  };
+
+  const reset = () => {
+    setCampaignState(null);
+  };
+
+  return (
+    <StoreContext.Provider value={{
+      campaign,
+      users,
+      currentUser,
+      setCampaign,
+      updateCampaign,
+      addChannel,
+      updateChannel,
+      deleteChannel,
+      addChannelPrinciple,
+      deleteChannelPrinciple,
+      addProject,
+      updateProject,
+      addProjectUpdate,
+      addBet,
+      updateBet,
+      addTicket,
+      updateTicket,
+      deleteTicket,
+      addRoadmapItem,
+      updateRoadmapItem,
+      deleteRoadmapItem,
+      moveRoadmapItem,
+      importAIPlan,
+      switchUser,
+      reset
+    }}>
+      {children}
+    </StoreContext.Provider>
+  );
+};
+
+export const useStore = () => {
+  const context = useContext(StoreContext);
+  if (!context) throw new Error("useStore must be used within StoreProvider");
+  return context;
+};
