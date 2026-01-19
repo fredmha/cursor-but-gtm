@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { Campaign, Channel, Bet, Ticket, TicketStatus, Status, User, Priority, RoadmapItem, Project, ProjectUpdate, ChannelLink, ChannelNote } from './types';
+import { Campaign, Channel, Bet, Ticket, TicketStatus, Status, User, Priority, RoadmapItem, Project, ProjectUpdate, ChannelLink, ChannelNote, TimelineTag } from './types';
 
 // Safe ID Generator for environments without secure context
 export const generateId = () => {
@@ -56,6 +56,10 @@ interface StoreState {
   updateRoadmapItem: (itemId: string, updates: Partial<RoadmapItem>) => void;
   deleteRoadmapItem: (itemId: string) => void;
   moveRoadmapItem: (itemId: string, newChannelId: string, newWeekIndex: number) => void;
+  
+  // Timeline Tag Actions
+  addTimelineTag: (tag: TimelineTag) => void;
+  deleteTimelineTag: (tagId: string) => void;
 
   importAIPlan: (channelsData: any[]) => void;
   switchUser: (userId: string) => void;
@@ -89,6 +93,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     // Ensure projects array exists
     if (!data.projects) {
         data.projects = [];
+    }
+
+    if (!data.timelineTags) {
+        data.timelineTags = [];
     }
 
     if (data.roadmapLanes) {
@@ -463,6 +471,22 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }) : null);
   };
 
+  const addTimelineTag = (tag: TimelineTag) => {
+    if (!campaign) return;
+    setCampaignState(prev => prev ? ({
+        ...prev,
+        timelineTags: [...(prev.timelineTags || []), tag]
+    }) : null);
+  };
+
+  const deleteTimelineTag = (tagId: string) => {
+    if (!campaign) return;
+    setCampaignState(prev => prev ? ({
+        ...prev,
+        timelineTags: (prev.timelineTags || []).filter(t => t.id !== tagId)
+    }) : null);
+  };
+
   const importAIPlan = (channelsData: any[]) => {
     if (!campaign) return;
     const newChannels: Channel[] = channelsData.map((c: any) => ({
@@ -533,6 +557,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       updateRoadmapItem,
       deleteRoadmapItem,
       moveRoadmapItem,
+      addTimelineTag,
+      deleteTimelineTag,
       importAIPlan,
       switchUser,
       reset

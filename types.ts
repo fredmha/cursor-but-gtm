@@ -146,6 +146,14 @@ export interface RoadmapItem {
   status?: Status;
 }
 
+export interface TimelineTag {
+  id: string;
+  weekIndex: number;
+  label: string; // 'LAUNCH' | 'THEME' | 'CUSTOM'
+  title: string;
+  color: string;
+}
+
 export interface Campaign {
   id: string;
   name: string;
@@ -157,6 +165,7 @@ export interface Campaign {
   projects: Project[];
   principles: OperatingPrinciple[];
   roadmapItems: RoadmapItem[];
+  timelineTags: TimelineTag[];
 }
 
 export type ViewMode = 'ONBOARDING' | 'ROADMAP' | 'EXECUTION' | 'REVIEW';

@@ -1,8 +1,8 @@
 
 import React, { useState, useMemo } from 'react';
-import { useStore } from '../store';
+import { useStore, generateId } from '../store';
 import { Icons, PRIORITIES } from '../constants';
-import { RoadmapItem, User, OperatingPrinciple, Priority, Bet, Status, TicketStatus, ChannelTag, Project } from '../types';
+import { RoadmapItem, User, OperatingPrinciple, Priority, Bet, Status, TicketStatus, ChannelTag, Project, TimelineTag } from '../types';
 import { ProjectDashboard } from './ProjectDashboard';
 import { ChannelDashboard } from './ChannelDashboard';
 
@@ -13,6 +13,16 @@ interface RoadmapSandboxProps {
 
 const WEEK_WIDTH = 200;
 const LEFT_PANEL_WIDTH = 340; 
+
+const CONTEXT_COLORS = [
+    { label: 'Pink', value: 'bg-pink-500' },
+    { label: 'Purple', value: 'bg-purple-500' },
+    { label: 'Indigo', value: 'bg-indigo-500' },
+    { label: 'Cyan', value: 'bg-cyan-500' },
+    { label: 'Emerald', value: 'bg-emerald-500' },
+    { label: 'Amber', value: 'bg-amber-500' },
+    { label: 'Zinc', value: 'bg-zinc-500' },
+];
 
 // --- COMPONENTS ---
 
@@ -179,6 +189,101 @@ const NorthStarHeader: React.FC<{
 
 // --- MODALS (Reused) ---
 // Note: In a real refactor, these should be separate files. Keeping here for scope.
+
+const WeekContextModal: React.FC<{
+  weekIndex: number;
+  date: Date;
+  tags: TimelineTag[];
+  onClose: () => void;
+  onSaveTag: (tag: Partial<TimelineTag>) => void;
+  onDeleteTag: (id: string) => void;
+}> = ({ weekIndex, date, tags, onClose, onSaveTag, onDeleteTag }) => {
+    const [newTag, setNewTag] = useState<{label: string, title: string, color: string}>({
+        label: 'LAUNCH',
+        title: '',
+        color: 'bg-pink-500'
+    });
+
+    const handleAdd = () => {
+        if (!newTag.title) return;
+        onSaveTag({
+            weekIndex,
+            label: newTag.label,
+            title: newTag.title,
+            color: newTag.color
+        });
+        setNewTag(prev => ({ ...prev, title: '' }));
+    };
+
+    return (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="absolute inset-0" onClick={onClose}></div>
+            <div className="w-[400px] bg-[#09090b] border border-zinc-800 rounded-xl shadow-2xl relative z-10 p-5">
+                <div className="flex justify-between items-center mb-4 border-b border-zinc-800 pb-3">
+                    <div>
+                        <h3 className="text-sm font-bold text-white uppercase tracking-wider">Week {weekIndex + 1} Context</h3>
+                        <p className="text-[10px] text-zinc-500 font-mono mt-0.5">{date.toLocaleDateString(undefined, {weekday: 'long', month:'long', day:'numeric'})}</p>
+                    </div>
+                    <button onClick={onClose}><Icons.XCircle className="w-5 h-5 text-zinc-500 hover:text-white" /></button>
+                </div>
+
+                {/* Existing Tags */}
+                <div className="space-y-2 mb-6 max-h-[200px] overflow-y-auto">
+                    {tags.length === 0 && <p className="text-xs text-zinc-600 italic text-center py-2">No tags defined for this week.</p>}
+                    {tags.map(tag => (
+                        <div key={tag.id} className="flex items-center justify-between p-2 bg-zinc-900 rounded border border-zinc-800">
+                            <div className="flex items-center gap-2">
+                                <span className={`text-[9px] font-bold text-white px-1.5 py-0.5 rounded ${tag.color}`}>{tag.label}</span>
+                                <span className="text-xs text-zinc-300 font-medium">{tag.title}</span>
+                            </div>
+                            <button onClick={() => onDeleteTag(tag.id)} className="text-zinc-600 hover:text-red-500"><Icons.XCircle className="w-4 h-4" /></button>
+                        </div>
+                    ))}
+                </div>
+
+                {/* Add New Tag */}
+                <div className="bg-zinc-900/50 p-3 rounded border border-zinc-800 space-y-3">
+                    <h4 className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Add New Marker</h4>
+                    <div className="flex gap-2">
+                        <select 
+                            className="bg-zinc-950 border border-zinc-800 rounded text-xs text-white p-2 focus:outline-none"
+                            value={newTag.label}
+                            onChange={e => setNewTag({...newTag, label: e.target.value})}
+                        >
+                            <option value="LAUNCH">🚀 Launch</option>
+                            <option value="THEME">🎨 Theme</option>
+                            <option value="EVENT">📅 Event</option>
+                        </select>
+                        <input 
+                            className="flex-1 bg-zinc-950 border border-zinc-800 rounded text-xs text-white p-2 focus:outline-none"
+                            placeholder="Marker Title..."
+                            value={newTag.title}
+                            onChange={e => setNewTag({...newTag, title: e.target.value})}
+                            onKeyDown={e => e.key === 'Enter' && handleAdd()}
+                        />
+                    </div>
+                    <div className="flex gap-2 items-center">
+                        <span className="text-[10px] text-zinc-600 uppercase font-bold">Color:</span>
+                        {CONTEXT_COLORS.map(c => (
+                            <button 
+                                key={c.value}
+                                onClick={() => setNewTag({...newTag, color: c.value})}
+                                className={`w-4 h-4 rounded-full ${c.value} transition-transform ${newTag.color === c.value ? 'scale-125 ring-1 ring-white' : 'opacity-50 hover:opacity-100'}`}
+                            />
+                        ))}
+                        <button 
+                            onClick={handleAdd}
+                            disabled={!newTag.title}
+                            className="ml-auto px-3 py-1 bg-indigo-600 text-white text-[10px] font-bold rounded hover:bg-indigo-500 disabled:opacity-50"
+                        >
+                            Add
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
 
 const ChannelCreationModal: React.FC<{
   onClose: () => void;
@@ -349,9 +454,15 @@ const TicketModal: React.FC<{
     }
   };
 
+  const handleSave = () => {
+      const finalItem = { ...item };
+      finalItem.type = 'CONTENT';
+      onSave(finalItem);
+  };
+
   const isFormValid = () => {
     if (!item.title) return false;
-    // Strict Linkage: Ticket MUST belong to a Bet.
+    // Strict Linkage: Ticket MUST belong to a Bet if bets exist
     if (bets.length > 0 && !item.linkedBetId) return false;
     return true;
   };
@@ -362,102 +473,100 @@ const TicketModal: React.FC<{
        <div className="w-[600px] bg-[#09090b] border border-zinc-800 rounded-xl shadow-2xl flex flex-col relative overflow-hidden ring-1 ring-white/10 z-10">
           
           <div className="h-14 border-b border-zinc-800 flex items-center justify-between px-6 bg-zinc-900/50">
-             <div className="flex items-center gap-2">
-                <Icons.FileText className="w-4 h-4 text-zinc-400" />
-                <span className="text-xs font-bold text-zinc-200">Edit Ticket</span>
-             </div>
+             <span className="text-xs font-bold uppercase tracking-wider text-white">Execution Task</span>
              <button onClick={onClose}><Icons.XCircle className="w-5 h-5 text-zinc-500 hover:text-white transition-colors"/></button>
           </div>
 
           <div className="p-6 space-y-6 overflow-y-auto max-h-[70vh]">
+              
               <div>
-                 <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2 block">Item Title</label>
+                 <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2 block">Task Title</label>
                  <input 
                     autoFocus
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-4 text-lg font-bold text-white placeholder-zinc-700 focus:outline-none focus:border-zinc-600 transition-colors"
                     placeholder="What needs to happen?"
                     value={item.title || ''}
                     onChange={(e) => setItem({...item, title: e.target.value})}
-                    onKeyDown={(e) => e.key === 'Enter' && isFormValid() && onSave(item)}
+                    onKeyDown={(e) => e.key === 'Enter' && isFormValid() && handleSave()}
                  />
               </div>
               
               <div>
-                 <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2 block">Description</label>
-                 <textarea 
-                    className="w-full h-24 bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-sm text-zinc-300 placeholder-zinc-700 focus:outline-none focus:border-zinc-600 resize-none leading-relaxed"
-                    placeholder="Add context, details, or acceptance criteria..."
-                    value={item.description || ''}
-                    onChange={(e) => setItem({...item, description: e.target.value})}
-                 />
-              </div>
-
-              {bets.length > 0 && (
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2 block">Strategic Link (Bet) <span className="text-red-500">*</span></label>
-                    <select 
-                        className={`w-full bg-zinc-950 border rounded-lg p-3 text-white text-sm focus:outline-none focus:border-indigo-500 ${!item.linkedBetId ? 'border-red-500/50' : 'border-zinc-800'}`}
-                        value={item.linkedBetId || ''}
-                        onChange={(e) => {
-                             // Auto-inherit project ID from bet
-                             const bet = bets.find(b => b.id === e.target.value);
-                             setItem({...item, linkedBetId: e.target.value, projectId: bet?.projectId});
-                        }}
-                    >
-                        <option value="" disabled>Select a Bet (Required)</option>
-                        {bets.map(b => (
-                            <option key={b.id} value={b.id}>{b.description}</option>
-                        ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2 block">Project Link (Optional)</label>
-                    <select 
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white text-sm focus:outline-none"
-                        value={item.projectId || ''}
-                        onChange={(e) => setItem({...item, projectId: e.target.value})}
-                    >
-                        <option value="">No Project</option>
-                        {projects.map(p => (
-                            <option key={p.id} value={p.id}>{p.name}</option>
-                        ))}
-                    </select>
-                  </div>
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2 block">Description</label>
+                    <textarea 
+                        className="w-full h-24 bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-sm text-zinc-300 placeholder-zinc-700 focus:outline-none focus:border-zinc-600 resize-none leading-relaxed"
+                        placeholder="Add context, details, or acceptance criteria..."
+                        value={item.description || ''}
+                        onChange={(e) => setItem({...item, description: e.target.value})}
+                    />
                 </div>
-              )}
 
-              <div className="grid grid-cols-2 gap-6">
-                 <div>
-                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2 block">Assigned Owner</label>
-                    <div className="flex flex-wrap gap-2">
-                        {users.map(u => (
+                {bets.length > 0 && (
+                    <div className="grid grid-cols-2 gap-4">
+                    <div>
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2 block">Strategic Link (Bet) <span className="text-red-500">*</span></label>
+                        <select 
+                            className={`w-full bg-zinc-950 border rounded-lg p-3 text-white text-sm focus:outline-none focus:border-indigo-500 ${!item.linkedBetId ? 'border-red-500/50' : 'border-zinc-800'}`}
+                            value={item.linkedBetId || ''}
+                            onChange={(e) => {
+                                // Auto-inherit project ID from bet
+                                const bet = bets.find(b => b.id === e.target.value);
+                                setItem({...item, linkedBetId: e.target.value, projectId: bet?.projectId});
+                            }}
+                        >
+                            <option value="" disabled>Select a Bet (Required)</option>
+                            {bets.map(b => (
+                                <option key={b.id} value={b.id}>{b.description}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2 block">Project Link (Optional)</label>
+                        <select 
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white text-sm focus:outline-none"
+                            value={item.projectId || ''}
+                            onChange={(e) => setItem({...item, projectId: e.target.value})}
+                        >
+                            <option value="">No Project</option>
+                            {projects.map(p => (
+                                <option key={p.id} value={p.id}>{p.name}</option>
+                            ))}
+                        </select>
+                    </div>
+                    </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-6">
+                    <div>
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2 block">Assigned Owner</label>
+                        <div className="flex flex-wrap gap-2">
+                            {users.map(u => (
+                                <button 
+                                    key={u.id}
+                                    onClick={() => toggleUser(u.id)}
+                                    className={`h-8 px-3 rounded-full border flex items-center justify-center gap-2 transition-all ${item.ownerIds?.includes(u.id) ? `border-white/20 bg-zinc-800 text-white` : 'border-zinc-800 bg-zinc-900 text-zinc-500 hover:border-zinc-700'}`}
+                                >
+                                    <div className={`w-2 h-2 rounded-full ${u.color}`}></div>
+                                    <span className="text-xs font-medium">{u.initials}</span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                    <div>
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2 block">Priority Level</label>
+                        <div className="grid grid-cols-3 gap-2">
+                        {PRIORITIES.map(p => (
                             <button 
-                                key={u.id}
-                                onClick={() => toggleUser(u.id)}
-                                className={`h-8 px-3 rounded-full border flex items-center justify-center gap-2 transition-all ${item.ownerIds?.includes(u.id) ? `border-white/20 bg-zinc-800 text-white` : 'border-zinc-800 bg-zinc-900 text-zinc-500 hover:border-zinc-700'}`}
+                                key={p.value}
+                                onClick={() => setItem({...item, priority: p.value})}
+                                className={`px-2 py-1.5 rounded text-[10px] font-bold uppercase tracking-wider border transition-all ${item.priority === p.value ? `bg-zinc-800 border-zinc-600 text-white` : 'bg-zinc-950 border-zinc-800 text-zinc-600 hover:border-zinc-700'}`}
                             >
-                                <div className={`w-2 h-2 rounded-full ${u.color}`}></div>
-                                <span className="text-xs font-medium">{u.initials}</span>
+                                {p.value}
                             </button>
                         ))}
+                        </div>
                     </div>
-                 </div>
-                 <div>
-                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2 block">Priority Level</label>
-                    <div className="grid grid-cols-3 gap-2">
-                      {PRIORITIES.map(p => (
-                         <button 
-                            key={p.value}
-                            onClick={() => setItem({...item, priority: p.value})}
-                            className={`px-2 py-1.5 rounded text-[10px] font-bold uppercase tracking-wider border transition-all ${item.priority === p.value ? `bg-zinc-800 border-zinc-600 text-white` : 'bg-zinc-950 border-zinc-800 text-zinc-600 hover:border-zinc-700'}`}
-                         >
-                            {p.value}
-                         </button>
-                      ))}
-                    </div>
-                 </div>
-              </div>
+                </div>
 
               <div>
                  <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2 block">Timeline Duration</label>
@@ -484,7 +593,7 @@ const TicketModal: React.FC<{
               <div className="flex gap-3">
                  <button onClick={onClose} className="px-4 py-2 text-xs text-zinc-400 hover:text-white font-medium">Cancel</button>
                  <button 
-                    onClick={() => onSave(item)} 
+                    onClick={handleSave} 
                     disabled={!isFormValid()} 
                     className="px-6 py-2 bg-white text-black text-xs font-bold rounded hover:bg-zinc-200 disabled:opacity-50 transition-colors shadow-lg shadow-white/5"
                  >
@@ -510,6 +619,7 @@ const RoadmapCard: React.FC<{
     const priority = PRIORITIES.find(p => p.value === item.priority);
     const linkedProject = projects.find(p => p.id === item.projectId);
 
+    // RENDER: EXECUTION TASK (Bar)
     return (
         <div
             draggable
@@ -561,6 +671,8 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
     updateChannel,
     updateRoadmapItem,
     deleteRoadmapItem,
+    addTimelineTag,
+    deleteTimelineTag,
     currentUser,
     users
   } = useStore();
@@ -573,6 +685,7 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
   const [expandedBets, setExpandedBets] = useState<Record<string, boolean>>({});
   const [activeDashboardChannel, setActiveDashboardChannel] = useState<string | null>(null);
   const [activeDashboardProject, setActiveDashboardProject] = useState<string | null>(null);
+  const [activeWeekContext, setActiveWeekContext] = useState<number | null>(null);
 
   // --- DATA ---
   const weeks = useMemo(() => {
@@ -654,13 +767,14 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
               weekIndex: newItem.weekIndex!,
               title: newItem.title!,
               description: newItem.description || '',
-              type: newItem.linkedBetId ? 'CONTENT' : 'NOTE',
-              label: 'Ticket',
+              type: newItem.type || 'CONTENT',
+              label: newItem.label || 'Ticket',
               durationWeeks: newItem.durationWeeks || 1,
-              ownerIds: newItem.ownerIds || [currentUser.id],
+              ownerIds: newItem.ownerIds || (newItem.type === 'CONTENT' ? [currentUser.id] : []),
               priority: newItem.priority || 'Medium',
               linkedBetId: newItem.linkedBetId,
-              projectId: newItem.projectId
+              projectId: newItem.projectId,
+              color: newItem.color
           });
       }
       setActiveTicket(null);
@@ -686,7 +800,17 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
 
   const toggleBet = (id: string) => {
       setExpandedBets(prev => ({...prev, [id]: !prev[id]}));
-  }
+  };
+
+  const handleSaveWeekTag = (tag: Partial<TimelineTag>) => {
+      addTimelineTag({
+          id: generateId(),
+          weekIndex: tag.weekIndex!,
+          label: tag.label || 'LAUNCH',
+          title: tag.title || 'Marker',
+          color: tag.color || 'bg-zinc-500'
+      });
+  };
 
   return (
     <div className="h-full w-full flex flex-col relative bg-[#09090b] font-sans text-zinc-100 select-none">
@@ -715,12 +839,38 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
                      <span className="text-[10px] font-mono font-bold text-zinc-500 uppercase">Channels & Strategy</span>
                  </div>
                  <div className="flex">
-                     {weeks.map((date, i) => (
-                         <div key={i} className="shrink-0 border-r border-white/5 p-2 flex flex-col justify-center items-center bg-[#09090b]" style={{ width: WEEK_WIDTH }}>
-                             <span className="text-[10px] text-zinc-600 font-mono uppercase mb-1">Week {i+1}</span>
-                             <span className="text-xs text-zinc-400 font-bold">{date.toLocaleDateString(undefined, {month:'short', day:'numeric'})}</span>
-                         </div>
-                     ))}
+                     {weeks.map((date, i) => {
+                         const weekTags = (campaign?.timelineTags || []).filter(t => t.weekIndex === i);
+                         
+                         return (
+                            <div 
+                                key={i} 
+                                className="shrink-0 border-r border-white/5 p-2 flex flex-col items-center bg-[#09090b] group cursor-pointer relative hover:bg-zinc-900/50 transition-colors" 
+                                style={{ width: WEEK_WIDTH }}
+                                onClick={() => setActiveWeekContext(i)}
+                            >
+                                <span className="text-[10px] text-zinc-600 font-mono uppercase mb-1">Week {i+1}</span>
+                                <span className="text-xs text-zinc-400 font-bold mb-2">{date.toLocaleDateString(undefined, {month:'short', day:'numeric'})}</span>
+                                
+                                {/* Tags Stack */}
+                                <div className="flex flex-col gap-1 w-full px-2">
+                                    {weekTags.map(tag => (
+                                        <div key={tag.id} className={`text-[9px] font-bold text-white px-2 py-0.5 rounded-full flex items-center justify-center truncate shadow-sm ${tag.color}`}>
+                                            <span className="opacity-75 mr-1">{tag.label}:</span>
+                                            {tag.title}
+                                        </div>
+                                    ))}
+                                </div>
+                                
+                                {/* Hover Add Button */}
+                                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <div className="p-1 rounded bg-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-700">
+                                        <Icons.Plus className="w-3 h-3" />
+                                    </div>
+                                </div>
+                            </div>
+                        )
+                     })}
                  </div>
              </div>
 
@@ -910,6 +1060,17 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
               onClose={() => setActiveTicket(null)}
               onSave={handleSaveTicket}
               onDelete={deleteRoadmapItem}
+          />
+      )}
+      
+      {activeWeekContext !== null && (
+          <WeekContextModal 
+             weekIndex={activeWeekContext}
+             date={weeks[activeWeekContext]}
+             tags={(campaign?.timelineTags || []).filter(t => t.weekIndex === activeWeekContext)}
+             onClose={() => setActiveWeekContext(null)}
+             onSaveTag={handleSaveWeekTag}
+             onDeleteTag={deleteTimelineTag}
           />
       )}
       

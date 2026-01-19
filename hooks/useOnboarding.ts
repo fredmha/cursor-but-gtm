@@ -66,7 +66,8 @@ export const useOnboarding = () => {
       channels: campaign?.channels || [],
       principles: formData.principles,
       projects: campaign?.projects || [],
-      roadmapItems: campaign?.roadmapItems || []
+      roadmapItems: campaign?.roadmapItems || [],
+      timelineTags: campaign?.timelineTags || []
     };
     if (campaign) {
       updateCampaign(c);
