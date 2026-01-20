@@ -26,6 +26,7 @@ const MatrixTicketModal: React.FC<{
     const [selectedBetId, setSelectedBetId] = useState<string>('');
     const [title, setTitle] = useState('');
     const [assigneeId, setAssigneeId] = useState('');
+    const [priority, setPriority] = useState<Priority>('Medium');
 
     const availableBets = useMemo(() => {
         if (!selectedChannelId) return [];
@@ -34,18 +35,18 @@ const MatrixTicketModal: React.FC<{
     }, [selectedChannelId, channels]);
 
     const handleSave = () => {
-        if (!selectedChannelId || !selectedBetId || !title) return;
+        if (!title) return;
         
         const ticket: Ticket = {
             id: generateId(),
             shortId: `T-${Math.floor(Math.random() * 10000)}`,
             title,
             status: TicketStatus.Todo,
-            betId: selectedBetId,
-            channelId: selectedChannelId,
+            betId: selectedBetId || undefined,
+            channelId: selectedChannelId || undefined,
             projectId: projectId, // LOCKED CONTEXT
             assigneeId: assigneeId || undefined,
-            priority: 'Medium',
+            priority: priority,
             createdAt: new Date().toISOString()
         };
         onSave(ticket);
@@ -63,68 +64,92 @@ const MatrixTicketModal: React.FC<{
                     <button onClick={onClose}><Icons.XCircle className="w-5 h-5 text-zinc-500 hover:text-white" /></button>
                 </div>
 
-                <div className="space-y-4">
-                    <div className="p-3 bg-zinc-900/50 border border-zinc-800 rounded text-xs text-zinc-400 mb-4">
-                        Creating ticket in context of <strong>Project</strong>. Select where the execution lives (Channel & Bet).
-                    </div>
-
+                <div className="space-y-6">
+                    {/* 1. Ticket Name & Details (Primary) */}
                     <div>
-                        <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">1. Select Channel</label>
-                        <select 
-                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white focus:border-indigo-500 focus:outline-none text-sm"
-                            value={selectedChannelId}
-                            onChange={e => { setSelectedChannelId(e.target.value); setSelectedBetId(''); }}
-                        >
-                            <option value="" disabled>Choose Department...</option>
-                            {availableChannels.map(c => (
-                                <option key={c.id} value={c.id}>{c.name}</option>
-                            ))}
-                        </select>
-                    </div>
-
-                    <div>
-                        <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">2. Select Strategic Bet</label>
-                        <select 
-                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white focus:border-indigo-500 focus:outline-none text-sm disabled:opacity-50"
-                            value={selectedBetId}
-                            onChange={e => setSelectedBetId(e.target.value)}
-                            disabled={!selectedChannelId}
-                        >
-                            <option value="" disabled>Choose Initiative...</option>
-                            {availableBets.map(b => (
-                                <option key={b.id} value={b.id}>{b.description}</option>
-                            ))}
-                        </select>
-                        {selectedChannelId && availableBets.length === 0 && (
-                            <p className="text-[10px] text-amber-500 mt-1">No active bets in this channel.</p>
-                        )}
-                    </div>
-
-                    <div>
-                        <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">3. Ticket Details</label>
+                        <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">Ticket Title</label>
                         <input 
-                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white focus:border-indigo-500 focus:outline-none placeholder-zinc-700 mb-2"
+                            autoFocus
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-4 text-white font-bold text-lg focus:border-indigo-500 focus:outline-none placeholder-zinc-700 mb-3"
                             placeholder="What needs to be done?"
                             value={title}
                             onChange={e => setTitle(e.target.value)}
+                            onKeyDown={e => e.key === 'Enter' && title && handleSave()}
                         />
-                         <select 
-                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white focus:border-indigo-500 focus:outline-none text-sm"
-                            value={assigneeId}
-                            onChange={e => setAssigneeId(e.target.value)}
-                        >
-                            <option value="">Unassigned</option>
-                            {users.map(u => (
-                                <option key={u.id} value={u.id}>{u.name}</option>
-                            ))}
-                        </select>
+                        <div className="flex gap-3">
+                             <select 
+                                className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-white focus:border-indigo-500 focus:outline-none text-xs"
+                                value={assigneeId}
+                                onChange={e => setAssigneeId(e.target.value)}
+                            >
+                                <option value="">Unassigned</option>
+                                {users.map(u => (
+                                    <option key={u.id} value={u.id}>{u.name}</option>
+                                ))}
+                            </select>
+                            <select 
+                                className="w-32 bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-white focus:border-indigo-500 focus:outline-none text-xs"
+                                value={priority}
+                                onChange={e => setPriority(e.target.value as Priority)}
+                            >
+                                {PRIORITIES.map(p => (
+                                    <option key={p.value} value={p.value}>{p.value}</option>
+                                ))}
+                            </select>
+                        </div>
+                    </div>
+
+                    {/* 2. Strategic Context (Optional) */}
+                    <div className="pt-4 border-t border-zinc-900 space-y-4">
+                        <div className="flex items-center gap-2 mb-2">
+                            <Icons.Layers className="w-3.5 h-3.5 text-zinc-500" />
+                            <h4 className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Execution Context</h4>
+                        </div>
+                        
+                        <div>
+                            <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1.5">Link to Channel (Optional)</label>
+                            <select 
+                                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-white focus:border-indigo-500 focus:outline-none text-xs"
+                                value={selectedChannelId}
+                                onChange={e => { setSelectedChannelId(e.target.value); setSelectedBetId(''); }}
+                            >
+                                <option value="">No Channel (Project Only)</option>
+                                {availableChannels.map(c => (
+                                    <option key={c.id} value={c.id}>{c.name}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div>
+                            <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1.5">Link to Bet (Optional)</label>
+                            <select 
+                                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-white focus:border-indigo-500 focus:outline-none text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                                value={selectedBetId}
+                                onChange={e => setSelectedBetId(e.target.value)}
+                                disabled={!selectedChannelId}
+                            >
+                                <option value="" disabled={!selectedChannelId}>
+                                    {!selectedChannelId ? 'Select a Channel first...' : 'Choose Initiative...'}
+                                </option>
+                                {availableBets.map(b => (
+                                    <option key={b.id} value={b.id}>{b.description}</option>
+                                ))}
+                            </select>
+                            {selectedChannelId && availableBets.length === 0 && (
+                                <p className="text-[10px] text-amber-500 mt-1">No active bets in this channel.</p>
+                            )}
+                        </div>
+
+                         {!selectedChannelId && (
+                             <p className="text-[10px] text-zinc-600 italic">Ticket will be created directly on the Project Timeline.</p>
+                         )}
                     </div>
                 </div>
 
                 <div className="flex justify-end gap-2 mt-6">
                     <button onClick={onClose} className="px-4 py-2 text-xs text-zinc-400 hover:text-white">Cancel</button>
                     <button 
-                        disabled={!selectedBetId || !title}
+                        disabled={!title}
                         onClick={handleSave}
                         className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg disabled:opacity-50 transition-colors shadow-lg"
                     >
@@ -143,7 +168,7 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
     onClose, 
     onNavigateToBet
 }) => {
-  const { campaign, users, currentUser, updateProject, addProjectUpdate, addTicket, updateTicket } = useStore();
+  const { campaign, users, currentUser, updateProject, addProjectUpdate, addTicket, addProjectTicket, updateTicket, updateProjectTicket } = useStore();
   const [newUpdate, setNewUpdate] = useState('');
   const [showNewTicketModal, setShowNewTicketModal] = useState(false);
 
@@ -158,10 +183,12 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
       )
   }
 
-  // Live Tickets for this Project
+  // Merged Live Tickets for this Project (Channel Tickets + Independent Project Tickets)
   const projectTickets = useMemo(() => {
-     return (campaign?.channels || []).flatMap(c => c.bets).flatMap(b => b.tickets).filter(t => t.projectId === projectId);
-  }, [campaign, projectId]);
+     const channelTickets = (campaign?.channels || []).flatMap(c => c.bets).flatMap(b => b.tickets).filter(t => t.projectId === projectId);
+     const directTickets = project.tickets || [];
+     return [...channelTickets, ...directTickets];
+  }, [campaign, projectId, project.tickets]);
   
   const activeBets = (campaign?.channels || []).flatMap(c => c.bets).filter(b => b.projectId === projectId && b.status !== Status.Killed);
   const projectLead = users.find(u => u.id === project.ownerId);
@@ -179,7 +206,11 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
   };
 
   const handleCreateMatrixTicket = (ticket: Ticket) => {
-      addTicket(ticket.channelId, ticket.betId, ticket);
+      if (ticket.channelId && ticket.betId) {
+        addTicket(ticket.channelId, ticket.betId, ticket);
+      } else {
+        addProjectTicket(projectId, ticket);
+      }
       setShowNewTicketModal(false);
   };
 
@@ -187,7 +218,11 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
       // Find ticket to get channel/bet context
       const ticket = projectTickets.find(t => t.id === ticketId);
       if (ticket) {
-          updateTicket(ticket.channelId, ticket.betId, ticketId, { status: newStatus });
+          if (ticket.channelId && ticket.betId) {
+             updateTicket(ticket.channelId, ticket.betId, ticketId, { status: newStatus });
+          } else {
+             updateProjectTicket(projectId, ticketId, { status: newStatus });
+          }
       }
   };
 

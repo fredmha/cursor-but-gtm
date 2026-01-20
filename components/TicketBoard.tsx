@@ -81,60 +81,83 @@ export const TicketBoard: React.FC<TicketBoardProps> = ({
     );
   };
 
+  const renderSwimlane = (title: string, icon: React.ReactNode, laneTickets: Ticket[], key: string, count: number) => (
+      <div key={key} className="bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden shrink-0">
+          {/* Swimlane Header */}
+          <div className="px-4 py-2 bg-zinc-900 border-b border-zinc-800 flex items-center gap-2">
+              <div className="p-1 rounded bg-zinc-800 text-zinc-400">{icon}</div>
+              <h3 className="text-xs font-bold text-zinc-300">{title}</h3>
+              <span className="text-[10px] text-zinc-500 font-mono ml-auto">{count} tickets</span>
+          </div>
+          
+          {/* Columns */}
+          <div className="grid grid-cols-3 divide-x divide-zinc-800">
+              {STATUS_COLUMNS.map(col => {
+                  const colTickets = laneTickets.filter(t => {
+                      if (col.id === TicketStatus.Todo) return t.status === TicketStatus.Todo || t.status === TicketStatus.Backlog;
+                      if (col.id === TicketStatus.Done) return t.status === TicketStatus.Done || t.status === TicketStatus.Canceled;
+                      return t.status === col.id;
+                  });
+                  
+                  return (
+                      <div 
+                        key={col.id} 
+                        className="p-3 min-h-[120px]"
+                        onDragOver={handleDragOver}
+                        onDrop={(e) => handleDrop(e, col.id)}
+                      >
+                          <div className="mb-2 flex items-center gap-2">
+                              <div className={`w-1.5 h-1.5 rounded-full ${col.color}`}></div>
+                              <span className="text-[10px] uppercase font-bold text-zinc-600">{col.label}</span>
+                          </div>
+                          <div className="space-y-2">
+                              {colTickets.map(renderCard)}
+                          </div>
+                          {colTickets.length === 0 && (
+                              <div className="h-full border-2 border-dashed border-zinc-800/50 rounded flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
+                                  <span className="text-[9px] text-zinc-700">Drop here</span>
+                              </div>
+                          )}
+                      </div>
+                  )
+              })}
+          </div>
+      </div>
+  );
+
   if (groupByChannel) {
-    // Swimlane View
+    // Separate tickets into those with a channel and those without (General/Project-Direct)
+    const generalTickets = tickets.filter(t => !t.channelId);
     const channelsWithTickets = channels.filter(c => tickets.some(t => t.channelId === c.id));
     
+    if (generalTickets.length === 0 && channelsWithTickets.length === 0) {
+        return (
+             <div className="text-center py-10 text-zinc-500 italic text-xs">No tickets found for this project.</div>
+        );
+    }
+
     return (
       <div className="flex flex-col h-full overflow-y-auto custom-scrollbar space-y-6 pb-10">
-         {channelsWithTickets.length === 0 && (
-             <div className="text-center py-10 text-zinc-500 italic text-xs">No tickets found for this project.</div>
+         
+         {/* General Project Tasks Swimlane */}
+         {generalTickets.length > 0 && renderSwimlane(
+             "General Project Tasks", 
+             <Icons.Target className="w-3 h-3" />, 
+             generalTickets, 
+             "general_lane", 
+             generalTickets.length
          )}
+
+         {/* Channel Swimlanes */}
          {channelsWithTickets.map(channel => {
              const channelTickets = tickets.filter(t => t.channelId === channel.id);
-             return (
-                 <div key={channel.id} className="bg-zinc-900/30 border border-zinc-800 rounded-xl overflow-hidden shrink-0">
-                     {/* Swimlane Header */}
-                     <div className="px-4 py-2 bg-zinc-900 border-b border-zinc-800 flex items-center gap-2">
-                         <div className="p-1 rounded bg-indigo-500/10 text-indigo-400"><Icons.Zap className="w-3 h-3" /></div>
-                         <h3 className="text-xs font-bold text-zinc-300">{channel.name}</h3>
-                         <span className="text-[10px] text-zinc-500 font-mono ml-auto">{channelTickets.length} tickets</span>
-                     </div>
-                     
-                     {/* Columns */}
-                     <div className="grid grid-cols-3 divide-x divide-zinc-800">
-                         {STATUS_COLUMNS.map(col => {
-                             const colTickets = channelTickets.filter(t => {
-                                 if (col.id === TicketStatus.Todo) return t.status === TicketStatus.Todo || t.status === TicketStatus.Backlog;
-                                 if (col.id === TicketStatus.Done) return t.status === TicketStatus.Done || t.status === TicketStatus.Canceled;
-                                 return t.status === col.id;
-                             });
-                             
-                             return (
-                                 <div 
-                                    key={col.id} 
-                                    className="p-3 min-h-[120px]"
-                                    onDragOver={handleDragOver}
-                                    onDrop={(e) => handleDrop(e, col.id)}
-                                 >
-                                     <div className="mb-2 flex items-center gap-2">
-                                         <div className={`w-1.5 h-1.5 rounded-full ${col.color}`}></div>
-                                         <span className="text-[10px] uppercase font-bold text-zinc-600">{col.label}</span>
-                                     </div>
-                                     <div className="space-y-2">
-                                         {colTickets.map(renderCard)}
-                                     </div>
-                                     {colTickets.length === 0 && (
-                                         <div className="h-full border-2 border-dashed border-zinc-800/50 rounded flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
-                                             <span className="text-[9px] text-zinc-700">Drop here</span>
-                                         </div>
-                                     )}
-                                 </div>
-                             )
-                         })}
-                     </div>
-                 </div>
-             )
+             return renderSwimlane(
+                 channel.name,
+                 <Icons.Zap className="w-3 h-3" />,
+                 channelTickets,
+                 channel.id,
+                 channelTickets.length
+             );
          })}
       </div>
     );

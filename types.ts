@@ -30,8 +30,8 @@ export interface Ticket {
   title: string;
   description?: string;
   status: TicketStatus;
-  betId: string; // STRICT PARENT LINK
-  channelId: string; // STRICT GRANDPARENT LINK (Roadmap Row)
+  betId?: string; // Optional: Can be standalone in a Project
+  channelId?: string; // Optional: Can be standalone in a Project
   projectId?: string; // Optional Context Link
   roadmapItemId?: string;
   assigneeId?: string;
@@ -74,6 +74,7 @@ export interface Project {
   startDate?: string;
   targetDate?: string;
   updates: ProjectUpdate[];
+  tickets: Ticket[]; // NEW: Independent Project Tickets
 }
 
 export interface ChannelPrinciple {
@@ -93,7 +94,6 @@ export interface ChannelNote {
   authorId: string;
   date: string;
   text: string;
-  pinned?: boolean;
 }
 
 export type ChannelTag = 'Inbound' | 'Outbound';
@@ -122,7 +122,7 @@ export type RoadmapItemType = 'CONTENT' | 'LAUNCH' | 'THEME' | 'NOTE' | 'BET';
 
 export interface RoadmapItem {
   id: string;
-  channelId: string; // The Row it belongs to
+  channelId?: string; // Optional: If undefined, it likely belongs to Strategy Horizon (Project)
   weekIndex: number;
   durationWeeks: number;
   title: string;

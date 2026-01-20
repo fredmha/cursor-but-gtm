@@ -102,83 +102,140 @@ const calculateLaneLayout = (items: RoadmapItem[]): { layoutItems: LayoutItem[],
 const StrategyHorizon: React.FC<{
     projects: Project[];
     users: User[];
+    roadmapItems: RoadmapItem[];
     campaignStart: Date;
     onProjectClick: (projectId: string) => void;
+    onTicketClick: (item: RoadmapItem) => void;
     weekCount: number;
-}> = ({ projects, users, campaignStart, onProjectClick, weekCount }) => {
+}> = ({ projects, users, roadmapItems, campaignStart, onProjectClick, onTicketClick, weekCount }) => {
     
     return (
-        <div className="min-w-max bg-[#09090b] border-b border-zinc-800 relative z-30">
-            <div className="flex">
-                {/* Header Label */}
-                <div className="shrink-0 border-r border-zinc-800 bg-[#09090b] p-3 flex flex-col justify-center" style={{ width: LEFT_PANEL_WIDTH }}>
+        <div className="min-w-max bg-[#09090b] border-b border-zinc-800 relative z-30 shadow-xl">
+            <div className="flex flex-col">
+                <div className="shrink-0 border-b border-zinc-800 bg-[#09090b] px-3 py-2">
                     <div className="flex items-center gap-2 text-indigo-400">
                         <Icons.Target className="w-4 h-4" />
                         <span className="text-xs font-bold uppercase tracking-wider">Strategy Horizon</span>
                     </div>
-                    <p className="text-[9px] text-zinc-500 mt-1">Timeline of Major Initiatives</p>
                 </div>
 
-                {/* Gantt Area */}
-                <div className="relative flex-1 h-24 bg-zinc-900/10">
-                    {/* Vertical Week Lines (Background) */}
-                    <div className="absolute inset-0 flex pointer-events-none">
-                         {Array.from({ length: weekCount }).map((_, i) => (
-                             <div key={i} className="border-r border-white/5 h-full" style={{ width: WEEK_WIDTH }}></div>
-                         ))}
-                    </div>
+                {projects.map(project => {
+                    if (!project.startDate || !project.targetDate) return null;
+                    
+                    // Filter "Project-Only" Tickets (No Channel)
+                    const projectItems = roadmapItems.filter(i => i.projectId === project.id && !i.channelId);
+                    
+                    // Group Items by Week Index for clustered rendering
+                    const itemsByWeek: Record<number, RoadmapItem[]> = {};
+                    projectItems.forEach(item => {
+                        if (!itemsByWeek[item.weekIndex]) itemsByWeek[item.weekIndex] = [];
+                        itemsByWeek[item.weekIndex].push(item);
+                    });
 
-                    {/* Project Bars */}
-                    {projects.map(project => {
-                         if (!project.startDate || !project.targetDate) return null;
-                         
-                         const start = new Date(project.startDate);
-                         const end = new Date(project.targetDate);
-                         const campaignS = new Date(campaignStart);
-                         
-                         // Calculate Position
-                         const diffTime = Math.abs(start.getTime() - campaignS.getTime());
-                         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
-                         const startOffsetPixels = (diffDays / 7) * WEEK_WIDTH;
-                         
-                         const durationTime = Math.abs(end.getTime() - start.getTime());
-                         const durationDays = Math.ceil(durationTime / (1000 * 60 * 60 * 24));
-                         const widthPixels = Math.max((durationDays / 7) * WEEK_WIDTH, 50); // Min width
+                    const start = new Date(project.startDate);
+                    const end = new Date(project.targetDate);
+                    const campaignS = new Date(campaignStart);
+                    
+                    // Calculate Position for Project Bar
+                    const diffTime = Math.abs(start.getTime() - campaignS.getTime());
+                    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+                    const startOffsetPixels = (diffDays / 7) * WEEK_WIDTH;
+                    
+                    const durationTime = Math.abs(end.getTime() - start.getTime());
+                    const durationDays = Math.ceil(durationTime / (1000 * 60 * 60 * 24));
+                    const widthPixels = Math.max((durationDays / 7) * WEEK_WIDTH, 50);
 
-                         const lead = users.find(u => u.id === project.ownerId);
+                    const lead = users.find(u => u.id === project.ownerId);
+                    const colorClass = project.status === 'On Track' ? 'bg-emerald-500' : project.status === 'At Risk' ? 'bg-amber-500' : project.status === 'Off Track' ? 'bg-red-500' : 'bg-zinc-500';
 
-                         // Color based on status
-                         const colorClass = project.status === 'On Track' ? 'bg-emerald-500' : project.status === 'At Risk' ? 'bg-amber-500' : project.status === 'Off Track' ? 'bg-red-500' : 'bg-zinc-500';
+                    // Fixed Height Row to prevent bloat
+                    return (
+                        <div key={project.id} className="flex border-b border-zinc-800/50 group/row hover:bg-zinc-900/20 transition-colors h-16">
+                             {/* Project Header (Left) */}
+                             <div className="shrink-0 border-r border-zinc-800 bg-zinc-900/10 p-3 flex flex-col justify-center" style={{ width: LEFT_PANEL_WIDTH }}>
+                                 <div 
+                                    onClick={() => onProjectClick(project.id)}
+                                    className="flex items-center gap-2 cursor-pointer group"
+                                 >
+                                    <div className={`w-2 h-2 rounded-full ${colorClass}`}></div>
+                                    <span className="text-sm font-bold text-zinc-300 group-hover:text-white truncate">{project.name}</span>
+                                    <Icons.ChevronRight className="w-3 h-3 text-zinc-600 group-hover:text-white opacity-0 group-hover/row:opacity-100 transition-opacity" />
+                                 </div>
+                                 <div className="mt-1 pl-4 flex gap-4">
+                                    <div className="text-[9px] text-zinc-500 font-mono">Lead: {lead?.initials || '--'}</div>
+                                    <div className="text-[9px] text-zinc-500 font-mono">{projectItems.length} tasks</div>
+                                 </div>
+                             </div>
 
-                         return (
-                             <div 
-                                key={project.id}
-                                onClick={() => onProjectClick(project.id)}
-                                className="absolute top-4 h-12 rounded-lg bg-zinc-800 border border-zinc-700 hover:border-zinc-500 shadow-lg cursor-pointer group transition-all flex items-center px-3 gap-3 hover:-translate-y-0.5"
-                                style={{ left: startOffsetPixels, width: widthPixels }}
-                             >
-                                 <div className={`w-1.5 h-full absolute left-0 top-0 bottom-0 rounded-l-lg ${colorClass}`}></div>
-                                 <div className="pl-1 overflow-hidden">
-                                     <div className="text-xs font-bold text-white truncate">{project.name}</div>
-                                     <div className="text-[9px] text-zinc-400 font-mono truncate">
-                                         {start.toLocaleDateString(undefined, {month: 'short', day:'numeric'})} - {end.toLocaleDateString(undefined, {month: 'short', day:'numeric'})}
+                             {/* Timeline (Right) */}
+                             <div className="relative flex-1 bg-zinc-900/5 overflow-visible">
+                                 {/* Vertical Lines */}
+                                 <div className="absolute inset-0 flex pointer-events-none">
+                                     {Array.from({ length: weekCount }).map((_, i) => (
+                                         <div key={i} className="border-r border-white/5 h-full" style={{ width: WEEK_WIDTH }}></div>
+                                     ))}
+                                 </div>
+
+                                 {/* The Main Project Bar */}
+                                 <div 
+                                    onClick={() => onProjectClick(project.id)}
+                                    className="absolute top-2 h-6 rounded bg-zinc-800 border border-zinc-700 hover:border-zinc-500 shadow-sm cursor-pointer group transition-all flex items-center px-2 gap-2 z-10 hover:z-20"
+                                    style={{ left: startOffsetPixels, width: widthPixels }}
+                                 >
+                                     <div className={`w-1 h-full absolute left-0 top-0 bottom-0 rounded-l ${colorClass}`}></div>
+                                     <div className="pl-1 overflow-hidden">
+                                         <div className="text-[9px] font-bold text-white truncate">{project.name}</div>
                                      </div>
                                  </div>
-                                 {lead && (
-                                     <div className={`w-6 h-6 rounded-full ${lead.color} flex items-center justify-center text-[8px] text-white font-bold ml-auto shrink-0 ring-2 ring-[#09090b]`}>
-                                         {lead.initials}
-                                     </div>
-                                 )}
+
+                                 {/* Compact Ticket Indicators (Squares) */}
+                                 {Object.entries(itemsByWeek).map(([weekIndexStr, items]) => {
+                                     const weekIndex = parseInt(weekIndexStr);
+                                     const left = (weekIndex * WEEK_WIDTH) + 12; // Slight padding from grid line
+                                     
+                                     return (
+                                         <div key={weekIndex} className="absolute top-9 flex gap-1.5 flex-wrap z-20 max-w-[180px]" style={{ left }}>
+                                             {items.map(item => (
+                                                 <div 
+                                                    key={item.id}
+                                                    onClick={(e) => { e.stopPropagation(); onTicketClick(item); }}
+                                                    className="group/marker relative"
+                                                 >
+                                                     <div className={`w-5 h-5 rounded flex items-center justify-center border transition-all hover:scale-110 shadow-sm ${item.status === Status.Completed ? 'bg-emerald-500/20 border-emerald-500 text-emerald-500' : 'bg-zinc-800 border-zinc-600 text-zinc-400 hover:bg-zinc-700 hover:text-indigo-400 hover:border-indigo-500'}`}>
+                                                         {item.status === Status.Completed ? (
+                                                             <Icons.CheckCircle className="w-3 h-3" />
+                                                         ) : (
+                                                             <Icons.FileText className="w-3 h-3" />
+                                                         )}
+                                                     </div>
+                                                     
+                                                     {/* Tooltip */}
+                                                     <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover/marker:block z-50">
+                                                         <div className="bg-zinc-950 text-white text-[10px] px-2 py-1.5 rounded border border-zinc-800 shadow-xl whitespace-nowrap min-w-[120px]">
+                                                             <div className="font-bold mb-0.5">{item.title}</div>
+                                                             <div className="flex items-center justify-between text-zinc-500 text-[9px] uppercase tracking-wider">
+                                                                 <span>{item.status}</span>
+                                                                 {item.priority !== 'None' && <span className={item.priority === 'Urgent' ? 'text-red-500' : ''}>{item.priority}</span>}
+                                                             </div>
+                                                         </div>
+                                                         {/* Arrow */}
+                                                         <div className="w-2 h-2 bg-zinc-950 border-r border-b border-zinc-800 transform rotate-45 absolute -bottom-1 left-1/2 -translate-x-1/2"></div>
+                                                     </div>
+                                                 </div>
+                                             ))}
+                                         </div>
+                                     );
+                                 })}
                              </div>
-                         )
-                    })}
-                    
-                    {projects.length === 0 && (
-                        <div className="absolute inset-0 flex items-center justify-center text-zinc-600 text-xs italic">
-                            No active projects with timeline data.
                         </div>
-                    )}
-                </div>
+                    );
+                })}
+
+                {projects.length === 0 && (
+                     <div className="p-8 text-center text-zinc-600 text-xs italic bg-zinc-900/10">
+                         No active projects. Create a project to see the Strategy Horizon.
+                     </div>
+                )}
             </div>
         </div>
     );
@@ -533,8 +590,8 @@ const TicketModal: React.FC<{
 
   const isFormValid = () => {
     if (!item.title) return false;
-    // Strict Linkage: Ticket MUST belong to a Bet if bets exist
-    if (bets.length > 0 && !item.linkedBetId) return false;
+    // Strict Linkage: Ticket MUST belong to a Bet if bets exist AND it's not a Project-Only ticket
+    if (bets.length > 0 && !item.linkedBetId && !item.projectId) return false;
     return true;
   };
 
@@ -577,7 +634,7 @@ const TicketModal: React.FC<{
                     <div>
                         <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2 block">Strategic Link (Bet) <span className="text-red-500">*</span></label>
                         <select 
-                            className={`w-full bg-zinc-950 border rounded-lg p-3 text-white text-sm focus:outline-none focus:border-indigo-500 ${!item.linkedBetId ? 'border-red-500/50' : 'border-zinc-800'}`}
+                            className={`w-full bg-zinc-950 border rounded-lg p-3 text-white text-sm focus:outline-none focus:border-indigo-500 ${!item.linkedBetId && !item.projectId ? 'border-red-500/50' : 'border-zinc-800'}`}
                             value={item.linkedBetId || ''}
                             onChange={(e) => {
                                 // Auto-inherit project ID from bet
@@ -781,6 +838,7 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
 
   const channels = campaign?.channels || [];
   const projects = campaign?.projects || [];
+  const allBets = useMemo(() => channels.flatMap(c => c.bets), [channels]);
 
   // --- ACTIONS ---
   
@@ -834,7 +892,7 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
       } else {
           addRoadmapItem({
               id: crypto.randomUUID(),
-              channelId: newItem.channelId!,
+              channelId: newItem.channelId || undefined,
               weekIndex: newItem.weekIndex!,
               title: newItem.title!,
               description: newItem.description || '',
@@ -948,9 +1006,11 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
              {/* STRATEGY HORIZON (Projects) */}
              <StrategyHorizon 
                 projects={projects}
+                roadmapItems={campaign?.roadmapItems || []}
                 users={users}
                 campaignStart={campaign?.startDate ? new Date(campaign.startDate) : new Date()}
                 onProjectClick={setActiveDashboardProject}
+                onTicketClick={(item) => setActiveTicket({ item, bets: allBets })}
                 weekCount={weeks.length}
              />
 

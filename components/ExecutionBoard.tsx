@@ -148,6 +148,7 @@ export const ExecutionBoard: React.FC = () => {
         status: TicketStatus.Todo,
         betId: selectedBet.id,
         channelId: selectedBet.channelId,
+        projectId: selectedBet.projectId, // Link to project if bet has one
         priority: 'Medium',
         assigneeId: currentUser.id,
         createdAt: new Date().toISOString()
@@ -166,7 +167,8 @@ export const ExecutionBoard: React.FC = () => {
           priority: data.priority,
           targetDate: data.targetDate,
           startDate: new Date().toISOString(),
-          updates: []
+          updates: [],
+          tickets: []
       });
       setShowProjectModal(false);
       // Immediately navigate to the new project

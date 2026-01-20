@@ -43,6 +43,11 @@ interface StoreState {
   addProject: (project: Project) => void;
   updateProject: (projectId: string, updates: Partial<Project>) => void;
   addProjectUpdate: (projectId: string, update: ProjectUpdate) => void;
+  
+  // Project Ticket Actions
+  addProjectTicket: (projectId: string, ticket: Ticket) => void;
+  updateProjectTicket: (projectId: string, ticketId: string, updates: Partial<Ticket>) => void;
+  deleteProjectTicket: (projectId: string, ticketId: string) => void;
 
   addBet: (channelId: string, bet: Bet) => void;
   updateBet: (channelId: string, betId: string, updates: Partial<Bet>) => void;
@@ -93,14 +98,16 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     // Ensure projects array exists
     if (!data.projects) {
         data.projects = [];
+    } else {
+        // Ensure tickets array exists on projects
+        data.projects = data.projects.map((p: any) => ({
+            ...p,
+            tickets: p.tickets || []
+        }));
     }
 
     if (!data.timelineTags) {
         data.timelineTags = [];
-    }
-
-    if (data.roadmapLanes) {
-       // ... existing migration logic ...
     }
 
     return data;
@@ -214,7 +221,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (!campaign) return;
     setCampaignState(prev => prev ? ({
       ...prev,
-      projects: [...(prev.projects || []), project]
+      projects: [...(prev.projects || []), { ...project, tickets: [] }]
     }) : null);
   };
 
@@ -235,6 +242,100 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         updates: [update, ...(p.updates || [])]
       } : p)
     }) : null);
+  };
+
+  // NEW: Project Ticket Logic
+  const addProjectTicket = (projectId: string, ticket: Ticket) => {
+    if (!campaign) return;
+    
+    // Auto-create roadmap item if needed
+    let newRoadmapItems = [...(campaign.roadmapItems || [])];
+    const finalTicket = { ...ticket, projectId };
+
+    if (!finalTicket.roadmapItemId) {
+        const newItemId = generateId();
+        finalTicket.roadmapItemId = newItemId;
+        
+        const newItem: RoadmapItem = {
+            id: newItemId,
+            channelId: undefined, // IMPORTANT: No channel means "Strategy Horizon"
+            weekIndex: 0, 
+            durationWeeks: 1,
+            title: ticket.title,
+            description: ticket.description,
+            type: 'CONTENT',
+            linkedBetId: undefined,
+            ticketId: finalTicket.id,
+            projectId: projectId,
+            status: ticket.status === TicketStatus.Done ? Status.Completed : Status.Active,
+            ownerIds: ticket.assigneeId ? [ticket.assigneeId] : [],
+            priority: ticket.priority,
+            label: 'Task'
+        };
+        newRoadmapItems.push(newItem);
+    }
+
+    setCampaignState(prev => prev ? ({
+        ...prev,
+        roadmapItems: newRoadmapItems,
+        projects: prev.projects.map(p => p.id === projectId ? {
+            ...p,
+            tickets: [...(p.tickets || []), finalTicket]
+        } : p)
+    }) : null);
+  };
+
+  const updateProjectTicket = (projectId: string, ticketId: string, updates: Partial<Ticket>) => {
+      if (!campaign) return;
+      
+      let newRoadmapItems = [...(campaign.roadmapItems || [])];
+      const rItemIndex = newRoadmapItems.findIndex(i => i.ticketId === ticketId);
+      
+      if (rItemIndex !== -1) {
+          const rItem = newRoadmapItems[rItemIndex];
+          let updatedRItem = { ...rItem };
+          let changed = false;
+
+          if (updates.status) {
+              if (updates.status === TicketStatus.Done) {
+                  updatedRItem.status = Status.Completed;
+                  changed = true;
+              } else if (rItem.status === Status.Completed) {
+                  updatedRItem.status = Status.Active;
+                  changed = true;
+              }
+          }
+          if (updates.title) {
+              updatedRItem.title = updates.title;
+              changed = true;
+          }
+          if (updates.assigneeId) {
+              updatedRItem.ownerIds = [updates.assigneeId];
+              changed = true;
+          }
+          if (changed) newRoadmapItems[rItemIndex] = updatedRItem;
+      }
+
+      setCampaignState(prev => prev ? ({
+          ...prev,
+          roadmapItems: newRoadmapItems,
+          projects: prev.projects.map(p => p.id === projectId ? {
+              ...p,
+              tickets: p.tickets.map(t => t.id === ticketId ? { ...t, ...updates } : t)
+          } : p)
+      }) : null);
+  };
+
+  const deleteProjectTicket = (projectId: string, ticketId: string) => {
+      if (!campaign) return;
+      setCampaignState(prev => prev ? ({
+          ...prev,
+          roadmapItems: prev.roadmapItems.filter(i => i.ticketId !== ticketId),
+          projects: prev.projects.map(p => p.id === projectId ? {
+              ...p,
+              tickets: p.tickets.filter(t => t.id !== ticketId)
+          } : p)
+      }) : null);
   };
 
   const addBet = (channelId: string, bet: Bet) => {
@@ -335,17 +436,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                  changed = true;
              }
          }
-         
          if (updates.title) {
              updatedRItem.title = updates.title;
              changed = true;
          }
-
          if (updates.assigneeId) {
              updatedRItem.ownerIds = [updates.assigneeId];
              changed = true;
          }
-
          if (changed) {
              newRoadmapItems[rItemIndex] = updatedRItem;
          }
@@ -429,6 +527,32 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
              });
              return;
         }
+    } else if (newItem.projectId && !newItem.channelId && !newItem.ticketId) {
+        // PROJECT ONLY TICKET
+        const ticketId = generateId();
+        const ticket: Ticket = {
+            id: ticketId,
+            shortId: `T-${Math.floor(Math.random() * 10000)}`,
+            title: newItem.title,
+            description: newItem.description,
+            status: TicketStatus.Todo,
+            projectId: newItem.projectId,
+            roadmapItemId: newItem.id,
+            assigneeId: newItem.ownerIds?.[0],
+            priority: newItem.priority || 'Medium',
+            createdAt: new Date().toISOString()
+        };
+        newItem.ticketId = ticketId;
+        
+        setCampaignState(prev => prev ? ({
+            ...prev,
+            roadmapItems: [...(prev.roadmapItems || []), newItem],
+            projects: prev.projects.map(p => p.id === newItem.projectId ? {
+                ...p,
+                tickets: [...(p.tickets || []), ticket]
+            } : p)
+        }) : null);
+        return;
     }
 
     setCampaignState(prev => prev ? ({
@@ -446,6 +570,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const moveRoadmapItem = (itemId: string, newChannelId: string, newWeekIndex: number) => {
+    // Note: If item is Project-Only (no channelId), moving it to a channel might require data migration (creating Bet link).
+    // For now, assume we just update properties.
     updateRoadmapItem(itemId, { channelId: newChannelId, weekIndex: newWeekIndex });
   };
 
@@ -453,20 +579,29 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (!campaign) return;
     const item = campaign.roadmapItems.find(i => i.id === itemId);
     let newChannels = [...campaign.channels];
+    let newProjects = [...campaign.projects];
 
     if (item && item.ticketId) {
-         newChannels = newChannels.map(c => ({
-             ...c,
-             bets: c.bets.map(b => ({
-                 ...b,
-                 tickets: b.tickets.filter(t => t.id !== item.ticketId)
-             }))
-         }));
+         if (item.channelId) {
+             newChannels = newChannels.map(c => ({
+                 ...c,
+                 bets: c.bets.map(b => ({
+                     ...b,
+                     tickets: b.tickets.filter(t => t.id !== item.ticketId)
+                 }))
+             }));
+         } else if (item.projectId) {
+             newProjects = newProjects.map(p => ({
+                 ...p,
+                 tickets: p.tickets.filter(t => t.id !== item.ticketId)
+             }));
+         }
     }
 
     setCampaignState(prev => prev ? ({
       ...prev,
       channels: newChannels,
+      projects: newProjects,
       roadmapItems: (prev.roadmapItems || []).filter(i => i.id !== itemId)
     }) : null);
   };
@@ -548,6 +683,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       addProject,
       updateProject,
       addProjectUpdate,
+      addProjectTicket,
+      updateProjectTicket,
+      deleteProjectTicket,
       addBet,
       updateBet,
       addTicket,
