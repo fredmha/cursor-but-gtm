@@ -18,8 +18,7 @@ const STATUS_CONFIG = {
 type ViewState = 
     | { type: 'MY_ISSUES' }
     | { type: 'PROJECT', id: string }
-    | { type: 'CHANNEL', id: string }
-    | { type: 'BET', id: string };
+    | { type: 'CHANNEL', id: string };
 
 // --- MODALS ---
 
@@ -110,13 +109,6 @@ export const ExecutionBoard: React.FC = () => {
   const channels = campaign?.channels || [];
   const projects = campaign?.projects || [];
 
-  const selectedBet = useMemo(() => {
-      if (view.type === 'BET') {
-          return channels.flatMap(c => c.bets).find(b => b.id === view.id) || null;
-      }
-      return null;
-  }, [channels, view]);
-
   const displayTickets = useMemo(() => {
       if (view.type === 'MY_ISSUES') {
           return channels.flatMap(c => 
@@ -129,34 +121,12 @@ export const ExecutionBoard: React.FC = () => {
               }))
             )
           ).filter(t => t.assigneeId === currentUser.id);
-      } else if (selectedBet) {
-          const channel = channels.find(c => c.id === selectedBet.channelId);
-          return selectedBet.tickets.map(t => ({...t, betTitle: selectedBet.description, channelName: channel?.name || 'Unknown', betId: selectedBet.id}));
       }
       return [];
-  }, [view, selectedBet, channels, currentUser.id]);
+  }, [view, channels, currentUser.id]);
 
   // --- Handlers ---
   
-  const handleCreateTicket = () => {
-      if (!selectedBet) return;
-      const newTicket: Ticket = {
-        id: generateId(),
-        shortId: `T-${Math.floor(Math.random() * 10000)}`, 
-        title: 'New Ticket',
-        description: '',
-        status: TicketStatus.Todo,
-        betId: selectedBet.id,
-        channelId: selectedBet.channelId,
-        projectId: selectedBet.projectId, // Link to project if bet has one
-        priority: 'Medium',
-        assigneeId: currentUser.id,
-        createdAt: new Date().toISOString()
-      };
-      addTicket(selectedBet.channelId, selectedBet.id, newTicket);
-      setEditingTicket(newTicket);
-  };
-
   const handleSaveProject = (data: { name: string; description: string; targetDate: string; priority: Priority }) => {
       const newId = generateId();
       addProject({
@@ -261,8 +231,9 @@ export const ExecutionBoard: React.FC = () => {
                                        {projectBets.map(bet => (
                                            <div 
                                                key={bet.id}
-                                               onClick={() => setView({ type: 'BET', id: bet.id })}
-                                               className={`px-2 py-1 rounded cursor-pointer truncate transition-all ${view.type === 'BET' && view.id === bet.id ? 'text-indigo-300 bg-zinc-900' : 'text-zinc-500 hover:text-zinc-300'}`}
+                                               // Clicking a Bet navigates to the Project context
+                                               onClick={() => setView({ type: 'PROJECT', id: p.id })}
+                                               className={`px-2 py-1 rounded cursor-pointer truncate transition-all text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800`}
                                            >
                                                <span className="text-[11px]">{bet.description}</span>
                                            </div>
@@ -319,8 +290,9 @@ export const ExecutionBoard: React.FC = () => {
                                        {channel.bets.map(bet => (
                                            <div 
                                                key={bet.id}
-                                               onClick={() => setView({ type: 'BET', id: bet.id })}
-                                               className={`px-2 py-1 rounded cursor-pointer truncate transition-all ${view.type === 'BET' && view.id === bet.id ? 'text-indigo-300 bg-zinc-900' : 'text-zinc-500 hover:text-zinc-300'}`}
+                                               // Clicking a Bet navigates to the Channel context
+                                               onClick={() => setView({ type: 'CHANNEL', id: channel.id })}
+                                               className={`px-2 py-1 rounded cursor-pointer truncate transition-all text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800`}
                                            >
                                                <span className="text-[11px]">{bet.description}</span>
                                            </div>
@@ -343,7 +315,8 @@ export const ExecutionBoard: React.FC = () => {
           {view.type === 'PROJECT' && (
               <ProjectDashboard 
                   projectId={view.id} 
-                  onNavigateToBet={(betId) => setView({type: 'BET', id: betId})}
+                  // Navigating to a bet inside a project simply keeps you in project context or highlights
+                  onNavigateToBet={(betId) => console.log('Focus bet', betId)}
               />
           )}
 
@@ -352,38 +325,17 @@ export const ExecutionBoard: React.FC = () => {
               <ChannelDashboard 
                   channelId={view.id}
                   onDelete={() => handleDeleteChannel(view.id)}
-                  onNavigateToBet={(betId) => setView({type: 'BET', id: betId})}
+                  onNavigateToBet={(betId) => console.log('Focus bet', betId)}
               />
           )}
 
-          {/* VIEW: TICKET BOARD (For Bets or My Issues) */}
-          {(view.type === 'BET' || view.type === 'MY_ISSUES') && (
+          {/* VIEW: MY ISSUES */}
+          {view.type === 'MY_ISSUES' && (
             <>
                 {/* Toolbar */}
                 <div className="h-14 border-b border-border flex items-center justify-between px-6 bg-surface/50 backdrop-blur shrink-0">
                     <div className="flex items-center gap-3">
-                         {/* Breadcrumbs */}
-                         {view.type === 'MY_ISSUES' ? (
-                             <span className="text-sm font-bold text-white">My Issues</span>
-                         ) : selectedBet ? (
-                             <>
-                                <span className="text-zinc-500 text-sm font-medium">{channels.find(c => c.id === selectedBet.channelId)?.name}</span>
-                                <span className="text-zinc-700">/</span>
-                                <span className="text-white text-sm font-bold truncate max-w-xs">{selectedBet.description}</span>
-                             </>
-                         ) : null}
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                        {view.type === 'BET' && (
-                            <button
-                                onClick={handleCreateTicket}
-                                className="text-xs px-3 py-1.5 bg-white hover:bg-zinc-200 text-black rounded font-bold flex items-center gap-2 transition-colors shadow-lg shadow-white/5"
-                            >
-                                <Icons.Plus className="w-3.5 h-3.5" />
-                                New Ticket
-                            </button>
-                        )}
+                         <span className="text-sm font-bold text-white">My Issues</span>
                     </div>
                 </div>
 

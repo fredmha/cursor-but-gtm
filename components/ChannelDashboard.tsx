@@ -16,6 +16,25 @@ interface ChannelDashboardProps {
   onDelete?: () => void;
 }
 
+const StrategyLockOverlay: React.FC<{ onCreateBet: () => void }> = ({ onCreateBet }) => (
+    <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-zinc-900/10 h-full animate-in fade-in duration-500">
+        <div className="w-16 h-16 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center mb-6 shadow-xl">
+            <Icons.Zap className="w-8 h-8 text-zinc-600" />
+        </div>
+        <h3 className="text-lg font-bold text-white mb-2">Execution Locked</h3>
+        <p className="text-sm text-zinc-500 max-w-xs mb-8 leading-relaxed">
+            You cannot create tickets without a strategy. Define a <strong>Strategic Bet</strong> (Hypothesis) first to ensure all work serves a purpose.
+        </p>
+        <button 
+            onClick={onCreateBet}
+            className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold uppercase tracking-wider rounded-lg shadow-lg shadow-indigo-900/20 transition-all flex items-center gap-2"
+        >
+            <Icons.Plus className="w-4 h-4" />
+            Place First Bet
+        </button>
+    </div>
+);
+
 export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({ 
     channelId, 
     isModal = false, 
@@ -47,6 +66,9 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
   const projects = campaign?.projects || [];
   
   if (!channel) return null;
+
+  const activeBets = channel.bets.filter(b => b.status !== Status.Killed);
+  const hasBets = activeBets.length > 0;
 
   const allTickets = useMemo(() => {
       return channel.bets.flatMap(b => b.tickets).sort((a, b) => {
@@ -281,15 +303,17 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
                         </div>
                     </div>
 
-                    {/* Active Bets List (Read Only / Navigation) */}
+                    {/* Active Bets List (Read Only) */}
                     <div>
-                        <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center justify-between mb-2">
                             <div className="flex items-center gap-2">
                                 <Icons.Target className="w-4 h-4 text-indigo-500" />
                                 <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Active Bets</h3>
                             </div>
                             <button onClick={() => setShowBetModal(true)} className="text-[10px] text-indigo-400 font-bold uppercase hover:text-indigo-300">+ New</button>
                         </div>
+                        <p className="text-[10px] text-zinc-600 italic mb-4">Bets are your hypotheses. Tickets are the proof.</p>
+                        
                         <div className="space-y-3">
                             {channel.bets.map(bet => {
                                 const total = bet.tickets.length;
@@ -299,8 +323,7 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
                                 return (
                                     <div 
                                         key={bet.id} 
-                                        onClick={() => onNavigateToBet && onNavigateToBet(bet.id)}
-                                        className={`p-3 bg-zinc-900 border border-zinc-800 rounded-lg group hover:border-indigo-500/50 transition-all ${onNavigateToBet ? 'cursor-pointer' : ''}`}
+                                        className="p-3 bg-zinc-900 border border-zinc-800 rounded-lg"
                                     >
                                         <h4 className="text-sm font-bold text-zinc-200 mb-2 leading-snug">{bet.description}</h4>
                                         <div className="flex items-center gap-3">
@@ -336,7 +359,8 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
                      </div>
                      <button 
                         onClick={() => { setEditingTicket(null); setShowTicketModal(true); }}
-                        className="px-4 py-1.5 bg-white text-black text-xs font-bold rounded hover:bg-zinc-200 transition-colors flex items-center gap-2"
+                        disabled={!hasBets}
+                        className={`px-4 py-1.5 bg-white text-black text-xs font-bold rounded hover:bg-zinc-200 transition-colors flex items-center gap-2 ${!hasBets ? 'opacity-50 cursor-not-allowed' : ''}`}
                      >
                         <Icons.Plus className="w-3.5 h-3.5" />
                         Ticket
@@ -344,59 +368,65 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
                  </div>
 
                  <div className="flex-1 overflow-hidden relative">
-                     {activeTab === 'QUEUE' && (
-                         <div className="h-full overflow-y-auto custom-scrollbar p-6">
-                             <div className="space-y-2">
-                                 {allTickets.map(t => {
-                                     const assignee = users.find(u => u.id === t.assigneeId);
-                                     return (
-                                         <div 
-                                            key={t.id} 
-                                            onClick={() => handleTicketClick(t)}
-                                            className="flex items-center gap-4 p-3 bg-zinc-900/30 border border-zinc-800 rounded hover:bg-zinc-900 cursor-pointer group"
-                                         >
-                                             <div className={`shrink-0 w-2 h-2 rounded-full ${t.status === TicketStatus.Done ? 'bg-emerald-500' : t.status === TicketStatus.InProgress ? 'bg-amber-500' : 'bg-zinc-600'}`}></div>
-                                             <span className="text-xs font-mono text-zinc-500 w-16">{t.shortId}</span>
-                                             <span className="text-sm text-zinc-300 truncate flex-1 font-medium">{t.title}</span>
-                                             
-                                             <div className="flex items-center gap-6">
-                                                 <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${t.priority === 'Urgent' ? 'bg-red-500/10 text-red-500' : 'bg-zinc-800 text-zinc-500'}`}>{t.priority}</span>
-                                                 <span className="text-xs text-zinc-500 font-mono w-24 text-right">
-                                                    {t.dueDate ? new Date(t.dueDate).toLocaleDateString() : '--'}
-                                                 </span>
-                                                 <div className="w-6 flex justify-center">
-                                                     {assignee ? (
-                                                        <div className={`w-5 h-5 rounded-full ${assignee.color} text-[8px] text-white flex items-center justify-center font-bold`}>{assignee.initials}</div>
-                                                     ) : (
-                                                        <div className="w-5 h-5 rounded-full border border-zinc-700"></div>
-                                                     )}
-                                                 </div>
-                                             </div>
-                                         </div>
-                                     )
-                                 })}
-                                 {allTickets.length === 0 && <p className="text-center text-zinc-500 text-sm py-10">No tickets in queue.</p>}
-                             </div>
-                         </div>
-                     )}
+                     {!hasBets ? (
+                         <StrategyLockOverlay onCreateBet={() => setShowBetModal(true)} />
+                     ) : (
+                        <>
+                            {activeTab === 'QUEUE' && (
+                                <div className="h-full overflow-y-auto custom-scrollbar p-6">
+                                    <div className="space-y-2">
+                                        {allTickets.map(t => {
+                                            const assignee = users.find(u => u.id === t.assigneeId);
+                                            return (
+                                                <div 
+                                                    key={t.id} 
+                                                    onClick={() => handleTicketClick(t)}
+                                                    className="flex items-center gap-4 p-3 bg-zinc-900/30 border border-zinc-800 rounded hover:bg-zinc-900 cursor-pointer group"
+                                                >
+                                                    <div className={`shrink-0 w-2 h-2 rounded-full ${t.status === TicketStatus.Done ? 'bg-emerald-500' : t.status === TicketStatus.InProgress ? 'bg-amber-500' : 'bg-zinc-600'}`}></div>
+                                                    <span className="text-xs font-mono text-zinc-500 w-16">{t.shortId}</span>
+                                                    <span className="text-sm text-zinc-300 truncate flex-1 font-medium">{t.title}</span>
+                                                    
+                                                    <div className="flex items-center gap-6">
+                                                        <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${t.priority === 'Urgent' ? 'bg-red-500/10 text-red-500' : 'bg-zinc-800 text-zinc-500'}`}>{t.priority}</span>
+                                                        <span className="text-xs text-zinc-500 font-mono w-24 text-right">
+                                                            {t.dueDate ? new Date(t.dueDate).toLocaleDateString() : '--'}
+                                                        </span>
+                                                        <div className="w-6 flex justify-center">
+                                                            {assignee ? (
+                                                                <div className={`w-5 h-5 rounded-full ${assignee.color} text-[8px] text-white flex items-center justify-center font-bold`}>{assignee.initials}</div>
+                                                            ) : (
+                                                                <div className="w-5 h-5 rounded-full border border-zinc-700"></div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )
+                                        })}
+                                        {allTickets.length === 0 && <p className="text-center text-zinc-500 text-sm py-10">No tickets in queue.</p>}
+                                    </div>
+                                </div>
+                            )}
 
-                     {activeTab === 'KANBAN' && (
-                         <div className="h-full overflow-hidden p-6 bg-[#09090b]">
-                            <TicketBoard 
-                                tickets={allTickets}
-                                channels={campaign?.channels || []}
-                                users={users}
-                                onTicketClick={handleTicketClick}
-                                onStatusChange={handleStatusChange}
-                                groupByChannel={false} 
-                            />
-                         </div>
-                     )}
+                            {activeTab === 'KANBAN' && (
+                                <div className="h-full overflow-hidden p-6 bg-[#09090b]">
+                                    <TicketBoard 
+                                        tickets={allTickets}
+                                        channels={campaign?.channels || []}
+                                        users={users}
+                                        onTicketClick={handleTicketClick}
+                                        onStatusChange={handleStatusChange}
+                                        groupByChannel={false} 
+                                    />
+                                </div>
+                            )}
 
-                     {activeTab === 'GANTT' && (
-                         <div className="h-full overflow-hidden">
-                             <ChannelGantt bets={channel.bets} tickets={allTickets} />
-                         </div>
+                            {activeTab === 'GANTT' && (
+                                <div className="h-full overflow-hidden">
+                                    <ChannelGantt bets={channel.bets} tickets={allTickets} />
+                                </div>
+                            )}
+                        </>
                      )}
                  </div>
             </div>

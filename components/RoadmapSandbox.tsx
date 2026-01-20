@@ -880,6 +880,10 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
                                          onDragOver={(e) => e.preventDefault()}
                                          onDrop={(e) => handleDrop(e, channel.id, i)}
                                          onClick={() => {
+                                             if (bets.length === 0) {
+                                                 setActiveBetCreation(channel.id);
+                                                 return;
+                                             }
                                              const defaultBetId = bets.length > 0 ? bets[0].id : undefined;
                                              // If default bet has a project, inherit it
                                              const bet = bets.find(b => b.id === defaultBetId);
