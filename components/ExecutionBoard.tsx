@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo } from 'react';
 import { useStore, generateId } from '../store';
 import { TicketStatus, Bet, Ticket, Priority, Status, Channel, Project } from '../types';
@@ -8,11 +7,11 @@ import { ProjectDashboard } from './ProjectDashboard';
 import { ChannelDashboard } from './ChannelDashboard';
 
 const STATUS_CONFIG = {
-    [TicketStatus.Backlog]: { icon: Icons.Circle, color: 'text-zinc-500', bg: 'bg-zinc-500/10' },
-    [TicketStatus.Todo]: { icon: Icons.Circle, color: 'text-zinc-400', bg: 'bg-zinc-400/10' },
-    [TicketStatus.InProgress]: { icon: Icons.Clock, color: 'text-amber-500', bg: 'bg-amber-500/10' },
-    [TicketStatus.Done]: { icon: Icons.CheckCircle, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
-    [TicketStatus.Canceled]: { icon: Icons.XCircle, color: 'text-red-500', bg: 'bg-red-500/10' },
+    [TicketStatus.Backlog]: { icon: Icons.Circle, color: 'text-zinc-300', bg: 'bg-zinc-50' },
+    [TicketStatus.Todo]: { icon: Icons.Circle, color: 'text-zinc-400', bg: 'bg-zinc-50' },
+    [TicketStatus.InProgress]: { icon: Icons.Clock, color: 'text-amber-500', bg: 'bg-amber-50' },
+    [TicketStatus.Done]: { icon: Icons.CheckCircle, color: 'text-emerald-500', bg: 'bg-emerald-50' },
+    [TicketStatus.Canceled]: { icon: Icons.XCircle, color: 'text-red-400', bg: 'bg-red-50' },
 };
 
 type ViewState = 
@@ -29,19 +28,19 @@ const ProjectCreationModal: React.FC<{
   const [data, setData] = useState({ name: '', description: '', targetDate: '', priority: 'Medium' as Priority });
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/20 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="absolute inset-0" onClick={onClose}></div>
-      <div className="w-[500px] bg-[#09090b] border border-zinc-800 rounded-xl shadow-2xl relative z-10 overflow-hidden">
-        <div className="p-6 border-b border-zinc-800 bg-zinc-950">
-           <h3 className="text-lg font-bold text-white">Initialize New Project</h3>
+      <div className="w-[500px] bg-white border border-border rounded-xl shadow-2xl relative z-10 overflow-hidden">
+        <div className="p-6 border-b border-border bg-surface">
+           <h3 className="text-base font-semibold text-zinc-900">Initialize New Project</h3>
            <p className="text-xs text-zinc-500">Define a finite, high-stakes initiative.</p>
         </div>
         <div className="p-6 space-y-4">
             <div>
-                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1.5 block">Project Name</label>
+                <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5 block">Project Name</label>
                 <input 
                     autoFocus
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white focus:outline-none focus:border-indigo-500 placeholder-zinc-700"
+                    className="w-full bg-surface border border-zinc-200 rounded-lg p-3 text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-100 placeholder-zinc-400 transition-all"
                     placeholder="e.g. Q4 Rebrand"
                     value={data.name}
                     onChange={e => setData({...data, name: e.target.value})}
@@ -49,9 +48,9 @@ const ProjectCreationModal: React.FC<{
                 />
             </div>
              <div>
-                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1.5 block">Description</label>
+                <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5 block">Description</label>
                 <textarea 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white focus:outline-none focus:border-indigo-500 h-24 resize-none placeholder-zinc-700"
+                    className="w-full bg-surface border border-zinc-200 rounded-lg p-3 text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-100 h-24 resize-none placeholder-zinc-400"
                     placeholder="What is the goal?"
                     value={data.description}
                     onChange={e => setData({...data, description: e.target.value})}
@@ -59,18 +58,18 @@ const ProjectCreationModal: React.FC<{
             </div>
              <div className="grid grid-cols-2 gap-4">
                  <div>
-                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1.5 block">Target Date</label>
+                    <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5 block">Target Date</label>
                     <input 
                         type="date"
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white focus:outline-none focus:border-indigo-500"
+                        className="w-full bg-surface border border-zinc-200 rounded-lg p-3 text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-100"
                         value={data.targetDate}
                         onChange={e => setData({...data, targetDate: e.target.value})}
                     />
                  </div>
                  <div>
-                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1.5 block">Priority</label>
+                    <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5 block">Priority</label>
                     <select
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white focus:outline-none focus:border-indigo-500"
+                        className="w-full bg-surface border border-zinc-200 rounded-lg p-3 text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-100"
                         value={data.priority}
                         onChange={e => setData({...data, priority: e.target.value as Priority})}
                     >
@@ -79,12 +78,12 @@ const ProjectCreationModal: React.FC<{
                  </div>
              </div>
         </div>
-        <div className="p-4 border-t border-zinc-800 bg-zinc-900/30 flex justify-end gap-2">
-            <button onClick={onClose} className="px-4 py-2 text-xs text-zinc-400 hover:text-white">Cancel</button>
+        <div className="p-4 border-t border-border bg-surface flex justify-end gap-2">
+            <button onClick={onClose} className="px-4 py-2 text-xs font-medium text-zinc-500 hover:text-zinc-900">Cancel</button>
             <button 
                 disabled={!data.name}
                 onClick={() => onSave(data)}
-                className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg disabled:opacity-50 transition-colors shadow-lg shadow-indigo-500/20"
+                className="px-6 py-2 bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-semibold rounded-lg disabled:opacity-50 transition-colors shadow-sm"
             >
                 Create Project
             </button>
@@ -178,138 +177,107 @@ export const ExecutionBoard: React.FC = () => {
     <div className="h-full flex bg-background">
       
       {/* Sidebar */}
-      <div className="w-64 border-r border-border flex flex-col bg-[#121215]">
-        <div className="p-4 border-b border-border bg-zinc-900/50">
-          <h2 className="text-xs uppercase font-mono text-zinc-500 font-bold tracking-wider">Execution</h2>
-        </div>
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-6">
-           
-           {/* Section 1: Workspace */}
-           <div>
-               <div 
-                   onClick={() => setView({type: 'MY_ISSUES'})}
-                   className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-all ${view.type === 'MY_ISSUES' ? 'bg-indigo-500/10 text-indigo-200' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'}`}
-               >
-                   <Icons.Target className="w-4 h-4"/>
-                   <span className="text-xs font-bold">My Issues</span>
-               </div>
+      <div className="w-64 border-r border-border flex flex-col bg-surface">
+        <div className="p-4 pt-6">
+          <h2 className="text-xs uppercase font-bold text-zinc-400 tracking-wider mb-4 px-2">Workspace</h2>
+          <div 
+               onClick={() => setView({type: 'MY_ISSUES'})}
+               className={`flex items-center gap-2 px-3 py-1.5 rounded-md cursor-pointer transition-all mb-6 ${view.type === 'MY_ISSUES' ? 'bg-white shadow-sm text-zinc-900' : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900'}`}
+           >
+               <Icons.Target className="w-4 h-4"/>
+               <span className="text-sm font-medium">My Issues</span>
            </div>
 
            {/* Section 2: Active Projects */}
-           <div>
-                <div className="px-3 flex items-center justify-between mb-2">
-                    <h3 className="text-[10px] font-bold text-zinc-600 uppercase tracking-wider">Active Projects</h3>
-                    <button 
-                        onClick={() => setShowProjectModal(true)} 
-                        className="text-zinc-600 hover:text-white transition-colors" 
-                        title="Add Project"
-                    >
-                        <Icons.Plus className="w-3 h-3"/>
-                    </button>
-                </div>
-                <div className="space-y-1">
-                    {projects.map(p => {
-                         const isSelected = view.type === 'PROJECT' && view.id === p.id;
-                         const isExpanded = !collapsedItems[p.id];
-                         // Find bets associated with this project across all channels
-                         const projectBets = channels.flatMap(c => c.bets).filter(b => b.projectId === p.id);
+           <div className="flex items-center justify-between mb-2 px-2">
+                <h3 className="text-xs uppercase font-bold text-zinc-400 tracking-wider">Projects</h3>
+                <button 
+                    onClick={() => setShowProjectModal(true)} 
+                    className="text-zinc-400 hover:text-zinc-900 transition-colors" 
+                    title="Add Project"
+                >
+                    <Icons.Plus className="w-3 h-3"/>
+                </button>
+            </div>
+            <div className="space-y-0.5 mb-6">
+                {projects.map(p => {
+                     const isSelected = view.type === 'PROJECT' && view.id === p.id;
+                     const isExpanded = !collapsedItems[p.id];
+                     const projectBets = channels.flatMap(c => c.bets).filter(b => b.projectId === p.id);
 
-                         return (
-                            <div key={p.id}>
-                                <div 
-                                   onClick={() => setView({ type: 'PROJECT', id: p.id })}
-                                   className={`flex items-center group cursor-pointer rounded overflow-hidden ${isSelected ? 'bg-zinc-800' : ''}`}
+                     return (
+                        <div key={p.id}>
+                            <div 
+                               onClick={() => setView({ type: 'PROJECT', id: p.id })}
+                               className={`flex items-center group cursor-pointer px-2 py-1.5 rounded-md transition-all ${isSelected ? 'bg-white shadow-sm text-zinc-900' : 'text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100'}`}
+                            >
+                                <button 
+                                    onClick={(e) => { e.stopPropagation(); toggleCollapse(p.id); }}
+                                    className="p-1 mr-1 text-zinc-400 hover:text-zinc-900 transition-colors"
                                 >
-                                    <button 
-                                        onClick={(e) => { e.stopPropagation(); toggleCollapse(p.id); }}
-                                        className="p-2 text-zinc-600 hover:text-white transition-colors"
-                                    >
-                                        <Icons.ChevronDown className={`w-3.5 h-3.5 transform transition-transform ${!isExpanded ? '-rotate-90' : 'rotate-0'}`} />
-                                    </button>
-                                    <div className={`flex-1 flex items-center gap-2 py-1.5 pr-2 ${isSelected ? 'text-white' : 'text-zinc-400 hover:text-zinc-200'}`}>
-                                        <Icons.Target className="w-3.5 h-3.5 text-emerald-500"/>
-                                        <span className="text-xs font-bold truncate">{p.name}</span>
-                                    </div>
-                                </div>
-                                {isExpanded && (
-                                   <div className="pl-6 border-l border-zinc-800 ml-3 space-y-0.5 mt-1">
-                                       {projectBets.map(bet => (
-                                           <div 
-                                               key={bet.id}
-                                               // Clicking a Bet navigates to the Project context
-                                               onClick={() => setView({ type: 'PROJECT', id: p.id })}
-                                               className={`px-2 py-1 rounded cursor-pointer truncate transition-all text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800`}
-                                           >
-                                               <span className="text-[11px]">{bet.description}</span>
-                                           </div>
-                                       ))}
-                                       {projectBets.length === 0 && <div className="px-2 text-[10px] text-zinc-600 italic">No bets</div>}
-                                   </div>
-                               )}
+                                    <Icons.ChevronDown className={`w-3 h-3 transform transition-transform ${!isExpanded ? '-rotate-90' : 'rotate-0'}`} />
+                                </button>
+                                <span className="text-sm font-medium truncate">{p.name}</span>
                             </div>
-                        );
-                    })}
-                </div>
-           </div>
+                            {isExpanded && (
+                               <div className="pl-8 space-y-0.5 mt-0.5">
+                                   {projectBets.map(bet => (
+                                       <div 
+                                           key={bet.id}
+                                           onClick={() => setView({ type: 'PROJECT', id: p.id })}
+                                           className={`px-2 py-1 rounded cursor-pointer truncate transition-all text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100`}
+                                       >
+                                           <span className="text-[11px]">{bet.description}</span>
+                                       </div>
+                                   ))}
+                                   {projectBets.length === 0 && <div className="px-2 text-[10px] text-zinc-400 italic">No bets</div>}
+                               </div>
+                           )}
+                        </div>
+                    );
+                })}
+            </div>
 
            {/* Section 3: Departments (Channels) */}
-           <div>
-                <div className="px-3 flex items-center justify-between mb-2">
-                   <h3 className="text-[10px] font-bold text-zinc-600 uppercase tracking-wider">Departments</h3>
-                   <button onClick={handleAddChannel} className="text-zinc-600 hover:text-white" title="Add Channel"><Icons.Plus className="w-3 h-3"/></button>
-                </div>
-                <div className="space-y-1">
-                   {channels.map(channel => {
-                       const isExpanded = !collapsedItems[channel.id];
-                       const isSelected = view.type === 'CHANNEL' && view.id === channel.id;
-                       
-                       return (
-                           <div key={channel.id}>
-                               <div className="flex items-center group cursor-pointer" onClick={() => setView({ type: 'CHANNEL', id: channel.id })}>
-                                    <button 
-                                        onClick={(e) => { e.stopPropagation(); toggleCollapse(channel.id); }}
-                                        className="p-1 text-zinc-600 hover:text-white transition-colors"
-                                    >
-                                        <Icons.ChevronDown className={`w-3.5 h-3.5 transform transition-transform ${!isExpanded ? '-rotate-90' : 'rotate-0'}`} />
-                                    </button>
-                                    <div 
-                                        className={`flex-1 flex items-center gap-2 px-2 py-1.5 rounded select-none overflow-hidden ${isSelected ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}
-                                    >
-                                        <Icons.Zap className="w-3.5 h-3.5 text-indigo-500 shrink-0"/>
-                                        <div className="flex-1 flex items-center justify-between min-w-0">
-                                            <span className="text-xs font-bold truncate">{channel.name}</span>
-                                            {/* Tag Dots */}
-                                            <div className="flex -space-x-1 shrink-0 ml-1">
-                                                {channel.tags?.includes('Inbound') && (
-                                                    <div className="w-2 h-2 rounded-full bg-cyan-500 ring-1 ring-[#121215]"></div>
-                                                )}
-                                                {channel.tags?.includes('Outbound') && (
-                                                    <div className="w-2 h-2 rounded-full bg-orange-500 ring-1 ring-[#121215]"></div>
-                                                )}
-                                            </div>
-                                        </div>
-                                    </div>
-                               </div>
-                               {isExpanded && (
-                                   <div className="pl-6 border-l border-zinc-800 ml-3 space-y-0.5 mt-1">
-                                       {channel.bets.map(bet => (
-                                           <div 
-                                               key={bet.id}
-                                               // Clicking a Bet navigates to the Channel context
-                                               onClick={() => setView({ type: 'CHANNEL', id: channel.id })}
-                                               className={`px-2 py-1 rounded cursor-pointer truncate transition-all text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800`}
-                                           >
-                                               <span className="text-[11px]">{bet.description}</span>
-                                           </div>
-                                       ))}
-                                   </div>
-                               )}
+            <div className="flex items-center justify-between mb-2 px-2">
+               <h3 className="text-xs uppercase font-bold text-zinc-400 tracking-wider">Teams</h3>
+               <button onClick={handleAddChannel} className="text-zinc-400 hover:text-zinc-900" title="Add Channel"><Icons.Plus className="w-3 h-3"/></button>
+            </div>
+            <div className="space-y-0.5">
+               {channels.map(channel => {
+                   const isExpanded = !collapsedItems[channel.id];
+                   const isSelected = view.type === 'CHANNEL' && view.id === channel.id;
+                   
+                   return (
+                       <div key={channel.id}>
+                           <div className={`flex items-center group cursor-pointer px-2 py-1.5 rounded-md transition-all ${isSelected ? 'bg-white shadow-sm text-zinc-900' : 'text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100'}`} onClick={() => setView({ type: 'CHANNEL', id: channel.id })}>
+                                <button 
+                                    onClick={(e) => { e.stopPropagation(); toggleCollapse(channel.id); }}
+                                    className="p-1 mr-1 text-zinc-400 hover:text-zinc-900 transition-colors"
+                                >
+                                    <Icons.ChevronDown className={`w-3 h-3 transform transition-transform ${!isExpanded ? '-rotate-90' : 'rotate-0'}`} />
+                                </button>
+                                <div className="flex-1 flex items-center justify-between min-w-0">
+                                    <span className="text-sm font-medium truncate">{channel.name}</span>
+                                </div>
                            </div>
-                       );
-                   })}
-                </div>
-           </div>
-
+                           {isExpanded && (
+                               <div className="pl-8 space-y-0.5 mt-0.5">
+                                   {channel.bets.map(bet => (
+                                       <div 
+                                           key={bet.id}
+                                           onClick={() => setView({ type: 'CHANNEL', id: channel.id })}
+                                           className={`px-2 py-1 rounded cursor-pointer truncate transition-all text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100`}
+                                       >
+                                           <span className="text-[11px]">{bet.description}</span>
+                                       </div>
+                                   ))}
+                               </div>
+                           )}
+                       </div>
+                   );
+               })}
+            </div>
         </div>
       </div>
 
@@ -320,7 +288,6 @@ export const ExecutionBoard: React.FC = () => {
           {view.type === 'PROJECT' && (
               <ProjectDashboard 
                   projectId={view.id} 
-                  // Navigating to a bet inside a project simply keeps you in project context or highlights
                   onNavigateToBet={(betId) => console.log('Focus bet', betId)}
                   onDelete={() => handleDeleteProject(view.id)}
               />
@@ -338,33 +305,31 @@ export const ExecutionBoard: React.FC = () => {
           {/* VIEW: MY ISSUES */}
           {view.type === 'MY_ISSUES' && (
             <>
-                {/* Toolbar */}
-                <div className="h-14 border-b border-border flex items-center justify-between px-6 bg-surface/50 backdrop-blur shrink-0">
-                    <div className="flex items-center gap-3">
-                         <span className="text-sm font-bold text-white">My Issues</span>
-                    </div>
+                {/* Minimal Header */}
+                <div className="h-14 flex items-center justify-between px-8 bg-background shrink-0">
+                    <span className="text-sm font-semibold text-zinc-900">My Issues</span>
                 </div>
 
                 {/* Canvas */}
-                <div className="flex-1 overflow-hidden bg-background">
+                <div className="flex-1 overflow-hidden bg-background px-4">
                     {displayTickets.length === 0 ? (
-                        <div className="h-full flex flex-col items-center justify-center text-zinc-600">
-                            <Icons.CheckCircle className="w-12 h-12 mb-4 opacity-20"/>
+                        <div className="h-full flex flex-col items-center justify-center text-zinc-400">
+                            <Icons.CheckCircle className="w-10 h-10 mb-4 opacity-10"/>
                             <p className="text-sm">No tickets found.</p>
                         </div>
                     ) : (
-                        <div className="h-full overflow-y-auto custom-scrollbar">
-                            <table className="w-full text-left border-collapse">
-                                <thead className="bg-surface sticky top-0 z-10 border-b border-border">
+                        <div className="h-full overflow-y-auto custom-scrollbar pb-10">
+                            <table className="w-full text-left border-separate border-spacing-y-1">
+                                <thead className="text-[10px] uppercase font-semibold text-zinc-400">
                                     <tr>
-                                        <th className="px-6 py-3 text-[10px] font-bold uppercase text-zinc-500 w-24">ID</th>
-                                        <th className="px-6 py-3 text-[10px] font-bold uppercase text-zinc-500">Title</th>
-                                        <th className="px-6 py-3 text-[10px] font-bold uppercase text-zinc-500 w-32">Status</th>
-                                        <th className="px-6 py-3 text-[10px] font-bold uppercase text-zinc-500 w-24">Priority</th>
-                                        <th className="px-6 py-3 text-[10px] font-bold uppercase text-zinc-500 w-24">Assignee</th>
+                                        <th className="px-4 py-2 w-20">ID</th>
+                                        <th className="px-4 py-2">Title</th>
+                                        <th className="px-4 py-2 w-32">Status</th>
+                                        <th className="px-4 py-2 w-24">Priority</th>
+                                        <th className="px-4 py-2 w-16"></th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-zinc-900">
+                                <tbody>
                                     {displayTickets.map(ticket => {
                                         const StatusIcon = STATUS_CONFIG[ticket.status].icon;
                                         const PriorityConfig = PRIORITIES.find(p => p.value === ticket.priority) || PRIORITIES[4];
@@ -373,27 +338,31 @@ export const ExecutionBoard: React.FC = () => {
                                         return (
                                             <tr 
                                                 key={ticket.id} 
-                                                className="hover:bg-zinc-900/50 cursor-pointer group transition-colors"
+                                                onClick={() => {
+                                                    // In a real app, this would open ticket modal
+                                                }}
+                                                className="group cursor-pointer hover:bg-surface transition-colors rounded-lg"
                                             >
-                                                <td className="px-6 py-3 text-xs font-mono text-zinc-500">{ticket.shortId}</td>
-                                                <td className="px-6 py-3 text-sm text-zinc-200 font-medium">
+                                                <td className="px-4 py-3 text-xs font-mono text-zinc-400 rounded-l-lg">{ticket.shortId}</td>
+                                                <td className="px-4 py-3 text-sm text-zinc-800 font-medium">
                                                     {ticket.title}
+                                                    {ticket.betTitle && <div className="text-[10px] text-zinc-400 mt-0.5">{ticket.betTitle}</div>}
                                                 </td>
-                                                <td className="px-6 py-3">
+                                                <td className="px-4 py-3">
                                                     <div className="flex items-center gap-2">
                                                         <StatusIcon className={`w-3.5 h-3.5 ${STATUS_CONFIG[ticket.status].color}`} />
-                                                        <span className="text-xs text-zinc-400">{ticket.status}</span>
+                                                        <span className="text-xs text-zinc-500">{ticket.status}</span>
                                                     </div>
                                                 </td>
-                                                <td className="px-6 py-3">
+                                                <td className="px-4 py-3">
                                                     <div className="flex items-center gap-1.5">
                                                         <Icons.Flag className={`w-3 h-3 ${PriorityConfig.color}`} />
                                                         <span className={`text-xs ${PriorityConfig.color}`}>{ticket.priority !== 'None' ? ticket.priority : ''}</span>
                                                     </div>
                                                 </td>
-                                                <td className="px-6 py-3">
+                                                <td className="px-4 py-3 rounded-r-lg text-right">
                                                     {assignee && (
-                                                        <div className={`w-5 h-5 rounded-full ${assignee.color} text-[8px] text-white flex items-center justify-center font-bold`}>
+                                                        <div className={`w-5 h-5 rounded-full ${assignee.color} text-[8px] text-white flex items-center justify-center font-bold inline-block`}>
                                                             {assignee.initials}
                                                         </div>
                                                     )}

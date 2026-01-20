@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -7,24 +7,30 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
-        darkMode: 'class',
         theme: {
           extend: {
             colors: {
-              background: '#09090b', // zinc-950
-              surface: '#18181b', // zinc-900
-              border: '#27272a', // zinc-800
-              primary: '#f4f4f5', // zinc-100
-              secondary: '#a1a1aa', // zinc-400
-              accent: '#3b82f6', // blue-500
-              success: '#10b981', // emerald-500
-              warning: '#f59e0b', // amber-500
-              danger: '#ef4444', // red-500
+              background: '#ffffff', // White
+              surface: '#fafafa', // Zinc-50
+              surfaceHighlight: '#f4f4f5', // Zinc-100
+              border: '#f4f4f5', // Zinc-100 (Softer than previous #e4e4e7)
+              primary: '#27272a', // Zinc-800 (Softer than #18181b)
+              secondary: '#71717a', // Zinc-500
+              accent: '#4f46e5', // Indigo-600
+              success: '#10b981', // Emerald-500
+              warning: '#f59e0b', // Amber-500
+              danger: '#ef4444', // Red-500
             },
             fontFamily: {
               sans: ['Inter', 'sans-serif'],
               mono: ['JetBrains Mono', 'monospace'],
             },
+            boxShadow: {
+                'sm': '0 1px 2px 0 rgb(0 0 0 / 0.02)', // Softer shadow
+                'md': '0 4px 6px -1px rgb(0 0 0 / 0.03), 0 2px 4px -2px rgb(0 0 0 / 0.02)',
+                'lg': '0 10px 15px -3px rgb(0 0 0 / 0.03), 0 4px 6px -4px rgb(0 0 0 / 0.02)',
+                'xl': '0 20px 25px -5px rgb(0 0 0 / 0.03), 0 8px 10px -6px rgb(0 0 0 / 0.01)',
+            }
           },
         },
       };
@@ -32,24 +38,30 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
       body {
-        background-color: #09090b;
-        color: #f4f4f5;
+        background-color: #ffffff;
+        color: #27272a;
         font-family: 'Inter', sans-serif;
+        -webkit-font-smoothing: antialiased;
       }
-      /* Custom scrollbar for a cleaner feel */
+      /* Custom scrollbar for a cleaner feel - Light Mode */
       ::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
+        width: 6px;
+        height: 6px;
       }
       ::-webkit-scrollbar-track {
-        background: #18181b;
+        background: transparent;
       }
       ::-webkit-scrollbar-thumb {
-        background: #3f3f46;
-        border-radius: 4px;
+        background: #e4e4e7; /* Zinc-200 */
+        border-radius: 3px;
       }
       ::-webkit-scrollbar-thumb:hover {
-        background: #52525b;
+        background: #d4d4d8; /* Zinc-300 */
+      }
+      
+      .custom-scrollbar::-webkit-scrollbar {
+        width: 4px;
+        height: 4px;
       }
     </style>
   <script type="importmap">
