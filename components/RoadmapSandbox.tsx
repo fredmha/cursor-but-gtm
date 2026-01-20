@@ -13,6 +13,11 @@ interface RoadmapSandboxProps {
 
 const WEEK_WIDTH = 200;
 const LEFT_PANEL_WIDTH = 340; 
+const ITEM_HEIGHT = 34; // Compact height for stacking
+const ITEM_GAP = 4;
+const ROW_PADDING_TOP = 12;
+const ROW_PADDING_BOTTOM = 12;
+const MIN_ROW_HEIGHT = 160;
 
 const CONTEXT_COLORS = [
     { label: 'Pink', value: 'bg-pink-500' },
@@ -23,6 +28,73 @@ const CONTEXT_COLORS = [
     { label: 'Amber', value: 'bg-amber-500' },
     { label: 'Zinc', value: 'bg-zinc-500' },
 ];
+
+// --- LAYOUT ENGINE ---
+
+interface LayoutItem extends RoadmapItem {
+  _layout: {
+    top: number;
+    height: number;
+  };
+}
+
+const calculateLaneLayout = (items: RoadmapItem[]): { layoutItems: LayoutItem[], rowHeight: number } => {
+  // 1. Sort: Earlier start first, then longer duration, then ID
+  const sorted = [...items].sort((a, b) => {
+    if (a.weekIndex !== b.weekIndex) return a.weekIndex - b.weekIndex;
+    if (a.durationWeeks !== b.durationWeeks) return b.durationWeeks - a.durationWeeks; // Longest first
+    return a.id.localeCompare(b.id);
+  });
+
+  const layoutItems: LayoutItem[] = [];
+  const slots: LayoutItem[][] = []; // slots[y] = array of items in that vertical slot
+
+  sorted.forEach(item => {
+    let placed = false;
+    let slotIndex = 0;
+
+    const itemStart = item.weekIndex;
+    const itemEnd = item.weekIndex + (item.durationWeeks || 1);
+
+    while (!placed) {
+      if (!slots[slotIndex]) {
+        slots[slotIndex] = [];
+      }
+
+      // Check collision in this slot
+      const hasCollision = slots[slotIndex].some(existing => {
+        const existingStart = existing.weekIndex;
+        const existingEnd = existing.weekIndex + (existing.durationWeeks || 1);
+        // Collision if intervals overlap: startA < endB && endA > startB
+        return itemStart < existingEnd && itemEnd > existingStart;
+      });
+
+      if (!hasCollision) {
+        // Place here
+        const layoutItem: LayoutItem = {
+          ...item,
+          _layout: {
+            top: ROW_PADDING_TOP + slotIndex * (ITEM_HEIGHT + ITEM_GAP),
+            height: ITEM_HEIGHT
+          }
+        };
+        slots[slotIndex].push(layoutItem);
+        layoutItems.push(layoutItem);
+        placed = true;
+      } else {
+        slotIndex++;
+      }
+    }
+  });
+
+  const maxSlot = slots.length;
+  // Calculate total height needed
+  const contentHeight = ROW_PADDING_TOP + (maxSlot * (ITEM_HEIGHT + ITEM_GAP)) + ROW_PADDING_BOTTOM;
+  const rowHeight = Math.max(MIN_ROW_HEIGHT, contentHeight);
+
+  return { layoutItems, rowHeight };
+};
+
 
 // --- COMPONENTS ---
 
@@ -187,8 +259,7 @@ const NorthStarHeader: React.FC<{
   </header>
 );
 
-// --- MODALS (Reused) ---
-// Note: In a real refactor, these should be separate files. Keeping here for scope.
+// --- MODALS ---
 
 const WeekContextModal: React.FC<{
   weekIndex: number;
@@ -607,7 +678,7 @@ const TicketModal: React.FC<{
 };
 
 const RoadmapCard: React.FC<{
-    item: RoadmapItem;
+    item: LayoutItem;
     users: User[];
     projects: any[];
     isDragging: boolean;
@@ -616,6 +687,9 @@ const RoadmapCard: React.FC<{
 }> = ({ item, users, projects, isDragging, onDragStart, onClick }) => {
     const left = item.weekIndex * WEEK_WIDTH;
     const width = (item.durationWeeks || 1) * WEEK_WIDTH;
+    const top = item._layout?.top ?? 8;
+    const height = item._layout?.height ?? ITEM_HEIGHT;
+    
     const priority = PRIORITIES.find(p => p.value === item.priority);
     const linkedProject = projects.find(p => p.id === item.projectId);
 
@@ -625,36 +699,33 @@ const RoadmapCard: React.FC<{
             draggable
             onDragStart={(e) => onDragStart(e, item.id)}
             onClick={(e) => { e.stopPropagation(); onClick(); }}
-            className={`absolute top-2 bottom-2 rounded-md bg-zinc-800 border border-zinc-700/50 hover:border-zinc-500 hover:bg-zinc-700 hover:shadow-xl transition-all cursor-move flex flex-col justify-center px-3 shadow-md z-20 group ${isDragging ? 'opacity-50 ring-2 ring-indigo-500 scale-95' : ''}`}
-            style={{ left: left + 4, width: width - 8 }}
+            className={`absolute rounded-md bg-zinc-800 border border-zinc-700/50 hover:border-zinc-500 hover:bg-zinc-700 hover:shadow-xl transition-all cursor-move flex items-center px-2 shadow-md z-20 group overflow-hidden ${isDragging ? 'opacity-50 ring-2 ring-indigo-500 scale-95' : ''}`}
+            style={{ left: left + 4, width: width - 8, top, height }}
         >
             <div className={`absolute left-0 top-0 bottom-0 w-1 rounded-l-md ${item.type === 'NOTE' ? 'bg-pink-500' : 'bg-indigo-500'}`}></div>
-            <div className="pl-2">
-                <div className="flex items-center gap-2 mb-1.5">
-                    <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider leading-none truncate flex-1">{item.linkedBetId ? 'TICKET' : 'NOTE'}</span>
+            <div className="flex items-center gap-2 w-full overflow-hidden pl-2">
+                 <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider shrink-0">{item.linkedBetId ? 'TICKET' : 'NOTE'}</span>
+                 <span className="text-xs font-semibold text-zinc-200 truncate flex-1">{item.title}</span>
+                 
+                 {/* Metadata Row (Inline) */}
+                 <div className="flex items-center gap-2 shrink-0">
                     {linkedProject && (
-                        <div className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 text-[8px] font-bold uppercase tracking-wide border border-emerald-500/20 truncate max-w-[80px]">
-                            {linkedProject.name}
+                        <div className="w-2 h-2 rounded-full bg-emerald-500" title={linkedProject.name}></div>
+                    )}
+                    {(item.ownerIds && item.ownerIds.length > 0) && (
+                        <div className="flex -space-x-1">
+                            {item.ownerIds.slice(0, 2).map(uid => {
+                                const u = users.find(user => user.id === uid);
+                                if (!u) return null;
+                                return (
+                                    <div key={uid} className={`w-4 h-4 rounded-full ${u.color} border border-zinc-800 flex items-center justify-center text-[6px] text-white ring-1 ring-[#09090b]`}>
+                                        {u.initials}
+                                    </div>
+                                )
+                            })}
                         </div>
                     )}
-                    {item.priority && item.priority !== 'None' && (
-                        <Icons.Flag className={`w-3 h-3 ${priority?.color}`} />
-                    )}
-                </div>
-                <span className="text-xs font-semibold text-zinc-200 truncate block leading-tight">{item.title}</span>
-                {(item.ownerIds && item.ownerIds.length > 0) && (
-                    <div className="flex -space-x-1.5 mt-2">
-                        {item.ownerIds.slice(0, 3).map(uid => {
-                            const u = users.find(user => user.id === uid);
-                            if (!u) return null;
-                            return (
-                                <div key={uid} className={`w-4 h-4 rounded-full ${u.color} border border-zinc-800 flex items-center justify-center text-[6px] text-white ring-1 ring-[#09090b]`}>
-                                    {u.initials}
-                                </div>
-                            )
-                        })}
-                    </div>
-                )}
+                 </div>
             </div>
         </div>
     );
@@ -889,12 +960,15 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
                      // Filter items for this channel
                      const laneItems = (campaign?.roadmapItems || []).filter(i => i.channelId === channel.id);
                      const bets = channel.bets.filter(b => b.status !== Status.Killed);
+                     
+                     // Calculate Vertical Layout
+                     const { layoutItems, rowHeight } = calculateLaneLayout(laneItems);
 
                      return (
-                         <div key={channel.id} className="flex min-h-[160px] border-b border-white/5 relative bg-[#09090b] group/lane">
+                         <div key={channel.id} className="flex border-b border-white/5 relative bg-[#09090b] group/lane" style={{ height: rowHeight }}>
                              
                              {/* LEFT SIDEBAR (Controls) */}
-                             <div className="shrink-0 border-r border-white/5 bg-zinc-900/10 p-4 flex flex-col" style={{ width: LEFT_PANEL_WIDTH }}>
+                             <div className="shrink-0 border-r border-white/5 bg-zinc-900/10 p-4 flex flex-col" style={{ width: LEFT_PANEL_WIDTH, minHeight: rowHeight }}>
                                  
                                 <div 
                                     className="flex flex-col mb-3 group/header cursor-pointer hover:bg-white/5 p-2 -m-2 rounded transition-colors"
@@ -1004,7 +1078,7 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
                                  ))}
 
                                  {/* Render Items */}
-                                 {laneItems.map(item => (
+                                 {layoutItems.map(item => (
                                      <RoadmapCard 
                                          key={item.id} 
                                          item={item} 
