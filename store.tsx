@@ -1,6 +1,7 @@
 
+
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { Campaign, Channel, Bet, Ticket, TicketStatus, Status, User, Priority, RoadmapItem, Project, ProjectUpdate, ChannelLink, ChannelNote, TimelineTag } from './types';
+import { Campaign, Channel, Bet, Ticket, TicketStatus, Status, User, Priority, RoadmapItem, Project, ProjectUpdate, ChannelLink, ChannelNote, TimelineTag, ChannelPlan, ContextDoc } from './types';
 
 // Safe ID Generator for environments without secure context
 export const generateId = () => {
@@ -33,6 +34,8 @@ interface StoreState {
   addChannel: (channel: Channel) => void;
   updateChannel: (channelId: string, updates: Partial<Channel>) => void;
   deleteChannel: (channelId: string) => void;
+  updateChannelPlan: (channelId: string, plan: ChannelPlan) => void;
+  
   addChannelPrinciple: (channelId: string, text: string) => void;
   deleteChannelPrinciple: (channelId: string, principleId: string) => void;
   addChannelLink: (channelId: string, link: ChannelLink) => void;
@@ -69,6 +72,11 @@ interface StoreState {
   addTimelineTag: (tag: TimelineTag) => void;
   deleteTimelineTag: (tagId: string) => void;
 
+  // Doc Actions
+  addDoc: (doc: ContextDoc) => void;
+  updateDoc: (docId: string, updates: Partial<ContextDoc>) => void;
+  deleteDoc: (docId: string) => void;
+
   importAIPlan: (channelsData: any[]) => void;
   switchUser: (userId: string) => void;
   reset: () => void;
@@ -95,7 +103,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             tags: c.tags || [],
             links: c.links || [],
             notes: c.notes || [],
-            memberIds: c.memberIds || []
+            memberIds: c.memberIds || [],
+            plan: c.plan || undefined
         }));
     }
 
@@ -112,6 +121,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     if (!data.timelineTags) {
         data.timelineTags = [];
+    }
+
+    if (!data.docs) {
+        data.docs = [];
     }
 
     return data;
@@ -152,6 +165,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setCampaignState(prev => prev ? ({
       ...prev,
       channels: prev.channels.map(c => c.id === channelId ? { ...c, ...updates } : c)
+    }) : null);
+  };
+
+  const updateChannelPlan = (channelId: string, plan: ChannelPlan) => {
+    if (!campaign) return;
+    setCampaignState(prev => prev ? ({
+      ...prev,
+      channels: prev.channels.map(c => c.id === channelId ? { ...c, plan } : c)
     }) : null);
   };
 
@@ -288,11 +309,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }) : null);
   };
 
-  // NEW: Project Ticket Logic
   const addProjectTicket = (projectId: string, ticket: Ticket) => {
     if (!campaign) return;
     
-    // Auto-create roadmap item if needed
     let newRoadmapItems = [...(campaign.roadmapItems || [])];
     const finalTicket = { ...ticket, projectId };
 
@@ -302,7 +321,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         
         const newItem: RoadmapItem = {
             id: newItemId,
-            channelId: undefined, // IMPORTANT: No channel means "Strategy Horizon"
+            channelId: undefined, 
             weekIndex: 0, 
             durationWeeks: 1,
             title: ticket.title,
@@ -531,9 +550,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (!campaign) return;
     let newItem = { ...item };
     
-    // SYNC: Create Ticket if linked to Bet and doesn't have a ticketId
     if (newItem.linkedBetId && !newItem.ticketId) {
-        // Find the bet to get context
         const bet = campaign.channels.flatMap(c => c.bets).find(b => b.id === newItem.linkedBetId);
         if (bet) {
              const ticketId = generateId();
@@ -554,7 +571,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
              
              newItem.ticketId = ticketId;
              
-             // Update store with both new item and new ticket
              setCampaignState(prev => {
                  if (!prev) return null;
                  const newChannels = prev.channels.map(c => 
@@ -572,7 +588,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
              return;
         }
     } else if (newItem.projectId && !newItem.channelId && !newItem.ticketId) {
-        // PROJECT ONLY TICKET
         const ticketId = generateId();
         const ticket: Ticket = {
             id: ticketId,
@@ -614,8 +629,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const moveRoadmapItem = (itemId: string, newChannelId: string, newWeekIndex: number) => {
-    // Note: If item is Project-Only (no channelId), moving it to a channel might require data migration (creating Bet link).
-    // For now, assume we just update properties.
     updateRoadmapItem(itemId, { channelId: newChannelId, weekIndex: newWeekIndex });
   };
 
@@ -663,6 +676,30 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setCampaignState(prev => prev ? ({
         ...prev,
         timelineTags: (prev.timelineTags || []).filter(t => t.id !== tagId)
+    }) : null);
+  };
+
+  const addDoc = (doc: ContextDoc) => {
+    if (!campaign) return;
+    setCampaignState(prev => prev ? ({
+        ...prev,
+        docs: [...(prev.docs || []), doc]
+    }) : null);
+  };
+
+  const updateDoc = (docId: string, updates: Partial<ContextDoc>) => {
+    if (!campaign) return;
+    setCampaignState(prev => prev ? ({
+        ...prev,
+        docs: (prev.docs || []).map(d => d.id === docId ? { ...d, ...updates } : d)
+    }) : null);
+  };
+
+  const deleteDoc = (docId: string) => {
+    if (!campaign) return;
+    setCampaignState(prev => prev ? ({
+        ...prev,
+        docs: (prev.docs || []).filter(d => d.id !== docId)
     }) : null);
   };
 
@@ -719,6 +756,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       addChannel,
       updateChannel,
       deleteChannel,
+      updateChannelPlan,
       addChannelPrinciple,
       deleteChannelPrinciple,
       addChannelLink,
@@ -745,6 +783,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       moveRoadmapItem,
       addTimelineTag,
       deleteTimelineTag,
+      addDoc,
+      updateDoc,
+      deleteDoc,
       importAIPlan,
       switchUser,
       reset

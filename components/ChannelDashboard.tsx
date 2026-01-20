@@ -1,5 +1,6 @@
 
-import React, { useState, useMemo } from 'react';
+
+import React, { useState, useMemo, useEffect } from 'react';
 import { useStore, generateId } from '../store';
 import { Icons } from '../constants';
 import { Status, TicketStatus, Bet, Ticket } from '../types';
@@ -7,6 +8,7 @@ import { TicketBoard } from './TicketBoard';
 import { TicketModal } from './TicketModal';
 import { BetCreationModal } from './BetCreationModal';
 import { ChannelGantt } from './ChannelGantt';
+import { ChannelPlanModal } from './lab/ChannelPlanModal';
 
 interface ChannelDashboardProps {
   channelId: string;
@@ -51,7 +53,7 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
       addChannelMember, removeChannelMember
   } = useStore();
   
-  const [activeTab, setActiveTab] = useState<'QUEUE' | 'KANBAN' | 'GANTT'>('QUEUE');
+  const [activeTab, setActiveTab] = useState<'QUEUE' | 'KANBAN' | 'GANTT' | 'STRATEGY'>('QUEUE');
   const [showBetModal, setShowBetModal] = useState(false);
   const [showTicketModal, setShowTicketModal] = useState(false);
   const [editingTicket, setEditingTicket] = useState<Ticket | null>(null);
@@ -61,6 +63,19 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
   const [newNote, setNewNote] = useState('');
   const [isAddingLink, setIsAddingLink] = useState(false);
   const [newLinkData, setNewLinkData] = useState({ title: '', url: '' });
+
+  // LAB MODE CHECK
+  const [isLabMode, setIsLabMode] = useState(false);
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('lab') === 'true') {
+            setIsLabMode(true);
+            // Default to Strategy tab if in Lab Mode and no bets exist yet?
+            // Let's stick to default QUEUE but allow user to click STRATEGY.
+        }
+    }
+  }, []);
 
   const channel = campaign?.channels.find(c => c.id === channelId);
   const projects = campaign?.projects || [];
@@ -178,6 +193,24 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
       }
       setShowTicketModal(false);
   };
+
+  // IF STRATEGY TAB ACTIVE (LAB MODE): Render Plan Modal inline
+  if (activeTab === 'STRATEGY') {
+      return (
+          <div className="h-full bg-[#09090b] relative flex flex-col">
+              {/* Custom Close Button for the 'Modal-in-Modal' feel if needed, but here we just reuse the container */}
+              <div className="absolute top-4 right-4 z-50">
+                   <button 
+                        onClick={() => setActiveTab('QUEUE')} 
+                        className="bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white px-3 py-1.5 rounded text-xs font-bold"
+                    >
+                        Close Lab
+                   </button>
+              </div>
+              <ChannelPlanModal channelId={channelId} onClose={() => {}} />
+          </div>
+      );
+  }
 
   return (
     <div className={`flex flex-col bg-[#09090b] h-full ${isModal ? 'rounded-xl overflow-hidden' : ''}`}>
@@ -364,6 +397,14 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
                                  {tab}
                              </button>
                          ))}
+                         {isLabMode && (
+                             <button
+                                onClick={() => setActiveTab('STRATEGY')}
+                                className="text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded transition-all flex items-center gap-1 text-zinc-500 hover:text-purple-400 border border-transparent"
+                             >
+                                 <Icons.Layout className="w-3 h-3" /> Strategy Plan
+                             </button>
+                         )}
                      </div>
                      <button 
                         onClick={() => { setEditingTicket(null); setShowTicketModal(true); }}

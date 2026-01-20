@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { useStore } from '../store';
 import { generateChannelsAndBets } from '../services/geminiService';
@@ -67,7 +66,8 @@ export const useOnboarding = () => {
       principles: formData.principles,
       projects: campaign?.projects || [],
       roadmapItems: campaign?.roadmapItems || [],
-      timelineTags: campaign?.timelineTags || []
+      timelineTags: campaign?.timelineTags || [],
+      docs: campaign?.docs || []
     };
     if (campaign) {
       updateCampaign(c);

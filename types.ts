@@ -97,11 +97,24 @@ export interface ChannelNote {
   text: string;
 }
 
+// NEW: Lab Mode Plan Structure
+export interface ChannelPlan {
+  id: string;
+  contextDump?: string; // Legacy/Fallback
+  audience: string;
+  offer: string;
+  mechanics: string;
+  lastGeneratedAt?: string;
+}
+
 export type ChannelTag = 'Inbound' | 'Outbound';
+
+export type ChannelType = '' | 'PROJECT';
 
 export interface Channel {
   id: string;
   name: string;
+  type?: ChannelType;
   campaignId: string;
   bets: Bet[];
   principles: ChannelPrinciple[];
@@ -109,6 +122,7 @@ export interface Channel {
   links?: ChannelLink[]; // SOPs, Docs
   notes?: ChannelNote[]; // Team remarks
   memberIds?: string[]; // Team members assigned to this channel
+  plan?: ChannelPlan; // OPTIONAL: Lab Mode Plan
 }
 
 export interface OperatingPrinciple {
@@ -156,6 +170,18 @@ export interface TimelineTag {
   color: string;
 }
 
+// --- KNOWLEDGE BASE (DOCS) ---
+export type DocType = 'STRATEGY' | 'PERSONA' | 'BRAND' | 'PROCESS';
+
+export interface ContextDoc {
+  id: string;
+  title: string;
+  content: string; // Markdown supported
+  type: DocType;
+  lastUpdated: string;
+  isAiGenerated: boolean;
+}
+
 export interface Campaign {
   id: string;
   name: string;
@@ -168,6 +194,7 @@ export interface Campaign {
   principles: OperatingPrinciple[];
   roadmapItems: RoadmapItem[];
   timelineTags: TimelineTag[];
+  docs: ContextDoc[];
 }
 
-export type ViewMode = 'ONBOARDING' | 'ROADMAP' | 'EXECUTION' | 'REVIEW';
+export type ViewMode = 'ONBOARDING' | 'ROADMAP' | 'EXECUTION' | 'REVIEW' | 'DOCS';

@@ -1,4 +1,5 @@
 
+
 import React from 'react';
 import { useOnboarding } from '../hooks/useOnboarding';
 import { PrinciplesCanvas } from './PrinciplesCanvas';
@@ -7,7 +8,11 @@ import { ChannelSetupModal } from './ChannelSetupModal';
 import { Icons } from '../constants';
 import { useStore } from '../store';
 
-export const OnboardingWizard: React.FC = () => {
+interface OnboardingWizardProps {
+  onEnableLabMode: () => void;
+}
+
+export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onEnableLabMode }) => {
   const { state, actions } = useOnboarding();
   const { currentUser } = useStore();
 
@@ -174,6 +179,17 @@ export const OnboardingWizard: React.FC = () => {
                       />
                       <Icons.Target className="absolute bottom-4 right-4 w-5 h-5 text-zinc-700 pointer-events-none" />
                   </div>
+                </div>
+
+                <div className="mt-8 pt-6 border-t border-zinc-800 text-center">
+                    <p className="text-zinc-500 text-xs mb-3">Want to try the experimental context-first flow?</p>
+                    <button 
+                        onClick={onEnableLabMode}
+                        className="text-xs font-bold text-purple-400 hover:text-purple-300 flex items-center justify-center gap-2 mx-auto border border-purple-500/30 bg-purple-500/10 px-4 py-2 rounded-full transition-all hover:bg-purple-500/20"
+                    >
+                        <Icons.Zap className="w-3 h-3" />
+                        Switch to AI Lab Mode
+                    </button>
                 </div>
               </div>
             </div>

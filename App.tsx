@@ -1,18 +1,35 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { StoreProvider, useStore } from './store';
 import { ExecutionBoard } from './components/ExecutionBoard';
 import { ReviewMode } from './components/ReviewMode';
 import { OnboardingWizard } from './components/OnboardingWizard';
 import { RoadmapSandbox } from './components/RoadmapSandbox';
+import { LabOnboarding } from './components/lab/LabOnboarding';
+import { DocsView } from './components/DocsView';
 import { ViewMode } from './types';
 import { Icons } from './constants';
 
 const MainLayout: React.FC = () => {
   const [view, setView] = useState<ViewMode>('ROADMAP');
   const { campaign, users, currentUser, switchUser, reset } = useStore();
+  
+  // Feature Flag: Lab Mode
+  const [isLabMode, setIsLabMode] = useState(false);
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('lab') === 'true') {
+            setIsLabMode(true);
+        }
+    }
+  }, []);
 
   if (!campaign || !campaign.name || campaign.status === 'Onboarding') {
-     return <OnboardingWizard />;
+     // If Lab Mode active and no campaign, show Lab Onboarding
+     if (isLabMode) {
+         return <LabOnboarding />;
+     }
+     return <OnboardingWizard onEnableLabMode={() => setIsLabMode(true)} />;
   }
 
   return (
@@ -33,7 +50,7 @@ const MainLayout: React.FC = () => {
           <div className="h-6 w-px bg-border mx-2"></div>
           
           <div className="flex gap-1 bg-zinc-900 p-1 rounded-lg border border-border">
-            {(['ROADMAP', 'EXECUTION', 'REVIEW'] as ViewMode[]).map((v) => (
+            {(['ROADMAP', 'EXECUTION', 'DOCS', 'REVIEW'] as ViewMode[]).map((v) => (
               <button
                 key={v}
                 onClick={() => setView(v)}
@@ -50,6 +67,11 @@ const MainLayout: React.FC = () => {
         </div>
         
         <div className="flex items-center gap-4">
+          {isLabMode && (
+              <span className="text-[10px] font-mono text-purple-500 bg-purple-500/10 px-2 py-1 rounded border border-purple-500/20 uppercase">
+                  Lab Mode
+              </span>
+          )}
           <div className="flex items-center gap-2">
             <span className="text-[10px] text-zinc-600 uppercase font-bold tracking-wider mr-1">Impersonate:</span>
             {users.map(user => (
@@ -76,6 +98,7 @@ const MainLayout: React.FC = () => {
       <main className="flex-1 overflow-hidden relative">
         {view === 'ROADMAP' && <RoadmapSandbox onNext={() => setView('EXECUTION')} />}
         {view === 'EXECUTION' && <ExecutionBoard />}
+        {view === 'DOCS' && <DocsView />}
         {view === 'REVIEW' && <ReviewMode />}
       </main>
     </div>
