@@ -1,8 +1,12 @@
 
-import React, { useState } from 'react';
-import { useStore } from '../store';
-import { Icons, PRIORITIES } from '../constants';
-import { Status, TicketStatus, ChannelLink } from '../types';
+import React, { useState, useMemo } from 'react';
+import { useStore, generateId } from '../store';
+import { Icons } from '../constants';
+import { Status, TicketStatus, Bet, Ticket } from '../types';
+import { TicketBoard } from './TicketBoard';
+import { TicketModal } from './TicketModal';
+import { BetCreationModal } from './BetCreationModal';
+import { ChannelGantt } from './ChannelGantt';
 
 interface ChannelDashboardProps {
   channelId: string;
@@ -19,21 +23,40 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
     onNavigateToBet,
     onDelete
 }) => {
-  const { campaign, users, currentUser, addChannelPrinciple, deleteChannelPrinciple, addBet, addChannelLink, removeChannelLink, addChannelNote, deleteChannelNote } = useStore();
+  const { 
+      campaign, users, currentUser, 
+      addChannelPrinciple, deleteChannelPrinciple, 
+      addBet, addChannelLink, removeChannelLink, 
+      addChannelNote, deleteChannelNote, 
+      addTicket, updateTicket, deleteTicket,
+      addChannelMember, removeChannelMember
+  } = useStore();
+  
+  const [activeTab, setActiveTab] = useState<'QUEUE' | 'KANBAN' | 'GANTT'>('QUEUE');
+  const [showBetModal, setShowBetModal] = useState(false);
+  const [showTicketModal, setShowTicketModal] = useState(false);
+  const [editingTicket, setEditingTicket] = useState<Ticket | null>(null);
+
+  // New Inputs
   const [newPrinciple, setNewPrinciple] = useState('');
   const [newNote, setNewNote] = useState('');
   const [isAddingLink, setIsAddingLink] = useState(false);
   const [newLinkData, setNewLinkData] = useState({ title: '', url: '' });
 
   const channel = campaign?.channels.find(c => c.id === channelId);
+  const projects = campaign?.projects || [];
+  
   if (!channel) return null;
 
-  // Flatten tickets for timeline
-  const allTickets = channel.bets.flatMap(b => b.tickets).sort((a, b) => {
-     if (!a.dueDate) return 1;
-     if (!b.dueDate) return -1;
-     return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
-  });
+  const allTickets = useMemo(() => {
+      return channel.bets.flatMap(b => b.tickets).sort((a, b) => {
+         if (!a.dueDate) return 1;
+         if (!b.dueDate) return -1;
+         return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+      });
+  }, [channel.bets]);
+
+  // --- Handlers ---
 
   const handleAddPrinciple = () => {
     if (!newPrinciple.trim()) return;
@@ -41,21 +64,21 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
     setNewPrinciple('');
   };
 
-  const handleAddBet = () => {
-    const desc = prompt("Bet Description:");
-    if (!desc) return;
+  const handleSaveBet = (betData: Partial<Bet>) => {
     addBet(channelId, {
         id: crypto.randomUUID(),
-        description: desc,
-        hypothesis: 'New hypothesis',
-        successCriteria: 'TBD',
+        description: betData.description!,
+        hypothesis: betData.hypothesis || 'New hypothesis',
+        successCriteria: betData.successCriteria || 'TBD',
         status: Status.Active,
         channelId,
+        projectId: betData.projectId,
         tickets: [],
         ownerId: currentUser.id,
         timeboxWeeks: 2,
         startDate: new Date().toISOString()
     });
+    setShowBetModal(false);
   };
 
   const handleAddLink = () => {
@@ -79,6 +102,59 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
           text: newNote
       });
       setNewNote('');
+  };
+
+  const handleTicketClick = (ticket: Ticket) => {
+      setEditingTicket(ticket);
+      setShowTicketModal(true);
+  };
+
+  const handleStatusChange = (ticketId: string, newStatus: TicketStatus) => {
+      // Find the ticket's bet ID since we need it for update
+      const ticket = allTickets.find(t => t.id === ticketId);
+      if (ticket && ticket.betId) {
+          updateTicket(channelId, ticket.betId, ticketId, { status: newStatus });
+      }
+  };
+
+  const handleSaveTicket = (data: any) => {
+      if (!data.betId) return; // Must have a bet for this view
+
+      const ticketData: Ticket = {
+          id: data.id || generateId(),
+          shortId: editingTicket?.shortId || `T-${Math.floor(Math.random() * 10000)}`,
+          title: data.title,
+          description: data.description,
+          status: editingTicket?.status || TicketStatus.Todo,
+          priority: data.priority,
+          assigneeId: data.assigneeId,
+          channelId: channelId,
+          betId: data.betId,
+          projectId: data.projectId,
+          createdAt: editingTicket?.createdAt || new Date().toISOString()
+      };
+
+      if (editingTicket) {
+           if (editingTicket.betId && editingTicket.betId !== data.betId) {
+               // Moved bets
+               deleteTicket(channelId, editingTicket.betId, editingTicket.id);
+               addTicket(channelId, data.betId, ticketData);
+           } else {
+               updateTicket(channelId, data.betId, ticketData.id, ticketData);
+           }
+      } else {
+          addTicket(channelId, data.betId, ticketData);
+      }
+      setShowTicketModal(false);
+      setEditingTicket(null);
+  };
+
+  const handleDeleteTicket = (id: string) => {
+      const ticket = allTickets.find(t => t.id === id);
+      if (ticket && ticket.betId) {
+          deleteTicket(channelId, ticket.betId, id);
+      }
+      setShowTicketModal(false);
   };
 
   return (
@@ -129,10 +205,52 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
         {/* 3-Column Layout */}
         <div className="flex-1 flex overflow-hidden">
             
-            {/* COLUMN 1: STRATEGY (Principles & Bets) - 30% */}
-            <div className="w-[30%] border-r border-zinc-800 flex flex-col overflow-hidden bg-zinc-900/10">
+            {/* COLUMN 1: STRATEGY (Principles & Bets) - 25% */}
+            <div className="w-[25%] border-r border-zinc-800 flex flex-col overflow-hidden bg-zinc-900/10">
                 <div className="flex-1 overflow-y-auto p-6 space-y-8 custom-scrollbar">
                     
+                    {/* Team Members */}
+                    <div>
+                        <div className="flex items-center justify-between mb-2">
+                             <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider flex items-center gap-2">
+                                <Icons.Target className="w-3.5 h-3.5" /> Team
+                             </h3>
+                        </div>
+                        <div className="flex flex-wrap gap-2 mb-2">
+                            {(channel.memberIds || []).map(mid => {
+                                const u = users.find(user => user.id === mid);
+                                if (!u) return null;
+                                return (
+                                    <div key={mid} className={`flex items-center gap-2 px-2 py-1 bg-zinc-900 rounded border border-zinc-800`}>
+                                        <div className={`w-4 h-4 rounded-full ${u.color} text-[8px] flex items-center justify-center text-white`}>{u.initials}</div>
+                                        <span className="text-xs text-zinc-300">{u.name}</span>
+                                        <button onClick={() => removeChannelMember(channelId, mid)} className="text-zinc-600 hover:text-red-500 ml-1"><Icons.XCircle className="w-3 h-3"/></button>
+                                    </div>
+                                )
+                            })}
+                            {(channel.memberIds || []).length === 0 && <span className="text-xs text-zinc-600 italic">No members assigned.</span>}
+                        </div>
+                        
+                        {/* Add Member Dropdown */}
+                        <div className="relative group">
+                            <button className="text-[10px] font-bold text-indigo-400 uppercase hover:text-indigo-300 flex items-center gap-1">
+                                + Add Member
+                            </button>
+                            <div className="absolute top-full left-0 mt-2 w-48 bg-zinc-950 border border-zinc-800 rounded shadow-xl hidden group-hover:block z-50">
+                                {users.filter(u => !(channel.memberIds || []).includes(u.id)).map(u => (
+                                    <button 
+                                        key={u.id}
+                                        onClick={() => addChannelMember(channelId, u.id)}
+                                        className="w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2"
+                                    >
+                                        <div className={`w-2 h-2 rounded-full ${u.color}`}></div>
+                                        {u.name}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+
                     {/* Mandates */}
                     <div>
                         <div className="flex items-center gap-2 mb-4">
@@ -151,7 +269,6 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
                                     </button>
                                 </div>
                             ))}
-                            {channel.principles.length === 0 && <p className="text-xs text-zinc-600 italic">No mandates defined.</p>}
                         </div>
                         <div className="flex gap-2">
                             <input 
@@ -164,14 +281,14 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
                         </div>
                     </div>
 
-                    {/* Active Bets */}
+                    {/* Active Bets List (Read Only / Navigation) */}
                     <div>
                         <div className="flex items-center justify-between mb-4">
                             <div className="flex items-center gap-2">
                                 <Icons.Target className="w-4 h-4 text-indigo-500" />
                                 <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Active Bets</h3>
                             </div>
-                            <button onClick={handleAddBet} className="text-[10px] text-indigo-400 font-bold uppercase hover:text-indigo-300">+ New</button>
+                            <button onClick={() => setShowBetModal(true)} className="text-[10px] text-indigo-400 font-bold uppercase hover:text-indigo-300">+ New</button>
                         </div>
                         <div className="space-y-3">
                             {channel.bets.map(bet => {
@@ -185,11 +302,6 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
                                         onClick={() => onNavigateToBet && onNavigateToBet(bet.id)}
                                         className={`p-3 bg-zinc-900 border border-zinc-800 rounded-lg group hover:border-indigo-500/50 transition-all ${onNavigateToBet ? 'cursor-pointer' : ''}`}
                                     >
-                                        <div className="flex justify-between items-start mb-2">
-                                            <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded tracking-wide ${
-                                                bet.status === Status.Active ? 'bg-emerald-500/10 text-emerald-500' : 'bg-zinc-800 text-zinc-500'
-                                            }`}>{bet.status}</span>
-                                        </div>
                                         <h4 className="text-sm font-bold text-zinc-200 mb-2 leading-snug">{bet.description}</h4>
                                         <div className="flex items-center gap-3">
                                             <div className="flex-1 h-1 bg-zinc-800 rounded-full overflow-hidden">
@@ -207,50 +319,85 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
                 </div>
             </div>
 
-            {/* COLUMN 2: EXECUTION (Timeline & Board) - 45% */}
-            <div className="w-[45%] flex flex-col overflow-hidden bg-[#09090b]">
-                 <div className="p-6 border-b border-zinc-800 shrink-0">
-                     <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-4 flex items-center gap-2">
-                        <Icons.Calendar className="w-4 h-4 text-emerald-500" /> Execution Queue
-                     </h3>
-                     {/* Mini Timeline Visualization (MVP: List) */}
-                     <div className="space-y-2 max-h-40 overflow-y-auto custom-scrollbar mb-6">
-                         {allTickets.slice(0, 5).map(t => (
-                             <div key={t.id} className="flex items-center gap-3 text-xs">
-                                 <span className="text-zinc-600 font-mono w-20 text-right">{t.dueDate ? new Date(t.dueDate).toLocaleDateString() : 'No Date'}</span>
-                                 <div className={`w-1.5 h-1.5 rounded-full ${t.status === TicketStatus.Done ? 'bg-emerald-500' : 'bg-zinc-600'}`}></div>
-                                 <span className="text-zinc-300 truncate">{t.title}</span>
-                             </div>
+            {/* COLUMN 2: EXECUTION (Timeline & Board) - 50% */}
+            <div className="w-[50%] flex flex-col overflow-hidden bg-[#09090b]">
+                 {/* Tabs Header */}
+                 <div className="px-6 py-4 border-b border-zinc-800 flex items-center justify-between shrink-0 bg-zinc-900/20">
+                     <div className="flex items-center gap-4">
+                         {(['QUEUE', 'KANBAN', 'GANTT'] as const).map(tab => (
+                             <button
+                                key={tab}
+                                onClick={() => setActiveTab(tab)}
+                                className={`text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded transition-all ${activeTab === tab ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+                             >
+                                 {tab}
+                             </button>
                          ))}
                      </div>
+                     <button 
+                        onClick={() => { setEditingTicket(null); setShowTicketModal(true); }}
+                        className="px-4 py-1.5 bg-white text-black text-xs font-bold rounded hover:bg-zinc-200 transition-colors flex items-center gap-2"
+                     >
+                        <Icons.Plus className="w-3.5 h-3.5" />
+                        Ticket
+                     </button>
                  </div>
 
-                 <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-                     <div className="flex items-center justify-between mb-4">
-                         <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider flex items-center gap-2">
-                            <Icons.Kanban className="w-4 h-4 text-zinc-500" /> Ticket Board
-                         </h3>
-                         <span className="text-[10px] text-zinc-600">{allTickets.length} items</span>
-                     </div>
-                     
-                     <div className="space-y-2">
-                        {allTickets.map(t => {
-                            const assignee = users.find(u => u.id === t.assigneeId);
-                            return (
-                                <div key={t.id} className="flex items-center gap-3 p-3 bg-zinc-900/50 border border-zinc-800/50 rounded hover:bg-zinc-900 transition-colors">
-                                     <div className={`shrink-0 w-2 h-2 rounded-full ${t.status === TicketStatus.Done ? 'bg-emerald-500' : t.status === TicketStatus.InProgress ? 'bg-amber-500' : 'bg-zinc-600'}`}></div>
-                                     <span className="text-xs font-mono text-zinc-500">{t.shortId}</span>
-                                     <span className="text-sm text-zinc-300 truncate flex-1">{t.title}</span>
-                                     {assignee && (
-                                         <div className={`w-5 h-5 rounded-full ${assignee.color} flex items-center justify-center text-[8px] text-white font-bold`}>
-                                             {assignee.initials}
+                 <div className="flex-1 overflow-hidden relative">
+                     {activeTab === 'QUEUE' && (
+                         <div className="h-full overflow-y-auto custom-scrollbar p-6">
+                             <div className="space-y-2">
+                                 {allTickets.map(t => {
+                                     const assignee = users.find(u => u.id === t.assigneeId);
+                                     return (
+                                         <div 
+                                            key={t.id} 
+                                            onClick={() => handleTicketClick(t)}
+                                            className="flex items-center gap-4 p-3 bg-zinc-900/30 border border-zinc-800 rounded hover:bg-zinc-900 cursor-pointer group"
+                                         >
+                                             <div className={`shrink-0 w-2 h-2 rounded-full ${t.status === TicketStatus.Done ? 'bg-emerald-500' : t.status === TicketStatus.InProgress ? 'bg-amber-500' : 'bg-zinc-600'}`}></div>
+                                             <span className="text-xs font-mono text-zinc-500 w-16">{t.shortId}</span>
+                                             <span className="text-sm text-zinc-300 truncate flex-1 font-medium">{t.title}</span>
+                                             
+                                             <div className="flex items-center gap-6">
+                                                 <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${t.priority === 'Urgent' ? 'bg-red-500/10 text-red-500' : 'bg-zinc-800 text-zinc-500'}`}>{t.priority}</span>
+                                                 <span className="text-xs text-zinc-500 font-mono w-24 text-right">
+                                                    {t.dueDate ? new Date(t.dueDate).toLocaleDateString() : '--'}
+                                                 </span>
+                                                 <div className="w-6 flex justify-center">
+                                                     {assignee ? (
+                                                        <div className={`w-5 h-5 rounded-full ${assignee.color} text-[8px] text-white flex items-center justify-center font-bold`}>{assignee.initials}</div>
+                                                     ) : (
+                                                        <div className="w-5 h-5 rounded-full border border-zinc-700"></div>
+                                                     )}
+                                                 </div>
+                                             </div>
                                          </div>
-                                     )}
-                                </div>
-                            )
-                        })}
-                        {allTickets.length === 0 && <p className="text-xs text-zinc-600 italic">No tickets in this channel.</p>}
-                     </div>
+                                     )
+                                 })}
+                                 {allTickets.length === 0 && <p className="text-center text-zinc-500 text-sm py-10">No tickets in queue.</p>}
+                             </div>
+                         </div>
+                     )}
+
+                     {activeTab === 'KANBAN' && (
+                         <div className="h-full overflow-hidden p-6 bg-[#09090b]">
+                            <TicketBoard 
+                                tickets={allTickets}
+                                channels={campaign?.channels || []}
+                                users={users}
+                                onTicketClick={handleTicketClick}
+                                onStatusChange={handleStatusChange}
+                                groupByChannel={false} 
+                            />
+                         </div>
+                     )}
+
+                     {activeTab === 'GANTT' && (
+                         <div className="h-full overflow-hidden">
+                             <ChannelGantt bets={channel.bets} tickets={allTickets} />
+                         </div>
+                     )}
                  </div>
             </div>
 
@@ -341,6 +488,35 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
             </div>
 
         </div>
+
+        {/* MODALS */}
+        {showBetModal && (
+            <BetCreationModal 
+                channelId={channelId} 
+                onClose={() => setShowBetModal(false)}
+                onSave={handleSaveBet}
+                projects={projects}
+            />
+        )}
+
+        {showTicketModal && (
+            <TicketModal 
+                initialData={editingTicket ? {
+                    id: editingTicket.id,
+                    title: editingTicket.title,
+                    description: editingTicket.description,
+                    priority: editingTicket.priority,
+                    assigneeId: editingTicket.assigneeId,
+                    channelId: editingTicket.channelId,
+                    betId: editingTicket.betId,
+                    projectId: editingTicket.projectId,
+                } : { channelId }} 
+                context={{ channels: campaign?.channels || [], projects, users }}
+                onClose={() => { setShowTicketModal(false); setEditingTicket(null); }}
+                onSave={handleSaveTicket}
+                onDelete={editingTicket ? () => handleDeleteTicket(editingTicket.id) : undefined}
+            />
+        )}
     </div>
   );
 };

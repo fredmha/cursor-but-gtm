@@ -1,4 +1,5 @@
 
+
 export enum Status {
   Active = 'Active',
   Paused = 'Paused',
@@ -107,6 +108,7 @@ export interface Channel {
   tags: ChannelTag[];
   links?: ChannelLink[]; // SOPs, Docs
   notes?: ChannelNote[]; // Team remarks
+  memberIds?: string[]; // Team members assigned to this channel
 }
 
 export interface OperatingPrinciple {

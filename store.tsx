@@ -39,6 +39,8 @@ interface StoreState {
   removeChannelLink: (channelId: string, linkId: string) => void;
   addChannelNote: (channelId: string, note: ChannelNote) => void;
   deleteChannelNote: (channelId: string, noteId: string) => void;
+  addChannelMember: (channelId: string, userId: string) => void;
+  removeChannelMember: (channelId: string, userId: string) => void;
   
   addProject: (project: Project) => void;
   updateProject: (projectId: string, updates: Partial<Project>) => void;
@@ -84,14 +86,15 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     // MIGRATION LOGIC ON LOAD
     const data = JSON.parse(saved);
     
-    // Ensure all channels have principles array and tags array
+    // Ensure all channels have arrays
     if (data.channels) {
         data.channels = data.channels.map((c: any) => ({
             ...c,
             principles: c.principles || [],
             tags: c.tags || [],
             links: c.links || [],
-            notes: c.notes || []
+            notes: c.notes || [],
+            memberIds: c.memberIds || []
         }));
     }
 
@@ -132,7 +135,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (!campaign) return;
     setCampaignState(prev => prev ? ({
       ...prev,
-      channels: [...prev.channels, { ...channel, principles: channel.principles || [], tags: channel.tags || [], links: [], notes: [] }]
+      channels: [...prev.channels, { 
+          ...channel, 
+          principles: channel.principles || [], 
+          tags: channel.tags || [], 
+          links: [], 
+          notes: [],
+          memberIds: []
+      }]
     }) : null);
   };
 
@@ -215,6 +225,30 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         c.id === channelId ? { ...c, notes: (c.notes || []).filter(n => n.id !== noteId) } : c
       )
     }) : null);
+  };
+
+  const addChannelMember = (channelId: string, userId: string) => {
+      if (!campaign) return;
+      setCampaignState(prev => prev ? ({
+          ...prev,
+          channels: prev.channels.map(c => {
+              if (c.id !== channelId) return c;
+              const currentMembers = c.memberIds || [];
+              if (currentMembers.includes(userId)) return c;
+              return { ...c, memberIds: [...currentMembers, userId] };
+          })
+      }) : null);
+  };
+
+  const removeChannelMember = (channelId: string, userId: string) => {
+      if (!campaign) return;
+      setCampaignState(prev => prev ? ({
+          ...prev,
+          channels: prev.channels.map(c => {
+              if (c.id !== channelId) return c;
+              return { ...c, memberIds: (c.memberIds || []).filter(id => id !== userId) };
+          })
+      }) : null);
   };
 
   const addProject = (project: Project) => {
@@ -642,7 +676,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       principles: [],
       tags: [],
       links: [],
-      notes: []
+      notes: [],
+      memberIds: []
     }));
     
     newChannels.forEach(c => {
@@ -680,6 +715,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       removeChannelLink,
       addChannelNote,
       deleteChannelNote,
+      addChannelMember,
+      removeChannelMember,
       addProject,
       updateProject,
       addProjectUpdate,

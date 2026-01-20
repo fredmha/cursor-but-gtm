@@ -5,6 +5,8 @@ import { Icons, PRIORITIES } from '../constants';
 import { RoadmapItem, User, OperatingPrinciple, Priority, Bet, Status, TicketStatus, ChannelTag, Project, TimelineTag } from '../types';
 import { ProjectDashboard } from './ProjectDashboard';
 import { ChannelDashboard } from './ChannelDashboard';
+import { TicketModal } from './TicketModal';
+import { BetCreationModal } from './BetCreationModal';
 
 interface RoadmapSandboxProps {
   onNext?: () => void;
@@ -122,8 +124,8 @@ const StrategyHorizon: React.FC<{
                 {projects.map(project => {
                     if (!project.startDate || !project.targetDate) return null;
                     
-                    // Filter "Project-Only" Tickets (No Channel)
-                    const projectItems = roadmapItems.filter(i => i.projectId === project.id && !i.channelId);
+                    // Show ALL tickets linked to this project, even if they belong to a channel
+                    const projectItems = roadmapItems.filter(i => i.projectId === project.id);
                     
                     // Group Items by Week Index for clustered rendering
                     const itemsByWeek: Record<number, RoadmapItem[]> = {};
@@ -481,259 +483,6 @@ const ChannelCreationModal: React.FC<{
   );
 };
 
-const BetCreationModal: React.FC<{
-  channelId: string;
-  onClose: () => void;
-  onSave: (bet: Partial<Bet>) => void;
-  projects?: any[];
-}> = ({ channelId, onClose, onSave, projects = [] }) => {
-  const [data, setData] = useState({ description: '', hypothesis: '', successCriteria: '', projectId: '' });
-
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="absolute inset-0" onClick={onClose}></div>
-      <div className="w-[500px] bg-[#09090b] border border-zinc-800 rounded-xl shadow-2xl overflow-hidden ring-1 ring-white/10 relative z-10">
-        <div className="bg-zinc-900/50 border-b border-zinc-800 p-4 flex justify-between items-center">
-            <div className="flex items-center gap-2">
-                <Icons.Zap className="w-4 h-4 text-indigo-400" />
-                <span className="text-xs font-bold text-zinc-200 uppercase tracking-wider">Define Strategic Bet</span>
-            </div>
-            <button onClick={onClose}><Icons.XCircle className="w-5 h-5 text-zinc-500 hover:text-white" /></button>
-        </div>
-        <div className="p-6 space-y-5">
-            <div>
-                <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">The Bet (Action)</label>
-                <input 
-                    autoFocus
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white focus:border-indigo-500 focus:outline-none placeholder-zinc-700"
-                    placeholder="e.g. Cold Email: CFO Sequence"
-                    value={data.description}
-                    onChange={e => setData({...data, description: e.target.value})}
-                />
-            </div>
-            
-            {projects.length > 0 && (
-                <div>
-                    <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">Link to Project (Optional)</label>
-                    <select
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white focus:border-indigo-500 focus:outline-none text-sm"
-                        value={data.projectId}
-                        onChange={e => setData({...data, projectId: e.target.value})}
-                    >
-                        <option value="">No Project</option>
-                        {projects.map(p => (
-                            <option key={p.id} value={p.id}>{p.name}</option>
-                        ))}
-                    </select>
-                </div>
-            )}
-
-            <div>
-                <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">Success Criteria</label>
-                <input 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white focus:border-indigo-500 focus:outline-none placeholder-zinc-700 font-mono text-sm"
-                    placeholder="e.g. >15% Reply Rate"
-                    value={data.successCriteria}
-                    onChange={e => setData({...data, successCriteria: e.target.value})}
-                />
-            </div>
-            <div>
-                <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">The Hypothesis (Why?)</label>
-                <textarea 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white focus:border-indigo-500 focus:outline-none h-20 resize-none text-sm text-zinc-300 placeholder-zinc-700 leading-relaxed"
-                    placeholder="We believe that..."
-                    value={data.hypothesis}
-                    onChange={e => setData({...data, hypothesis: e.target.value})}
-                />
-            </div>
-        </div>
-        <div className="p-4 border-t border-zinc-800 bg-zinc-900/30 flex justify-end gap-2">
-            <button onClick={onClose} className="px-4 py-2 text-xs text-zinc-400 hover:text-white">Cancel</button>
-            <button 
-                disabled={!data.description}
-                onClick={() => onSave(data)}
-                className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg disabled:opacity-50 transition-colors shadow-lg shadow-indigo-900/20"
-            >
-                Place Bet
-            </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const TicketModal: React.FC<{
-  item: Partial<RoadmapItem>;
-  bets: Bet[];
-  users: User[];
-  projects: any[];
-  onClose: () => void;
-  onSave: (item: Partial<RoadmapItem>) => void;
-  onDelete: (id: string) => void;
-}> = ({ item: initialItem, bets, users, projects, onClose, onSave, onDelete }) => {
-  const [item, setItem] = useState<Partial<RoadmapItem>>(initialItem);
-
-  const toggleUser = (userId: string) => {
-    const current = item.ownerIds || [];
-    if (current.includes(userId)) {
-      setItem({ ...item, ownerIds: current.filter(id => id !== userId) });
-    } else {
-      setItem({ ...item, ownerIds: [...current, userId] });
-    }
-  };
-
-  const handleSave = () => {
-      const finalItem = { ...item };
-      finalItem.type = 'CONTENT';
-      onSave(finalItem);
-  };
-
-  const isFormValid = () => {
-    if (!item.title) return false;
-    // Strict Linkage: Ticket MUST belong to a Bet if bets exist AND it's not a Project-Only ticket
-    if (bets.length > 0 && !item.linkedBetId && !item.projectId) return false;
-    return true;
-  };
-
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-       <div className="absolute inset-0" onClick={onClose}></div>
-       <div className="w-[600px] bg-[#09090b] border border-zinc-800 rounded-xl shadow-2xl flex flex-col relative overflow-hidden ring-1 ring-white/10 z-10">
-          
-          <div className="h-14 border-b border-zinc-800 flex items-center justify-between px-6 bg-zinc-900/50">
-             <span className="text-xs font-bold uppercase tracking-wider text-white">Execution Task</span>
-             <button onClick={onClose}><Icons.XCircle className="w-5 h-5 text-zinc-500 hover:text-white transition-colors"/></button>
-          </div>
-
-          <div className="p-6 space-y-6 overflow-y-auto max-h-[70vh]">
-              
-              <div>
-                 <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2 block">Task Title</label>
-                 <input 
-                    autoFocus
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-4 text-lg font-bold text-white placeholder-zinc-700 focus:outline-none focus:border-zinc-600 transition-colors"
-                    placeholder="What needs to happen?"
-                    value={item.title || ''}
-                    onChange={(e) => setItem({...item, title: e.target.value})}
-                    onKeyDown={(e) => e.key === 'Enter' && isFormValid() && handleSave()}
-                 />
-              </div>
-              
-              <div>
-                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2 block">Description</label>
-                    <textarea 
-                        className="w-full h-24 bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-sm text-zinc-300 placeholder-zinc-700 focus:outline-none focus:border-zinc-600 resize-none leading-relaxed"
-                        placeholder="Add context, details, or acceptance criteria..."
-                        value={item.description || ''}
-                        onChange={(e) => setItem({...item, description: e.target.value})}
-                    />
-                </div>
-
-                {bets.length > 0 && (
-                    <div className="grid grid-cols-2 gap-4">
-                    <div>
-                        <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2 block">Strategic Link (Bet) <span className="text-red-500">*</span></label>
-                        <select 
-                            className={`w-full bg-zinc-950 border rounded-lg p-3 text-white text-sm focus:outline-none focus:border-indigo-500 ${!item.linkedBetId && !item.projectId ? 'border-red-500/50' : 'border-zinc-800'}`}
-                            value={item.linkedBetId || ''}
-                            onChange={(e) => {
-                                // Auto-inherit project ID from bet
-                                const bet = bets.find(b => b.id === e.target.value);
-                                setItem({...item, linkedBetId: e.target.value, projectId: bet?.projectId});
-                            }}
-                        >
-                            <option value="" disabled>Select a Bet (Required)</option>
-                            {bets.map(b => (
-                                <option key={b.id} value={b.id}>{b.description}</option>
-                            ))}
-                        </select>
-                    </div>
-                    <div>
-                        <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2 block">Project Link (Optional)</label>
-                        <select 
-                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-white text-sm focus:outline-none"
-                            value={item.projectId || ''}
-                            onChange={(e) => setItem({...item, projectId: e.target.value})}
-                        >
-                            <option value="">No Project</option>
-                            {projects.map(p => (
-                                <option key={p.id} value={p.id}>{p.name}</option>
-                            ))}
-                        </select>
-                    </div>
-                    </div>
-                )}
-
-                <div className="grid grid-cols-2 gap-6">
-                    <div>
-                        <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2 block">Assigned Owner</label>
-                        <div className="flex flex-wrap gap-2">
-                            {users.map(u => (
-                                <button 
-                                    key={u.id}
-                                    onClick={() => toggleUser(u.id)}
-                                    className={`h-8 px-3 rounded-full border flex items-center justify-center gap-2 transition-all ${item.ownerIds?.includes(u.id) ? `border-white/20 bg-zinc-800 text-white` : 'border-zinc-800 bg-zinc-900 text-zinc-500 hover:border-zinc-700'}`}
-                                >
-                                    <div className={`w-2 h-2 rounded-full ${u.color}`}></div>
-                                    <span className="text-xs font-medium">{u.initials}</span>
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-                    <div>
-                        <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2 block">Priority Level</label>
-                        <div className="grid grid-cols-3 gap-2">
-                        {PRIORITIES.map(p => (
-                            <button 
-                                key={p.value}
-                                onClick={() => setItem({...item, priority: p.value})}
-                                className={`px-2 py-1.5 rounded text-[10px] font-bold uppercase tracking-wider border transition-all ${item.priority === p.value ? `bg-zinc-800 border-zinc-600 text-white` : 'bg-zinc-950 border-zinc-800 text-zinc-600 hover:border-zinc-700'}`}
-                            >
-                                {p.value}
-                            </button>
-                        ))}
-                        </div>
-                    </div>
-                </div>
-
-              <div>
-                 <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2 block">Timeline Duration</label>
-                 <div className="bg-zinc-900/50 p-4 rounded-lg border border-zinc-800">
-                   <div className="flex items-center gap-4">
-                      <input 
-                          type="range" min="1" max="8" 
-                          value={item.durationWeeks || 1}
-                          onChange={(e) => setItem({...item, durationWeeks: parseInt(e.target.value)})}
-                          className="flex-1 accent-indigo-500 h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer hover:accent-indigo-400"
-                      />
-                      <span className="text-sm font-mono text-zinc-300 w-12 text-right font-bold">{item.durationWeeks || 1}wk</span>
-                   </div>
-                 </div>
-              </div>
-          </div>
-
-          <div className="p-4 border-t border-zinc-800 bg-zinc-900/30 flex justify-between items-center">
-              {item.id ? (
-                  <button onClick={() => onDelete(item.id!)} className="text-xs text-red-500 hover:text-red-400 hover:bg-red-500/10 px-3 py-1.5 rounded transition-colors flex items-center gap-1.5">
-                    <Icons.Trash className="w-3.5 h-3.5"/> Delete
-                  </button>
-              ) : <div></div>}
-              <div className="flex gap-3">
-                 <button onClick={onClose} className="px-4 py-2 text-xs text-zinc-400 hover:text-white font-medium">Cancel</button>
-                 <button 
-                    onClick={handleSave} 
-                    disabled={!isFormValid()} 
-                    className="px-6 py-2 bg-white text-black text-xs font-bold rounded hover:bg-zinc-200 disabled:opacity-50 transition-colors shadow-lg shadow-white/5"
-                 >
-                    Save
-                 </button>
-              </div>
-          </div>
-       </div>
-    </div>
-  );
-};
-
 const RoadmapCard: React.FC<{
     item: LayoutItem;
     users: User[];
@@ -882,28 +631,39 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
       setActiveBetCreation(null);
   };
 
-  const handleSaveTicket = (item: Partial<RoadmapItem>) => {
+  const handleSaveTicket = (data: any) => {
       if (!activeTicket) return;
       
-      const newItem = { ...item };
+      const newItem: Partial<RoadmapItem> = {
+          id: data.id,
+          channelId: data.channelId || activeTicket.item.channelId, // Keep original channel if not changed, or update
+          weekIndex: activeTicket.item.weekIndex, // Preserve week
+          title: data.title,
+          description: data.description,
+          type: 'CONTENT',
+          durationWeeks: data.durationWeeks,
+          ownerIds: data.assigneeId ? [data.assigneeId] : [],
+          priority: data.priority,
+          linkedBetId: data.betId,
+          projectId: data.projectId,
+      };
 
       if (newItem.id) {
           updateRoadmapItem(newItem.id, newItem);
       } else {
           addRoadmapItem({
               id: crypto.randomUUID(),
-              channelId: newItem.channelId || undefined,
+              channelId: newItem.channelId,
               weekIndex: newItem.weekIndex!,
               title: newItem.title!,
               description: newItem.description || '',
               type: newItem.type || 'CONTENT',
-              label: newItem.label || 'Ticket',
+              label: 'Ticket',
               durationWeeks: newItem.durationWeeks || 1,
-              ownerIds: newItem.ownerIds || (newItem.type === 'CONTENT' ? [currentUser.id] : []),
+              ownerIds: newItem.ownerIds || [],
               priority: newItem.priority || 'Medium',
               linkedBetId: newItem.linkedBetId,
               projectId: newItem.projectId,
-              color: newItem.color
           });
       }
       setActiveTicket(null);
@@ -1187,10 +947,18 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
 
       {activeTicket && (
           <TicketModal 
-              item={activeTicket.item}
-              bets={activeTicket.bets}
-              users={users}
-              projects={projects}
+              initialData={{
+                  id: activeTicket.item.id,
+                  title: activeTicket.item.title,
+                  description: activeTicket.item.description,
+                  priority: activeTicket.item.priority,
+                  assigneeId: activeTicket.item.ownerIds?.[0],
+                  channelId: activeTicket.item.channelId,
+                  betId: activeTicket.item.linkedBetId,
+                  projectId: activeTicket.item.projectId,
+                  durationWeeks: activeTicket.item.durationWeeks,
+              }}
+              context={{ channels, projects, users }}
               onClose={() => setActiveTicket(null)}
               onSave={handleSaveTicket}
               onDelete={deleteRoadmapItem}

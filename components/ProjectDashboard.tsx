@@ -1,9 +1,10 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useStore, generateId } from '../store';
 import { Icons, PRIORITIES } from '../constants';
 import { Status, ProjectHealth, Priority, TicketStatus, Ticket, Bet, Channel } from '../types';
 import { TicketBoard } from './TicketBoard';
+import { TicketModal } from './TicketModal';
 
 interface ProjectDashboardProps {
   projectId: string; // Changed from channelId
@@ -12,167 +13,27 @@ interface ProjectDashboardProps {
   onNavigateToBet?: (betId: string) => void;
 }
 
-// MATRIX TICKET CREATION MODAL
-const MatrixTicketModal: React.FC<{
-    projectId: string;
-    channels: Channel[];
-    users: any[];
-    onClose: () => void;
-    onSave: (ticket: Ticket) => void;
-}> = ({ projectId, channels, users, onClose, onSave }) => {
-    // Bets are pre-filtered to those that are NOT killed
-    const availableChannels = channels;
-    const [selectedChannelId, setSelectedChannelId] = useState<string>('');
-    const [selectedBetId, setSelectedBetId] = useState<string>('');
-    const [title, setTitle] = useState('');
-    const [assigneeId, setAssigneeId] = useState('');
-    const [priority, setPriority] = useState<Priority>('Medium');
-
-    const availableBets = useMemo(() => {
-        if (!selectedChannelId) return [];
-        const channel = channels.find(c => c.id === selectedChannelId);
-        return channel ? channel.bets.filter(b => b.status !== Status.Killed) : [];
-    }, [selectedChannelId, channels]);
-
-    const handleSave = () => {
-        if (!title) return;
-        
-        const ticket: Ticket = {
-            id: generateId(),
-            shortId: `T-${Math.floor(Math.random() * 10000)}`,
-            title,
-            status: TicketStatus.Todo,
-            betId: selectedBetId || undefined,
-            channelId: selectedChannelId || undefined,
-            projectId: projectId, // LOCKED CONTEXT
-            assigneeId: assigneeId || undefined,
-            priority: priority,
-            createdAt: new Date().toISOString()
-        };
-        onSave(ticket);
-    };
-
-    return (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="absolute inset-0" onClick={onClose}></div>
-            <div className="w-[500px] bg-[#09090b] border border-zinc-800 rounded-xl shadow-2xl relative z-10 p-6 overflow-hidden">
-                <div className="flex justify-between items-center mb-6">
-                    <div className="flex items-center gap-2">
-                        <Icons.PlusCircle className="w-5 h-5 text-indigo-500" />
-                        <h3 className="text-lg font-bold text-white">New Matrix Ticket</h3>
-                    </div>
-                    <button onClick={onClose}><Icons.XCircle className="w-5 h-5 text-zinc-500 hover:text-white" /></button>
-                </div>
-
-                <div className="space-y-6">
-                    {/* 1. Ticket Name & Details (Primary) */}
-                    <div>
-                        <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">Ticket Title</label>
-                        <input 
-                            autoFocus
-                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-4 text-white font-bold text-lg focus:border-indigo-500 focus:outline-none placeholder-zinc-700 mb-3"
-                            placeholder="What needs to be done?"
-                            value={title}
-                            onChange={e => setTitle(e.target.value)}
-                            onKeyDown={e => e.key === 'Enter' && title && handleSave()}
-                        />
-                        <div className="flex gap-3">
-                             <select 
-                                className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-white focus:border-indigo-500 focus:outline-none text-xs"
-                                value={assigneeId}
-                                onChange={e => setAssigneeId(e.target.value)}
-                            >
-                                <option value="">Unassigned</option>
-                                {users.map(u => (
-                                    <option key={u.id} value={u.id}>{u.name}</option>
-                                ))}
-                            </select>
-                            <select 
-                                className="w-32 bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-white focus:border-indigo-500 focus:outline-none text-xs"
-                                value={priority}
-                                onChange={e => setPriority(e.target.value as Priority)}
-                            >
-                                {PRIORITIES.map(p => (
-                                    <option key={p.value} value={p.value}>{p.value}</option>
-                                ))}
-                            </select>
-                        </div>
-                    </div>
-
-                    {/* 2. Strategic Context (Optional) */}
-                    <div className="pt-4 border-t border-zinc-900 space-y-4">
-                        <div className="flex items-center gap-2 mb-2">
-                            <Icons.Layers className="w-3.5 h-3.5 text-zinc-500" />
-                            <h4 className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Execution Context</h4>
-                        </div>
-                        
-                        <div>
-                            <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1.5">Link to Channel (Optional)</label>
-                            <select 
-                                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-white focus:border-indigo-500 focus:outline-none text-xs"
-                                value={selectedChannelId}
-                                onChange={e => { setSelectedChannelId(e.target.value); setSelectedBetId(''); }}
-                            >
-                                <option value="">No Channel (Project Only)</option>
-                                {availableChannels.map(c => (
-                                    <option key={c.id} value={c.id}>{c.name}</option>
-                                ))}
-                            </select>
-                        </div>
-
-                        <div>
-                            <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1.5">Link to Bet (Optional)</label>
-                            <select 
-                                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-white focus:border-indigo-500 focus:outline-none text-xs disabled:opacity-50 disabled:cursor-not-allowed"
-                                value={selectedBetId}
-                                onChange={e => setSelectedBetId(e.target.value)}
-                                disabled={!selectedChannelId}
-                            >
-                                <option value="" disabled={!selectedChannelId}>
-                                    {!selectedChannelId ? 'Select a Channel first...' : 'Choose Initiative...'}
-                                </option>
-                                {availableBets.map(b => (
-                                    <option key={b.id} value={b.id}>{b.description}</option>
-                                ))}
-                            </select>
-                            {selectedChannelId && availableBets.length === 0 && (
-                                <p className="text-[10px] text-amber-500 mt-1">No active bets in this channel.</p>
-                            )}
-                        </div>
-
-                         {!selectedChannelId && (
-                             <p className="text-[10px] text-zinc-600 italic">Ticket will be created directly on the Project Timeline.</p>
-                         )}
-                    </div>
-                </div>
-
-                <div className="flex justify-end gap-2 mt-6">
-                    <button onClick={onClose} className="px-4 py-2 text-xs text-zinc-400 hover:text-white">Cancel</button>
-                    <button 
-                        disabled={!title}
-                        onClick={handleSave}
-                        className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg disabled:opacity-50 transition-colors shadow-lg"
-                    >
-                        Create Ticket
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-};
-
-
 export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({ 
     projectId, 
     isModal = false, 
     onClose, 
     onNavigateToBet
 }) => {
-  const { campaign, users, currentUser, updateProject, addProjectUpdate, addTicket, addProjectTicket, updateTicket, updateProjectTicket } = useStore();
+  const { 
+      campaign, users, currentUser, 
+      updateProject, addProjectUpdate, 
+      addTicket, addProjectTicket, 
+      updateTicket, updateProjectTicket,
+      deleteTicket, deleteProjectTicket
+  } = useStore();
+  
   const [newUpdate, setNewUpdate] = useState('');
   const [showNewTicketModal, setShowNewTicketModal] = useState(false);
+  const [editingTicket, setEditingTicket] = useState<Ticket | null>(null);
 
   const project = campaign?.projects.find(p => p.id === projectId);
+  const channels = campaign?.channels || [];
+  const projects = campaign?.projects || [];
   
   if (!project) {
       return (
@@ -205,13 +66,75 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
     setNewUpdate('');
   };
 
-  const handleCreateMatrixTicket = (ticket: Ticket) => {
-      if (ticket.channelId && ticket.betId) {
-        addTicket(ticket.channelId, ticket.betId, ticket);
-      } else {
-        addProjectTicket(projectId, ticket);
+  const handleTicketClick = (ticket: Ticket) => {
+      setEditingTicket(ticket);
+      setShowNewTicketModal(true);
+  };
+
+  const handleSaveTicket = (data: any) => {
+      // Reconstruct Ticket Object from generic Modal Data
+      const ticketData: Ticket = {
+          id: data.id || generateId(),
+          shortId: editingTicket?.shortId || `T-${Math.floor(Math.random() * 10000)}`,
+          title: data.title,
+          description: data.description,
+          status: editingTicket?.status || TicketStatus.Todo,
+          priority: data.priority,
+          assigneeId: data.assigneeId,
+          channelId: data.channelId,
+          betId: data.betId,
+          projectId: projectId, // Force current project context? Or allow move? 
+          // The modal allows selecting project. Let's respect modal choice if changed, but default to current.
+          // Actually, if we are in ProjectDashboard(A), and user moves ticket to Project(B), it should disappear from here.
+          // Let's assume data.projectId is correct.
+          createdAt: editingTicket?.createdAt || new Date().toISOString()
+      };
+      
+      // Override projectId with selected one, or fallback to current
+      ticketData.projectId = data.projectId || projectId;
+
+      // HANDLE EDIT (If we are editing an existing ticket)
+      if (editingTicket) {
+          const isLocationChanged = 
+              (editingTicket.channelId !== ticketData.channelId) || 
+              (editingTicket.betId !== ticketData.betId) ||
+              (editingTicket.projectId !== ticketData.projectId);
+            
+          if (isLocationChanged) {
+              // 1. Delete from old location
+              if (editingTicket.channelId && editingTicket.betId) {
+                  deleteTicket(editingTicket.channelId, editingTicket.betId, editingTicket.id);
+              } else {
+                  // Was project ticket
+                  deleteProjectTicket(projectId, editingTicket.id);
+              }
+
+              // 2. Add to new location
+              if (ticketData.channelId && ticketData.betId) {
+                  addTicket(ticketData.channelId, ticketData.betId, ticketData);
+              } else {
+                  addProjectTicket(ticketData.projectId || projectId, ticketData);
+              }
+          } else {
+              // Just Update in place
+              if (ticketData.channelId && ticketData.betId) {
+                  updateTicket(ticketData.channelId, ticketData.betId, ticketData.id, ticketData);
+              } else {
+                  updateProjectTicket(projectId, ticketData.id, ticketData);
+              }
+          }
+      } 
+      // HANDLE CREATE (New Ticket)
+      else {
+          if (ticketData.channelId && ticketData.betId) {
+            addTicket(ticketData.channelId, ticketData.betId, ticketData);
+          } else {
+            addProjectTicket(projectId, ticketData);
+          }
       }
+      
       setShowNewTicketModal(false);
+      setEditingTicket(null);
   };
 
   const handleStatusChange = (ticketId: string, newStatus: TicketStatus) => {
@@ -260,7 +183,7 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
                          </div>
                      </div>
                      <button 
-                        onClick={() => setShowNewTicketModal(true)}
+                        onClick={() => { setEditingTicket(null); setShowNewTicketModal(true); }}
                         className="px-4 py-1.5 bg-white text-black text-xs font-bold rounded hover:bg-zinc-200 transition-colors flex items-center gap-2"
                      >
                         <Icons.Plus className="w-3.5 h-3.5" />
@@ -274,7 +197,7 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
                         tickets={projectTickets}
                         channels={campaign?.channels || []}
                         users={users}
-                        onTicketClick={(t) => console.log('Edit ticket', t)}
+                        onTicketClick={handleTicketClick}
                         onStatusChange={handleStatusChange}
                         groupByChannel={true}
                      />
@@ -411,12 +334,28 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
         </div>
 
         {showNewTicketModal && (
-            <MatrixTicketModal 
-                projectId={projectId}
-                channels={campaign?.channels || []}
-                users={users}
-                onClose={() => setShowNewTicketModal(false)}
-                onSave={handleCreateMatrixTicket}
+            <TicketModal 
+                initialData={editingTicket ? {
+                    id: editingTicket.id,
+                    title: editingTicket.title,
+                    description: editingTicket.description,
+                    priority: editingTicket.priority,
+                    assigneeId: editingTicket.assigneeId,
+                    channelId: editingTicket.channelId,
+                    betId: editingTicket.betId,
+                    projectId: editingTicket.projectId || projectId,
+                } : { projectId }} // PRE-FILL PROJECT ID on CREATE
+                context={{ channels, projects, users }}
+                onClose={() => { setShowNewTicketModal(false); setEditingTicket(null); }}
+                onSave={handleSaveTicket}
+                onDelete={editingTicket ? () => {
+                    if (editingTicket.channelId && editingTicket.betId) {
+                        deleteTicket(editingTicket.channelId, editingTicket.betId, editingTicket.id);
+                    } else {
+                        deleteProjectTicket(projectId, editingTicket.id);
+                    }
+                    setShowNewTicketModal(false);
+                } : undefined}
             />
         )}
     </div>
