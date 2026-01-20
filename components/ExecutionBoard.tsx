@@ -97,7 +97,7 @@ const ProjectCreationModal: React.FC<{
 // --- MAIN COMPONENT ---
 
 export const ExecutionBoard: React.FC = () => {
-  const { campaign, addTicket, users, currentUser, addBet, addChannel, addProject, deleteChannel } = useStore();
+  const { campaign, addTicket, users, currentUser, addBet, addChannel, addProject, deleteChannel, deleteProject } = useStore();
   
   // State
   const [view, setView] = useState<ViewState>({ type: 'MY_ISSUES' });
@@ -162,6 +162,11 @@ export const ExecutionBoard: React.FC = () => {
   
   const handleDeleteChannel = (channelId: string) => {
       deleteChannel(channelId);
+      setView({ type: 'MY_ISSUES' });
+  };
+  
+  const handleDeleteProject = (projectId: string) => {
+      deleteProject(projectId);
       setView({ type: 'MY_ISSUES' });
   };
 
@@ -317,6 +322,7 @@ export const ExecutionBoard: React.FC = () => {
                   projectId={view.id} 
                   // Navigating to a bet inside a project simply keeps you in project context or highlights
                   onNavigateToBet={(betId) => console.log('Focus bet', betId)}
+                  onDelete={() => handleDeleteProject(view.id)}
               />
           )}
 

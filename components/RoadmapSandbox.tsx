@@ -546,8 +546,10 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
     addRoadmapItem, 
     addChannel,
     updateChannel,
+    deleteChannel,
     updateRoadmapItem,
     deleteRoadmapItem,
+    deleteProject,
     addTimelineTag,
     deleteTimelineTag,
     currentUser,
@@ -989,6 +991,7 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
                     channelId={activeDashboardChannel} 
                     isModal={true}
                     onClose={() => setActiveDashboardChannel(null)}
+                    onDelete={() => { deleteChannel(activeDashboardChannel!); setActiveDashboardChannel(null); }}
                 />
             </div>
         </div>
@@ -1003,6 +1006,7 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
                     projectId={activeDashboardProject} 
                     isModal={true}
                     onClose={() => setActiveDashboardProject(null)}
+                    onDelete={() => { deleteProject(activeDashboardProject!); setActiveDashboardProject(null); }}
                 />
             </div>
         </div>

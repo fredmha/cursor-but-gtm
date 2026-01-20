@@ -11,13 +11,15 @@ interface ProjectDashboardProps {
   isModal?: boolean;
   onClose?: () => void;
   onNavigateToBet?: (betId: string) => void;
+  onDelete?: () => void;
 }
 
 export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({ 
     projectId, 
     isModal = false, 
     onClose, 
-    onNavigateToBet
+    onNavigateToBet,
+    onDelete
 }) => {
   const { 
       campaign, users, currentUser, 
@@ -163,11 +165,30 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
                     <p className="text-zinc-500 text-sm max-w-xl leading-relaxed">{project.description || "No description provided."}</p>
                 </div>
             </div>
-            {isModal && onClose && (
-                <button onClick={onClose} className="p-2 hover:bg-zinc-900 rounded-full text-zinc-500 hover:text-white transition-colors">
-                    <Icons.XCircle className="w-6 h-6" />
-                </button>
-            )}
+            <div className="flex items-center gap-2">
+                {onDelete && (
+                    <button 
+                        type="button"
+                        onClick={(e) => { 
+                            e.stopPropagation();
+                            if(window.confirm('Delete this project? This action cannot be undone.')) onDelete(); 
+                        }}
+                        className="p-2 hover:bg-red-500/10 rounded-full text-zinc-500 hover:text-red-500 transition-colors"
+                        title="Delete Project"
+                    >
+                        <Icons.Trash className="w-5 h-5" />
+                    </button>
+                )}
+                {isModal && onClose && (
+                    <button 
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); onClose(); }} 
+                        className="p-2 hover:bg-zinc-900 rounded-full text-zinc-500 hover:text-white transition-colors"
+                    >
+                        <Icons.XCircle className="w-6 h-6" />
+                    </button>
+                )}
+            </div>
         </div>
 
         <div className="flex-1 flex overflow-hidden">

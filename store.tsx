@@ -44,6 +44,7 @@ interface StoreState {
   
   addProject: (project: Project) => void;
   updateProject: (projectId: string, updates: Partial<Project>) => void;
+  deleteProject: (projectId: string) => void;
   addProjectUpdate: (projectId: string, update: ProjectUpdate) => void;
   
   // Project Ticket Actions
@@ -264,6 +265,15 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setCampaignState(prev => prev ? ({
       ...prev,
       projects: (prev.projects || []).map(p => p.id === projectId ? { ...p, ...updates } : p)
+    }) : null);
+  };
+
+  const deleteProject = (projectId: string) => {
+    if (!campaign) return;
+    setCampaignState(prev => prev ? ({
+      ...prev,
+      projects: (prev.projects || []).filter(p => p.id !== projectId),
+      roadmapItems: (prev.roadmapItems || []).filter(i => i.projectId !== projectId)
     }) : null);
   };
 
@@ -719,6 +729,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       removeChannelMember,
       addProject,
       updateProject,
+      deleteProject,
       addProjectUpdate,
       addProjectTicket,
       updateProjectTicket,

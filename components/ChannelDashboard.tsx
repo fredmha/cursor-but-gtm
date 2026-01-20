@@ -207,9 +207,13 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
                 </div>
             </div>
             <div className="flex items-center gap-2">
-                {!isModal && onDelete && (
+                {onDelete && (
                     <button 
-                        onClick={() => { if(confirm('Delete this channel?')) onDelete() }}
+                        type="button"
+                        onClick={(e) => { 
+                            e.stopPropagation();
+                            if(window.confirm('Delete this channel?')) onDelete(); 
+                        }}
                         className="p-2 hover:bg-red-500/10 rounded-full text-zinc-500 hover:text-red-500 transition-colors"
                         title="Delete Channel"
                     >
@@ -217,7 +221,11 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
                     </button>
                 )}
                 {isModal && onClose && (
-                    <button onClick={onClose} className="p-2 hover:bg-zinc-900 rounded-full text-zinc-500 hover:text-white transition-colors">
+                    <button 
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); onClose(); }} 
+                        className="p-2 hover:bg-zinc-900 rounded-full text-zinc-500 hover:text-white transition-colors"
+                    >
                         <Icons.XCircle className="w-6 h-6" />
                     </button>
                 )}
