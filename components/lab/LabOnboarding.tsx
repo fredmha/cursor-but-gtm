@@ -166,17 +166,17 @@ export const LabOnboarding: React.FC = () => {
   };
 
   return (
-    <div className="h-screen w-full bg-[#09090b] text-zinc-100 flex flex-col font-sans selection:bg-indigo-500/30">
+    <div className="h-screen w-full bg-white text-zinc-900 flex flex-col font-sans">
         {/* Header */}
-        <div className="h-14 border-b border-zinc-800 flex items-center justify-between px-6 bg-zinc-950">
-            <div className="flex items-center gap-2 text-indigo-500">
+        <div className="h-14 border-b border-zinc-100 flex items-center justify-between px-6 bg-white shrink-0">
+            <div className="flex items-center gap-2 text-indigo-600">
                 <Icons.Sparkles className="w-5 h-5" />
                 <span className="font-bold tracking-wider">STRATEGY_LAB</span>
             </div>
             {isReady && !isGenerating && (
                 <button 
                     onClick={handleGenerate}
-                    className="px-4 py-1.5 bg-white text-black font-bold text-xs rounded hover:bg-zinc-200 transition-colors flex items-center gap-2"
+                    className="px-4 py-1.5 bg-zinc-900 text-white font-bold text-xs rounded hover:bg-zinc-800 transition-colors flex items-center gap-2 shadow-lg"
                 >
                     <Icons.Play className="w-3 h-3" /> GENERATE GTM OS
                 </button>
@@ -184,17 +184,17 @@ export const LabOnboarding: React.FC = () => {
         </div>
 
         {/* Chat Area */}
-        <div className="flex-1 overflow-y-auto p-4 custom-scrollbar flex flex-col items-center">
+        <div className="flex-1 overflow-y-auto p-4 custom-scrollbar flex flex-col items-center bg-zinc-50/50">
             <div className="w-full max-w-2xl space-y-6 py-10">
                 {messages.map(msg => (
                     <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-[80%] p-4 rounded-xl text-sm leading-relaxed ${
+                        <div className={`max-w-[80%] p-4 rounded-xl text-sm leading-relaxed shadow-sm ${
                             msg.role === 'user' 
-                            ? 'bg-zinc-800 text-white rounded-br-none border border-zinc-700' 
-                            : 'bg-indigo-900/20 text-indigo-100 rounded-bl-none border border-indigo-500/20 shadow-[0_0_15px_rgba(99,102,241,0.1)]'
+                            ? 'bg-white text-zinc-900 rounded-br-none border border-zinc-200' 
+                            : 'bg-zinc-100 text-zinc-700 rounded-bl-none'
                         }`}>
                             {msg.role === 'model' && (
-                                <div className="text-[10px] font-bold text-indigo-400 mb-1 uppercase tracking-wider flex items-center gap-1">
+                                <div className="text-[10px] font-bold text-indigo-600 mb-1 uppercase tracking-wider flex items-center gap-1">
                                     <Icons.Sparkles className="w-3 h-3" /> Architect
                                 </div>
                             )}
@@ -205,10 +205,10 @@ export const LabOnboarding: React.FC = () => {
                 
                 {isProcessing && (
                     <div className="flex justify-start">
-                        <div className="bg-indigo-900/10 text-indigo-400 p-4 rounded-xl rounded-bl-none border border-indigo-500/10 flex items-center gap-2">
-                            <span className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce"></span>
-                            <span className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce delay-100"></span>
-                            <span className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce delay-200"></span>
+                        <div className="bg-zinc-100 text-zinc-400 p-4 rounded-xl rounded-bl-none flex items-center gap-2">
+                            <span className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce"></span>
+                            <span className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce delay-100"></span>
+                            <span className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce delay-200"></span>
                         </div>
                     </div>
                 )}
@@ -217,18 +217,18 @@ export const LabOnboarding: React.FC = () => {
         </div>
 
         {/* Input Area */}
-        <div className="p-6 border-t border-zinc-800 bg-zinc-900/50 flex justify-center">
+        <div className="p-6 border-t border-zinc-100 bg-white flex justify-center shrink-0">
             <div className="w-full max-w-2xl relative">
                 {isGenerating ? (
-                    <div className="absolute inset-0 bg-zinc-900/90 z-10 flex flex-col items-center justify-center rounded-lg text-center">
-                        <Icons.Sparkles className="w-8 h-8 text-indigo-500 animate-spin mb-2" />
-                        <span className="text-sm font-bold text-white">Synthesizing Strategy...</span>
+                    <div className="absolute inset-0 bg-white/90 z-10 flex flex-col items-center justify-center rounded-lg text-center backdrop-blur-sm">
+                        <Icons.Sparkles className="w-8 h-8 text-indigo-600 animate-spin mb-2" />
+                        <span className="text-sm font-bold text-zinc-900">Synthesizing Strategy...</span>
                         <span className="text-xs text-zinc-500">Creating Docs, Channels, and Bets</span>
                     </div>
                 ) : null}
                 
                 <input 
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-4 pr-12 text-sm text-white focus:border-indigo-500 focus:outline-none shadow-lg placeholder-zinc-600"
+                    className="w-full bg-white border border-zinc-200 rounded-xl p-4 pr-12 text-sm text-zinc-900 focus:border-indigo-500 focus:outline-none shadow-lg shadow-zinc-100 placeholder-zinc-400"
                     placeholder="Type your answer..."
                     value={input}
                     onChange={e => setInput(e.target.value)}

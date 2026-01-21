@@ -1,5 +1,3 @@
-
-
 import React, { useState, useMemo, useEffect } from 'react';
 import { useStore, generateId } from '../store';
 import { Icons } from '../constants';
@@ -19,17 +17,17 @@ interface ChannelDashboardProps {
 }
 
 const StrategyLockOverlay: React.FC<{ onCreateBet: () => void }> = ({ onCreateBet }) => (
-    <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-zinc-900/10 h-full animate-in fade-in duration-500">
-        <div className="w-16 h-16 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center mb-6 shadow-xl">
-            <Icons.Zap className="w-8 h-8 text-zinc-600" />
+    <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-zinc-50 h-full animate-in fade-in duration-500">
+        <div className="w-16 h-16 rounded-2xl bg-white border border-zinc-200 flex items-center justify-center mb-6 shadow-sm">
+            <Icons.Zap className="w-8 h-8 text-zinc-400" />
         </div>
-        <h3 className="text-lg font-bold text-white mb-2">Execution Locked</h3>
+        <h3 className="text-lg font-bold text-zinc-900 mb-2">Execution Locked</h3>
         <p className="text-sm text-zinc-500 max-w-xs mb-8 leading-relaxed">
             You cannot create tickets without a strategy. Define a <strong>Strategic Bet</strong> (Hypothesis) first to ensure all work serves a purpose.
         </p>
         <button 
             onClick={onCreateBet}
-            className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold uppercase tracking-wider rounded-lg shadow-lg shadow-indigo-900/20 transition-all flex items-center gap-2"
+            className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold uppercase tracking-wider rounded-lg shadow-lg shadow-indigo-100 transition-all flex items-center gap-2"
         >
             <Icons.Plus className="w-4 h-4" />
             Place First Bet
@@ -71,8 +69,6 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
         const params = new URLSearchParams(window.location.search);
         if (params.get('lab') === 'true') {
             setIsLabMode(true);
-            // Default to Strategy tab if in Lab Mode and no bets exist yet?
-            // Let's stick to default QUEUE but allow user to click STRATEGY.
         }
     }
   }, []);
@@ -147,7 +143,6 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
   };
 
   const handleStatusChange = (ticketId: string, newStatus: TicketStatus) => {
-      // Find the ticket's bet ID since we need it for update
       const ticket = allTickets.find(t => t.id === ticketId);
       if (ticket && ticket.betId) {
           updateTicket(channelId, ticket.betId, ticketId, { status: newStatus });
@@ -155,7 +150,7 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
   };
 
   const handleSaveTicket = (data: any) => {
-      if (!data.betId) return; // Must have a bet for this view
+      if (!data.betId) return;
 
       const ticketData: Ticket = {
           id: data.id || generateId(),
@@ -173,7 +168,6 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
 
       if (editingTicket) {
            if (editingTicket.betId && editingTicket.betId !== data.betId) {
-               // Moved bets
                deleteTicket(channelId, editingTicket.betId, editingTicket.id);
                addTicket(channelId, data.betId, ticketData);
            } else {
@@ -194,15 +188,13 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
       setShowTicketModal(false);
   };
 
-  // IF STRATEGY TAB ACTIVE (LAB MODE): Render Plan Modal inline
   if (activeTab === 'STRATEGY') {
       return (
-          <div className="h-full bg-[#09090b] relative flex flex-col">
-              {/* Custom Close Button for the 'Modal-in-Modal' feel if needed, but here we just reuse the container */}
+          <div className="h-full bg-white relative flex flex-col">
               <div className="absolute top-4 right-4 z-50">
                    <button 
                         onClick={() => setActiveTab('QUEUE')} 
-                        className="bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white px-3 py-1.5 rounded text-xs font-bold"
+                        className="bg-white border border-zinc-200 text-zinc-500 hover:text-zinc-900 px-3 py-1.5 rounded text-xs font-bold shadow-sm"
                     >
                         Close Lab
                    </button>
@@ -213,24 +205,24 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
   }
 
   return (
-    <div className={`flex flex-col bg-[#09090b] h-full ${isModal ? 'rounded-xl overflow-hidden' : ''}`}>
+    <div className={`flex flex-col bg-white h-full ${isModal ? 'rounded-xl overflow-hidden' : ''}`}>
         
         {/* Header */}
-        <div className={`p-8 border-b border-zinc-800 bg-zinc-950 flex justify-between items-start shrink-0`}>
+        <div className={`p-8 border-b border-zinc-100 bg-white flex justify-between items-start shrink-0`}>
             <div className="flex gap-4">
-                <div className={`w-12 h-12 rounded-xl flex items-center justify-center border bg-indigo-500/10 border-indigo-500/20 text-indigo-500`}>
+                <div className={`w-12 h-12 rounded-xl flex items-center justify-center border bg-indigo-50 border-indigo-100 text-indigo-600`}>
                     <Icons.Zap className="w-6 h-6"/>
                 </div>
                 <div>
-                    <h2 className="text-2xl font-bold text-white mb-1">{channel.name}</h2>
+                    <h2 className="text-2xl font-bold text-zinc-900 mb-1">{channel.name}</h2>
                     <div className="flex gap-1.5">
                         {channel.tags?.map(tag => (
                             <span 
                                 key={tag} 
                                 className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
                                     tag === 'Inbound' 
-                                    ? 'bg-cyan-500/10 text-cyan-500' 
-                                    : 'bg-orange-500/10 text-orange-500'
+                                    ? 'bg-cyan-50 text-cyan-600 border border-cyan-100' 
+                                    : 'bg-orange-50 text-orange-600 border border-orange-100'
                                 }`}
                             >
                                 {tag}
@@ -247,7 +239,7 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
                             e.stopPropagation();
                             if(window.confirm('Delete this channel?')) onDelete(); 
                         }}
-                        className="p-2 hover:bg-red-500/10 rounded-full text-zinc-500 hover:text-red-500 transition-colors"
+                        className="p-2 hover:bg-red-50 rounded-full text-zinc-400 hover:text-red-500 transition-colors"
                         title="Delete Channel"
                     >
                         <Icons.Trash className="w-5 h-5" />
@@ -257,7 +249,7 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
                     <button 
                         type="button"
                         onClick={(e) => { e.stopPropagation(); onClose(); }} 
-                        className="p-2 hover:bg-zinc-900 rounded-full text-zinc-500 hover:text-white transition-colors"
+                        className="p-2 hover:bg-zinc-100 rounded-full text-zinc-400 hover:text-zinc-900 transition-colors"
                     >
                         <Icons.XCircle className="w-6 h-6" />
                     </button>
@@ -269,13 +261,13 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
         <div className="flex-1 flex overflow-hidden">
             
             {/* COLUMN 1: STRATEGY (Principles & Bets) - 25% */}
-            <div className="w-[25%] border-r border-zinc-800 flex flex-col overflow-hidden bg-zinc-900/10">
+            <div className="w-[25%] border-r border-zinc-100 flex flex-col overflow-hidden bg-zinc-50/50">
                 <div className="flex-1 overflow-y-auto p-6 space-y-8 custom-scrollbar">
                     
                     {/* Team Members */}
                     <div>
                         <div className="flex items-center justify-between mb-2">
-                             <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider flex items-center gap-2">
+                             <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
                                 <Icons.Target className="w-3.5 h-3.5" /> Team
                              </h3>
                         </div>
@@ -284,27 +276,27 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
                                 const u = users.find(user => user.id === mid);
                                 if (!u) return null;
                                 return (
-                                    <div key={mid} className={`flex items-center gap-2 px-2 py-1 bg-zinc-900 rounded border border-zinc-800`}>
+                                    <div key={mid} className={`flex items-center gap-2 px-2 py-1 bg-white rounded border border-zinc-200 shadow-sm`}>
                                         <div className={`w-4 h-4 rounded-full ${u.color} text-[8px] flex items-center justify-center text-white`}>{u.initials}</div>
-                                        <span className="text-xs text-zinc-300">{u.name}</span>
-                                        <button onClick={() => removeChannelMember(channelId, mid)} className="text-zinc-600 hover:text-red-500 ml-1"><Icons.XCircle className="w-3 h-3"/></button>
+                                        <span className="text-xs text-zinc-600">{u.name}</span>
+                                        <button onClick={() => removeChannelMember(channelId, mid)} className="text-zinc-400 hover:text-red-500 ml-1"><Icons.XCircle className="w-3 h-3"/></button>
                                     </div>
                                 )
                             })}
-                            {(channel.memberIds || []).length === 0 && <span className="text-xs text-zinc-600 italic">No members assigned.</span>}
+                            {(channel.memberIds || []).length === 0 && <span className="text-xs text-zinc-400 italic">No members assigned.</span>}
                         </div>
                         
                         {/* Add Member Dropdown */}
                         <div className="relative group">
-                            <button className="text-[10px] font-bold text-indigo-400 uppercase hover:text-indigo-300 flex items-center gap-1">
+                            <button className="text-[10px] font-bold text-indigo-500 uppercase hover:text-indigo-600 flex items-center gap-1">
                                 + Add Member
                             </button>
-                            <div className="absolute top-full left-0 mt-2 w-48 bg-zinc-950 border border-zinc-800 rounded shadow-xl hidden group-hover:block z-50">
+                            <div className="absolute top-full left-0 mt-2 w-48 bg-white border border-zinc-100 rounded shadow-xl hidden group-hover:block z-50">
                                 {users.filter(u => !(channel.memberIds || []).includes(u.id)).map(u => (
                                     <button 
                                         key={u.id}
                                         onClick={() => addChannelMember(channelId, u.id)}
-                                        className="w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2"
+                                        className="w-full text-left px-3 py-2 text-xs text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900 flex items-center gap-2"
                                     >
                                         <div className={`w-2 h-2 rounded-full ${u.color}`}></div>
                                         {u.name}
@@ -318,15 +310,15 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
                     <div>
                         <div className="flex items-center gap-2 mb-4">
                             <Icons.FileText className="w-4 h-4 text-pink-500" />
-                            <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Channel Mandates</h3>
+                            <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Channel Mandates</h3>
                         </div>
                         <div className="space-y-3 mb-3">
                             {(channel.principles || []).map(p => (
-                                <div key={p.id} className="group relative bg-zinc-900 border border-zinc-800 rounded p-3 hover:border-zinc-700 transition-colors">
-                                    <p className="text-xs text-zinc-300 leading-relaxed">{p.text}</p>
+                                <div key={p.id} className="group relative bg-white border border-zinc-200 rounded p-3 hover:border-zinc-300 transition-colors shadow-sm">
+                                    <p className="text-xs text-zinc-600 leading-relaxed">{p.text}</p>
                                     <button 
                                         onClick={() => deleteChannelPrinciple(channelId, p.id)}
-                                        className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-red-500 transition-opacity"
+                                        className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-500 transition-opacity"
                                     >
                                         <Icons.XCircle className="w-3.5 h-3.5" />
                                     </button>
@@ -335,7 +327,7 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
                         </div>
                         <div className="flex gap-2">
                             <input 
-                                className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-white focus:border-indigo-500 focus:outline-none"
+                                className="flex-1 bg-white border border-zinc-200 rounded-lg px-3 py-2 text-xs text-zinc-900 focus:border-indigo-500 focus:outline-none shadow-sm"
                                 placeholder="Add mandate..."
                                 value={newPrinciple}
                                 onChange={e => setNewPrinciple(e.target.value)}
@@ -348,12 +340,12 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
                     <div>
                         <div className="flex items-center justify-between mb-2">
                             <div className="flex items-center gap-2">
-                                <Icons.Target className="w-4 h-4 text-indigo-500" />
-                                <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Active Bets</h3>
+                                <Icons.Target className="w-4 h-4 text-indigo-600" />
+                                <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Active Bets</h3>
                             </div>
-                            <button onClick={() => setShowBetModal(true)} className="text-[10px] text-indigo-400 font-bold uppercase hover:text-indigo-300">+ New</button>
+                            <button onClick={() => setShowBetModal(true)} className="text-[10px] text-indigo-500 font-bold uppercase hover:text-indigo-600">+ New</button>
                         </div>
-                        <p className="text-[10px] text-zinc-600 italic mb-4">Bets are your hypotheses. Tickets are the proof.</p>
+                        <p className="text-[10px] text-zinc-400 italic mb-4">Bets are your hypotheses. Tickets are the proof.</p>
                         
                         <div className="space-y-3">
                             {channel.bets.map(bet => {
@@ -364,19 +356,19 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
                                 return (
                                     <div 
                                         key={bet.id} 
-                                        className="p-3 bg-zinc-900 border border-zinc-800 rounded-lg"
+                                        className="p-3 bg-white border border-zinc-200 rounded-lg shadow-sm"
                                     >
-                                        <h4 className="text-sm font-bold text-zinc-200 mb-2 leading-snug">{bet.description}</h4>
+                                        <h4 className="text-sm font-bold text-zinc-800 mb-2 leading-snug">{bet.description}</h4>
                                         <div className="flex items-center gap-3">
-                                            <div className="flex-1 h-1 bg-zinc-800 rounded-full overflow-hidden">
+                                            <div className="flex-1 h-1 bg-zinc-100 rounded-full overflow-hidden">
                                                 <div className="h-full bg-indigo-500" style={{ width: `${progress}%` }}></div>
                                             </div>
-                                            <span className="text-[10px] font-mono text-zinc-500">{done}/{total}</span>
+                                            <span className="text-[10px] font-mono text-zinc-400">{done}/{total}</span>
                                         </div>
                                     </div>
                                 );
                             })}
-                             {channel.bets.length === 0 && <p className="text-xs text-zinc-600 italic">No active bets.</p>}
+                             {channel.bets.length === 0 && <p className="text-xs text-zinc-400 italic">No active bets.</p>}
                         </div>
                     </div>
 
@@ -384,15 +376,15 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
             </div>
 
             {/* COLUMN 2: EXECUTION (Timeline & Board) - 50% */}
-            <div className="w-[50%] flex flex-col overflow-hidden bg-[#09090b]">
+            <div className="w-[50%] flex flex-col overflow-hidden bg-white">
                  {/* Tabs Header */}
-                 <div className="px-6 py-4 border-b border-zinc-800 flex items-center justify-between shrink-0 bg-zinc-900/20">
+                 <div className="px-6 py-4 border-b border-zinc-100 flex items-center justify-between shrink-0 bg-white">
                      <div className="flex items-center gap-4">
                          {(['QUEUE', 'KANBAN', 'GANTT'] as const).map(tab => (
                              <button
                                 key={tab}
                                 onClick={() => setActiveTab(tab)}
-                                className={`text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded transition-all ${activeTab === tab ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+                                className={`text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded transition-all ${activeTab === tab ? 'bg-zinc-900 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50'}`}
                              >
                                  {tab}
                              </button>
@@ -400,7 +392,7 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
                          {isLabMode && (
                              <button
                                 onClick={() => setActiveTab('STRATEGY')}
-                                className="text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded transition-all flex items-center gap-1 text-zinc-500 hover:text-purple-400 border border-transparent"
+                                className="text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded transition-all flex items-center gap-1 text-zinc-500 hover:text-purple-600 border border-transparent"
                              >
                                  <Icons.Layout className="w-3 h-3" /> Strategy Plan
                              </button>
@@ -409,7 +401,7 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
                      <button 
                         onClick={() => { setEditingTicket(null); setShowTicketModal(true); }}
                         disabled={!hasBets}
-                        className={`px-4 py-1.5 bg-white text-black text-xs font-bold rounded hover:bg-zinc-200 transition-colors flex items-center gap-2 ${!hasBets ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        className={`px-4 py-1.5 bg-zinc-900 text-white text-xs font-bold rounded hover:bg-zinc-800 transition-colors flex items-center gap-2 shadow-sm ${!hasBets ? 'opacity-50 cursor-not-allowed' : ''}`}
                      >
                         <Icons.Plus className="w-3.5 h-3.5" />
                         Ticket
@@ -430,35 +422,35 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
                                                 <div 
                                                     key={t.id} 
                                                     onClick={() => handleTicketClick(t)}
-                                                    className="flex items-center gap-4 p-3 bg-zinc-900/30 border border-zinc-800 rounded hover:bg-zinc-900 cursor-pointer group"
+                                                    className="flex items-center gap-4 p-3 bg-white border border-zinc-200 rounded hover:bg-zinc-50 cursor-pointer group shadow-sm hover:shadow-md transition-all"
                                                 >
-                                                    <div className={`shrink-0 w-2 h-2 rounded-full ${t.status === TicketStatus.Done ? 'bg-emerald-500' : t.status === TicketStatus.InProgress ? 'bg-amber-500' : 'bg-zinc-600'}`}></div>
-                                                    <span className="text-xs font-mono text-zinc-500 w-16">{t.shortId}</span>
-                                                    <span className="text-sm text-zinc-300 truncate flex-1 font-medium">{t.title}</span>
+                                                    <div className={`shrink-0 w-2 h-2 rounded-full ${t.status === TicketStatus.Done ? 'bg-emerald-500' : t.status === TicketStatus.InProgress ? 'bg-amber-500' : 'bg-zinc-300'}`}></div>
+                                                    <span className="text-xs font-mono text-zinc-400 w-16">{t.shortId}</span>
+                                                    <span className="text-sm text-zinc-700 truncate flex-1 font-medium">{t.title}</span>
                                                     
                                                     <div className="flex items-center gap-6">
-                                                        <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${t.priority === 'Urgent' ? 'bg-red-500/10 text-red-500' : 'bg-zinc-800 text-zinc-500'}`}>{t.priority}</span>
-                                                        <span className="text-xs text-zinc-500 font-mono w-24 text-right">
+                                                        <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${t.priority === 'Urgent' ? 'bg-red-50 text-red-600' : 'bg-zinc-100 text-zinc-500'}`}>{t.priority}</span>
+                                                        <span className="text-xs text-zinc-400 font-mono w-24 text-right">
                                                             {t.dueDate ? new Date(t.dueDate).toLocaleDateString() : '--'}
                                                         </span>
                                                         <div className="w-6 flex justify-center">
                                                             {assignee ? (
                                                                 <div className={`w-5 h-5 rounded-full ${assignee.color} text-[8px] text-white flex items-center justify-center font-bold`}>{assignee.initials}</div>
                                                             ) : (
-                                                                <div className="w-5 h-5 rounded-full border border-zinc-700"></div>
+                                                                <div className="w-5 h-5 rounded-full border border-zinc-300 border-dashed"></div>
                                                             )}
                                                         </div>
                                                     </div>
                                                 </div>
                                             )
                                         })}
-                                        {allTickets.length === 0 && <p className="text-center text-zinc-500 text-sm py-10">No tickets in queue.</p>}
+                                        {allTickets.length === 0 && <p className="text-center text-zinc-400 text-sm py-10">No tickets in queue.</p>}
                                     </div>
                                 </div>
                             )}
 
                             {activeTab === 'KANBAN' && (
-                                <div className="h-full overflow-hidden p-6 bg-[#09090b]">
+                                <div className="h-full overflow-hidden p-6 bg-white">
                                     <TicketBoard 
                                         tickets={allTickets}
                                         channels={campaign?.channels || []}
@@ -481,7 +473,7 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
             </div>
 
             {/* COLUMN 3: KNOWLEDGE (Links & Notes) - 25% */}
-            <div className="w-[25%] border-l border-zinc-800 flex flex-col overflow-hidden bg-zinc-900/10">
+            <div className="w-[25%] border-l border-zinc-100 flex flex-col overflow-hidden bg-zinc-50/50">
                 <div className="flex-1 overflow-y-auto p-6 space-y-8 custom-scrollbar">
                     
                     {/* SOPs & Links */}
@@ -489,21 +481,21 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
                         <div className="flex items-center justify-between mb-4">
                             <div className="flex items-center gap-2">
                                 <Icons.Layers className="w-4 h-4 text-blue-500" />
-                                <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Resources</h3>
+                                <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Resources</h3>
                             </div>
-                            <button onClick={() => setIsAddingLink(!isAddingLink)} className="text-[10px] text-blue-400 font-bold uppercase hover:text-blue-300">+ Add</button>
+                            <button onClick={() => setIsAddingLink(!isAddingLink)} className="text-[10px] text-blue-500 font-bold uppercase hover:text-blue-600">+ Add</button>
                         </div>
                         
                         {isAddingLink && (
-                            <div className="bg-zinc-900 p-3 rounded mb-3 space-y-2 border border-zinc-800">
+                            <div className="bg-white p-3 rounded mb-3 space-y-2 border border-zinc-200 shadow-sm">
                                 <input 
-                                    className="w-full bg-zinc-950 px-2 py-1 text-xs text-white border border-zinc-800 rounded focus:outline-none"
+                                    className="w-full bg-zinc-50 px-2 py-1 text-xs text-zinc-900 border border-zinc-200 rounded focus:outline-none"
                                     placeholder="Title"
                                     value={newLinkData.title}
                                     onChange={e => setNewLinkData({...newLinkData, title: e.target.value})}
                                 />
                                 <input 
-                                    className="w-full bg-zinc-950 px-2 py-1 text-xs text-white border border-zinc-800 rounded focus:outline-none"
+                                    className="w-full bg-zinc-50 px-2 py-1 text-xs text-zinc-900 border border-zinc-200 rounded focus:outline-none"
                                     placeholder="URL"
                                     value={newLinkData.url}
                                     onChange={e => setNewLinkData({...newLinkData, url: e.target.value})}
@@ -517,17 +509,17 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
 
                         <div className="space-y-2">
                             {(channel.links || []).map(l => (
-                                <div key={l.id} className="flex items-center justify-between group p-2 hover:bg-zinc-800 rounded transition-colors">
-                                    <a href={l.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-xs text-zinc-300 hover:text-blue-400 truncate">
-                                        <Icons.FileText className="w-3.5 h-3.5 text-zinc-500" />
+                                <div key={l.id} className="flex items-center justify-between group p-2 hover:bg-zinc-100 rounded transition-colors">
+                                    <a href={l.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-xs text-zinc-600 hover:text-blue-600 truncate">
+                                        <Icons.FileText className="w-3.5 h-3.5 text-zinc-400" />
                                         {l.title}
                                     </a>
-                                    <button onClick={() => removeChannelLink(channelId, l.id)} className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-red-500">
+                                    <button onClick={() => removeChannelLink(channelId, l.id)} className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-500">
                                         <Icons.XCircle className="w-3 h-3" />
                                     </button>
                                 </div>
                             ))}
-                            {(!channel.links || channel.links.length === 0) && <p className="text-xs text-zinc-600 italic">No resources added.</p>}
+                            {(!channel.links || channel.links.length === 0) && <p className="text-xs text-zinc-400 italic">No resources added.</p>}
                         </div>
                     </div>
 
@@ -535,26 +527,26 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
                     <div className="flex flex-col h-64">
                          <div className="flex items-center gap-2 mb-4">
                             <Icons.Edit className="w-4 h-4 text-purple-500" />
-                            <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Team Notes</h3>
+                            <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Team Notes</h3>
                         </div>
-                        <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 mb-3 bg-zinc-900/30 rounded p-2">
+                        <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 mb-3 bg-zinc-100/50 rounded p-2 border border-zinc-100">
                             {(channel.notes || []).map(n => {
                                 const author = users.find(u => u.id === n.authorId);
                                 return (
                                     <div key={n.id} className="text-xs group">
                                         <div className="flex items-center gap-1 mb-1">
-                                            <span className="font-bold text-zinc-400">{author?.initials}</span>
-                                            <span className="text-[10px] text-zinc-600">{new Date(n.date).toLocaleDateString()}</span>
-                                            <button onClick={() => deleteChannelNote(channelId, n.id)} className="opacity-0 group-hover:opacity-100 ml-auto text-zinc-700 hover:text-red-500"><Icons.Trash className="w-3 h-3" /></button>
+                                            <span className="font-bold text-zinc-500">{author?.initials}</span>
+                                            <span className="text-[10px] text-zinc-400">{new Date(n.date).toLocaleDateString()}</span>
+                                            <button onClick={() => deleteChannelNote(channelId, n.id)} className="opacity-0 group-hover:opacity-100 ml-auto text-zinc-400 hover:text-red-500"><Icons.Trash className="w-3 h-3" /></button>
                                         </div>
-                                        <p className="text-zinc-300 leading-relaxed">{n.text}</p>
+                                        <p className="text-zinc-700 leading-relaxed">{n.text}</p>
                                     </div>
                                 )
                             })}
                         </div>
                         <div className="flex gap-2">
                              <input 
-                                className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-white focus:border-indigo-500 focus:outline-none"
+                                className="flex-1 bg-white border border-zinc-200 rounded-lg px-3 py-2 text-xs text-zinc-900 focus:border-indigo-500 focus:outline-none shadow-sm"
                                 placeholder="Type a note..."
                                 value={newNote}
                                 onChange={e => setNewNote(e.target.value)}
