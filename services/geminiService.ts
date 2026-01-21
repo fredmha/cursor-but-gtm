@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 
 const getClient = () => {
@@ -13,8 +14,7 @@ export const generateChannelsAndBets = async (objective: string): Promise<any> =
   const client = getClient();
   if (!client) return null;
 
-  const prompt = `You are a GTM strategist. Given the objective: "${objective}", suggest 3 marketing channels and 2 specific "Bets" (experiments) per channel. 
-  A Bet is a specific hypothesis-driven activity. 
+  const prompt = `You are a GTM strategist. Given the objective: "${objective}", suggest 3 marketing channels and 2 specific "Tickets" (tasks) per channel. 
   Return JSON only.`;
 
   const responseSchema: Schema = {
@@ -27,19 +27,19 @@ export const generateChannelsAndBets = async (objective: string): Promise<any> =
           properties: {
             name: { type: Type.STRING, description: "Channel name (e.g. SEO, Cold Email)" },
             type: { type: Type.STRING, description: "Category of channel" },
-            bets: {
+            tickets: {
               type: Type.ARRAY,
               items: {
                 type: Type.OBJECT,
                 properties: {
-                  description: { type: Type.STRING, description: "Actionable bet description" },
-                  hypothesis: { type: Type.STRING, description: "Why we think this will work" },
+                  title: { type: Type.STRING, description: "Actionable task title" },
+                  description: { type: Type.STRING, description: "Task description" },
                 },
-                required: ["description", "hypothesis"],
+                required: ["title", "description"],
               },
             },
           },
-          required: ["name", "type", "bets"],
+          required: ["name", "type", "tickets"],
         },
       },
     },
@@ -66,31 +66,7 @@ export const generateChannelsAndBets = async (objective: string): Promise<any> =
 };
 
 export const generateTicketsForBet = async (betDescription: string): Promise<string[]> => {
-  const client = getClient();
-  if (!client) return [];
-
-  const prompt = `For the GTM experiment/bet: "${betDescription}", list 3-5 tactical execution tickets to complete this bet. Return a simple JSON array of strings.`;
-  
-   const responseSchema: Schema = {
-    type: Type.ARRAY,
-    items: { type: Type.STRING }
-  };
-
-  try {
-    const response = await client.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: responseSchema,
-      },
-    });
-
-    const text = response.text;
-    if (!text) return [];
-    return JSON.parse(text);
-  } catch (error) {
-    console.error("Gemini Error:", error);
-    return [];
-  }
+    // This function is likely deprecated now that we don't have bets, but kept for interface compatibility if needed, 
+    // or we could delete it. I will simplify it to return empty array or handle general task expansion if reused.
+    return []; 
 };

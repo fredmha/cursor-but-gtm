@@ -1,5 +1,6 @@
+
 import { GoogleGenAI, Type, Schema } from "@google/genai";
-import { ChannelPlan, Bet, Campaign, ContextDoc, Channel } from "../types";
+import { ChannelPlan, Ticket, Campaign, ContextDoc, Channel } from "../types";
 
 const getClient = () => {
   const apiKey = process.env.API_KEY;
@@ -10,8 +11,8 @@ const getClient = () => {
   return new GoogleGenAI({ apiKey });
 };
 
-// Generates Bets based on the structured Channel Plan
-export const generateBetsFromPlan = async (channelName: string, plan: ChannelPlan): Promise<Partial<Bet>[]> => {
+// Generates Tickets based on the structured Channel Plan
+export const generateBetsFromPlan = async (channelName: string, plan: ChannelPlan): Promise<Partial<Ticket>[]> => {
   const client = getClient();
   if (!client) return [];
 
@@ -25,12 +26,12 @@ export const generateBetsFromPlan = async (channelName: string, plan: ChannelPla
 
   const prompt = `
     You are a GTM Strategist. Based on the following strategic context for the channel "${channelName}", 
-    generate 3 high-impact "Bets" (experiments/initiatives).
+    generate 3 high-impact execution tasks (Tickets).
     
     Context:
     ${context}
 
-    Return a JSON array of objects with 'description' (the bet title) and 'hypothesis' (why it will work).
+    Return a JSON array of objects with 'title' (actionable task name) and 'description' (details).
   `;
 
   const responseSchema: Schema = {
@@ -38,10 +39,10 @@ export const generateBetsFromPlan = async (channelName: string, plan: ChannelPla
     items: {
       type: Type.OBJECT,
       properties: {
-        description: { type: Type.STRING, description: "Actionable bet title (e.g. 'Launch Cold Email Sequence')" },
-        hypothesis: { type: Type.STRING, description: "Strategic reasoning (e.g. 'Targeting CFOs with ROI data will increase reply rate')" },
+        title: { type: Type.STRING, description: "Actionable task title (e.g. 'Launch Cold Email Sequence')" },
+        description: { type: Type.STRING, description: "Details on how to execute" },
       },
-      required: ["description", "hypothesis"],
+      required: ["title", "description"],
     },
   };
 
@@ -86,7 +87,7 @@ export const generateFullCampaignFromChat = async (transcript: ChatMessage[]): P
         1. Extract the North Star Objective.
         2. Define 3-5 Operating Principles (Rules of Engagement).
         3. Define 3-4 Distribution Channels.
-        4. For each channel, create 2-3 "Bets" (Strategic Hypotheses).
+        4. For each channel, create 2-3 "Tickets" (Execution Tasks).
         5. Create 3 Context Documents (Markdown format) that summarize the strategy:
            - "ICP Definition" (Who they are targeting)
            - "Value Proposition" (Why they win)
@@ -118,19 +119,19 @@ export const generateFullCampaignFromChat = async (transcript: ChatMessage[]): P
                     properties: {
                         name: { type: Type.STRING },
                         tags: { type: Type.ARRAY, items: { type: Type.STRING } },
-                        bets: {
+                        tickets: {
                             type: Type.ARRAY,
                             items: {
                                 type: Type.OBJECT,
                                 properties: {
-                                    description: { type: Type.STRING },
-                                    hypothesis: { type: Type.STRING }
+                                    title: { type: Type.STRING },
+                                    description: { type: Type.STRING }
                                 },
-                                required: ["description", "hypothesis"]
+                                required: ["title", "description"]
                             }
                         }
                     },
-                    required: ["name", "tags", "bets"]
+                    required: ["name", "tags", "tickets"]
                 }
             },
             docs: {

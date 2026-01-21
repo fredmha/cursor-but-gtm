@@ -31,7 +31,7 @@ export const ChannelSetupModal: React.FC<ChannelSetupModalProps> = ({ existingCh
         id: crypto.randomUUID(), 
         name: newChannelName.trim(), 
         tags: [],
-        bets: [],
+        tickets: [],
         principles: []
     }]);
     setNewChannelName('');

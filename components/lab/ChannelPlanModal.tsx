@@ -1,8 +1,9 @@
+
 import React, { useState, useEffect } from 'react';
 import { useStore, generateId } from '../../store';
 import { Icons } from '../../constants';
 import { generateBetsFromPlan } from '../../services/labService';
-import { Status, ChannelPlan } from '../../types';
+import { Status, ChannelPlan, TicketStatus } from '../../types';
 
 interface ChannelPlanModalProps {
   channelId: string;
@@ -10,7 +11,7 @@ interface ChannelPlanModalProps {
 }
 
 export const ChannelPlanModal: React.FC<ChannelPlanModalProps> = ({ channelId, onClose }) => {
-  const { campaign, updateChannelPlan, addBet, currentUser } = useStore();
+  const { campaign, updateChannelPlan, addTicket, currentUser } = useStore();
   const channel = campaign?.channels.find(c => c.id === channelId);
   
   const [formData, setFormData] = useState<ChannelPlan>({
@@ -43,22 +44,21 @@ export const ChannelPlanModal: React.FC<ChannelPlanModalProps> = ({ channelId, o
     };
     updateChannelPlan(channelId, plan);
 
-    // 2. Generate Bets
-    const newBets = await generateBetsFromPlan(channel.name, plan);
+    // 2. Generate Tickets
+    const newTickets = await generateBetsFromPlan(channel.name, plan);
     
-    // 3. Add Bets to Store
-    newBets.forEach(bet => {
-        addBet(channelId, {
+    // 3. Add Tickets to Store
+    newTickets.forEach(t => {
+        addTicket(channelId, {
             id: generateId(),
-            description: bet.description!,
-            hypothesis: bet.hypothesis!,
-            successCriteria: 'TBD',
-            status: Status.Draft,
+            shortId: `T-${Math.floor(Math.random() * 1000)}`,
+            title: t.title!,
+            description: t.description!,
+            status: TicketStatus.Todo,
+            priority: 'Medium',
             channelId: channelId,
-            tickets: [],
-            ownerId: currentUser.id,
-            timeboxWeeks: 2,
-            startDate: new Date().toISOString()
+            assigneeId: currentUser.id,
+            createdAt: new Date().toISOString()
         });
     });
 
@@ -150,7 +150,7 @@ export const ChannelPlanModal: React.FC<ChannelPlanModalProps> = ({ channelId, o
                     disabled={loading}
                     className="px-6 py-3 bg-zinc-100 text-zinc-500 font-bold text-sm rounded-lg hover:bg-zinc-200 transition-colors"
                 >
-                    {loading ? "Regenerating..." : "Save & Regenerate Bets"}
+                    {loading ? "Regenerating..." : "Save & Regenerate Tasks"}
                 </button>
             ) : (
                 <button 

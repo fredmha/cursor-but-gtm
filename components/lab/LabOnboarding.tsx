@@ -1,11 +1,10 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { useStore, generateId } from '../../store';
 import { Icons } from '../../constants';
-import { Campaign, Status, ContextDoc } from '../../types';
-import { GoogleGenAI, Type, Schema } from "@google/genai";
+import { Campaign, Status, TicketStatus } from '../../types';
+import { GoogleGenAI } from "@google/genai";
 import { generateFullCampaignFromChat } from '../../services/labService';
-
-// --- CHAT LOGIC ---
 
 interface ChatMessage {
     id: string;
@@ -40,12 +39,9 @@ export const LabOnboarding: React.FC = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Gemini Client
   const client = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-  // Initialize Chat
   useEffect(() => {
-      // Initial AI Message
       const initId = generateId();
       setMessages([{
           id: initId,
@@ -99,11 +95,9 @@ export const LabOnboarding: React.FC = () => {
   const handleGenerate = async () => {
       setIsGenerating(true);
       
-      // Call Service
       const data = await generateFullCampaignFromChat(messages);
       
       if (data) {
-          // Construct Campaign
           const newCampaign: Campaign = {
               id: generateId(),
               name: "Conversational Plan",
@@ -114,19 +108,19 @@ export const LabOnboarding: React.FC = () => {
               channels: data.channels.map((c: any) => ({
                   id: generateId(),
                   name: c.name,
-                  campaignId: '', // Fix later
+                  campaignId: '', 
                   type: 'CHANNEL',
                   tags: c.tags || [],
-                  bets: c.bets.map((b: any) => ({
+                  tickets: c.tickets.map((t: any) => ({
                       id: generateId(),
-                      description: b.description,
-                      hypothesis: b.hypothesis,
-                      successCriteria: 'TBD',
-                      status: Status.Active,
-                      channelId: '', // Fix later
-                      tickets: [],
-                      ownerId: currentUser.id,
-                      timeboxWeeks: 2
+                      shortId: `T-${Math.floor(Math.random() * 1000)}`,
+                      title: t.title,
+                      description: t.description,
+                      status: TicketStatus.Todo,
+                      priority: 'Medium',
+                      channelId: '', 
+                      assigneeId: currentUser.id,
+                      createdAt: new Date().toISOString()
                   })),
                   principles: [],
                   links: [],
@@ -142,20 +136,34 @@ export const LabOnboarding: React.FC = () => {
               })),
               roadmapItems: [],
               timelineTags: [],
-              docs: data.docs.map((d: any) => ({
-                  id: generateId(),
-                  title: d.title,
-                  content: d.content,
-                  type: d.type,
-                  lastUpdated: new Date().toISOString(),
-                  isAiGenerated: true
-              }))
+              docFolders: [
+                  { id: 'f_strategy', name: 'Strategy', createdAt: new Date().toISOString() },
+                  { id: 'f_personas', name: 'Personas', createdAt: new Date().toISOString() },
+                  { id: 'f_brand', name: 'Brand', createdAt: new Date().toISOString() },
+                  { id: 'f_process', name: 'Process', createdAt: new Date().toISOString() },
+              ],
+              docs: data.docs.map((d: any) => {
+                  let folderId = undefined;
+                  if (d.type === 'STRATEGY') folderId = 'f_strategy';
+                  else if (d.type === 'PERSONA') folderId = 'f_personas';
+                  else if (d.type === 'BRAND') folderId = 'f_brand';
+                  else if (d.type === 'PROCESS') folderId = 'f_process';
+                  
+                  return {
+                      id: generateId(),
+                      title: d.title,
+                      content: d.content,
+                      type: d.type,
+                      folderId: folderId,
+                      lastUpdated: new Date().toISOString(),
+                      isAiGenerated: true
+                  };
+              })
           };
 
-          // Fix IDs
           newCampaign.channels.forEach(c => {
               c.campaignId = newCampaign.id;
-              c.bets.forEach(b => b.channelId = c.id);
+              c.tickets.forEach(t => t.channelId = c.id);
           });
 
           setCampaign(newCampaign);
@@ -167,7 +175,6 @@ export const LabOnboarding: React.FC = () => {
 
   return (
     <div className="h-screen w-full bg-white text-zinc-900 flex flex-col font-sans">
-        {/* Header */}
         <div className="h-14 border-b border-zinc-100 flex items-center justify-between px-6 bg-white shrink-0">
             <div className="flex items-center gap-2 text-indigo-600">
                 <Icons.Sparkles className="w-5 h-5" />
@@ -183,7 +190,6 @@ export const LabOnboarding: React.FC = () => {
             )}
         </div>
 
-        {/* Chat Area */}
         <div className="flex-1 overflow-y-auto p-4 custom-scrollbar flex flex-col items-center bg-zinc-50/50">
             <div className="w-full max-w-2xl space-y-6 py-10">
                 {messages.map(msg => (
@@ -216,14 +222,13 @@ export const LabOnboarding: React.FC = () => {
             </div>
         </div>
 
-        {/* Input Area */}
         <div className="p-6 border-t border-zinc-100 bg-white flex justify-center shrink-0">
             <div className="w-full max-w-2xl relative">
                 {isGenerating ? (
                     <div className="absolute inset-0 bg-white/90 z-10 flex flex-col items-center justify-center rounded-lg text-center backdrop-blur-sm">
                         <Icons.Sparkles className="w-8 h-8 text-indigo-600 animate-spin mb-2" />
                         <span className="text-sm font-bold text-zinc-900">Synthesizing Strategy...</span>
-                        <span className="text-xs text-zinc-500">Creating Docs, Channels, and Bets</span>
+                        <span className="text-xs text-zinc-500">Creating Docs, Channels, and Tasks</span>
                     </div>
                 ) : null}
                 

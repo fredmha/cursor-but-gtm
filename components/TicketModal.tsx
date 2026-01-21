@@ -1,6 +1,7 @@
-import React, { useState, useMemo, useEffect } from 'react';
+
+import React, { useState, useMemo } from 'react';
 import { Icons, PRIORITIES } from '../constants';
-import { User, Project, Channel, Priority, TicketStatus } from '../types';
+import { User, Project, Channel, Priority, TicketStatus, ContextDoc } from '../types';
 
 interface TicketModalProps {
     initialData?: {
@@ -11,14 +12,15 @@ interface TicketModalProps {
         priority?: Priority;
         assigneeId?: string;
         channelId?: string;
-        betId?: string;
         projectId?: string;
         durationWeeks?: number;
+        linkedDocIds?: string[];
     };
     context: {
         channels: Channel[];
         projects: Project[];
         users: User[];
+        docs?: ContextDoc[]; // Optional for now to support progressive migration
     };
     onClose: () => void;
     onSave: (data: any) => void;
@@ -26,7 +28,7 @@ interface TicketModalProps {
 }
 
 export const TicketModal: React.FC<TicketModalProps> = ({ initialData, context, onClose, onSave, onDelete }) => {
-    const { channels, projects, users } = context;
+    const { channels, projects, users, docs = [] } = context;
     
     // Form State
     const [title, setTitle] = useState(initialData?.title || '');
@@ -36,32 +38,11 @@ export const TicketModal: React.FC<TicketModalProps> = ({ initialData, context, 
     
     // Context State
     const [channelId, setChannelId] = useState<string>(initialData?.channelId || '');
-    const [betId, setBetId] = useState<string>(initialData?.betId || '');
     const [projectId, setProjectId] = useState<string>(initialData?.projectId || '');
+    const [linkedDocIds, setLinkedDocIds] = useState<string[]>(initialData?.linkedDocIds || []);
     
     // Roadmap Specific
     const [durationWeeks, setDurationWeeks] = useState<number>(initialData?.durationWeeks || 1);
-
-    // Derived State
-    const availableBets = useMemo(() => {
-        if (!channelId) return [];
-        const channel = channels.find(c => c.id === channelId);
-        return channel ? channel.bets : [];
-    }, [channelId, channels]);
-
-    // Handlers
-    const handleChannelChange = (newChannelId: string) => {
-        setChannelId(newChannelId);
-        setBetId(''); // Clear bet when channel changes
-    };
-
-    const handleBetChange = (newBetId: string) => {
-        setBetId(newBetId);
-        const bet = availableBets.find(b => b.id === newBetId);
-        if (bet && bet.projectId) {
-            setProjectId(bet.projectId);
-        }
-    };
 
     const isFormValid = () => {
         if (!title.trim()) return false;
@@ -76,11 +57,17 @@ export const TicketModal: React.FC<TicketModalProps> = ({ initialData, context, 
             priority,
             assigneeId,
             channelId: channelId || undefined,
-            betId: betId || undefined, 
             projectId: projectId || undefined,
-            durationWeeks
+            durationWeeks,
+            linkedDocIds
         };
         onSave(data);
+    };
+    
+    const toggleDocLink = (docId: string) => {
+        setLinkedDocIds(prev => 
+            prev.includes(docId) ? prev.filter(id => id !== docId) : [...prev, docId]
+        );
     };
 
     return (
@@ -137,7 +124,7 @@ export const TicketModal: React.FC<TicketModalProps> = ({ initialData, context, 
                                 <select 
                                     className="w-full bg-white border border-zinc-200 rounded-lg p-2.5 text-zinc-900 text-xs focus:outline-none focus:border-indigo-500 shadow-sm"
                                     value={channelId}
-                                    onChange={(e) => handleChannelChange(e.target.value)}
+                                    onChange={(e) => setChannelId(e.target.value)}
                                 >
                                     <option value="">No Channel (Project Direct)</option>
                                     {channels.map(c => (
@@ -146,40 +133,20 @@ export const TicketModal: React.FC<TicketModalProps> = ({ initialData, context, 
                                 </select>
                             </div>
 
-                            {/* Bet */}
+                            {/* Project Link */}
                             <div>
-                                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1.5 block">
-                                    Strategic Bet
-                                </label>
+                                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1.5 block">Project Initiative</label>
                                 <select 
-                                    className="w-full bg-white border border-zinc-200 rounded-lg p-2.5 text-zinc-900 text-xs focus:outline-none focus:border-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-                                    value={betId}
-                                    onChange={(e) => handleBetChange(e.target.value)}
-                                    disabled={!channelId}
+                                    className="w-full bg-white border border-zinc-200 rounded-lg p-2.5 text-zinc-900 text-xs focus:outline-none focus:border-indigo-500 shadow-sm"
+                                    value={projectId}
+                                    onChange={(e) => setProjectId(e.target.value)}
                                 >
-                                    <option value="">
-                                        {channelId ? 'No Bet (Channel Only)' : '---'}
-                                    </option>
-                                    {availableBets.map(b => (
-                                        <option key={b.id} value={b.id}>{b.description}</option>
+                                    <option value="">No Project Link</option>
+                                    {projects.map(p => (
+                                        <option key={p.id} value={p.id}>{p.name}</option>
                                     ))}
                                 </select>
                             </div>
-                        </div>
-
-                        {/* Project Link */}
-                        <div>
-                            <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1.5 block">Project Initiative</label>
-                            <select 
-                                className="w-full bg-white border border-zinc-200 rounded-lg p-2.5 text-zinc-900 text-xs focus:outline-none focus:border-indigo-500 shadow-sm"
-                                value={projectId}
-                                onChange={(e) => setProjectId(e.target.value)}
-                            >
-                                <option value="">No Project Link</option>
-                                {projects.map(p => (
-                                    <option key={p.id} value={p.id}>{p.name}</option>
-                                ))}
-                            </select>
                         </div>
                     </div>
 
@@ -215,6 +182,28 @@ export const TicketModal: React.FC<TicketModalProps> = ({ initialData, context, 
                             </div>
                         </div>
                     </div>
+                    
+                    {/* Docs Attachment */}
+                    {docs.length > 0 && (
+                        <div>
+                            <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2 block">Linked Documents</label>
+                            <div className="bg-zinc-50 border border-zinc-200 rounded-lg p-3 max-h-32 overflow-y-auto custom-scrollbar space-y-1">
+                                {docs.map(doc => (
+                                    <div 
+                                        key={doc.id}
+                                        onClick={() => toggleDocLink(doc.id)}
+                                        className={`flex items-center gap-2 p-2 rounded cursor-pointer text-xs transition-colors ${linkedDocIds.includes(doc.id) ? 'bg-indigo-50 text-indigo-700 border border-indigo-100' : 'hover:bg-zinc-100 text-zinc-600'}`}
+                                    >
+                                        <div className={`w-3 h-3 rounded-sm border flex items-center justify-center ${linkedDocIds.includes(doc.id) ? 'bg-indigo-500 border-indigo-500' : 'bg-white border-zinc-300'}`}>
+                                            {linkedDocIds.includes(doc.id) && <Icons.CheckCircle className="w-2.5 h-2.5 text-white" />}
+                                        </div>
+                                        <span className="truncate flex-1">{doc.title}</span>
+                                        {doc.isAiGenerated && <Icons.Sparkles className="w-3 h-3 text-purple-400" />}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
 
                     {/* Duration Slider (Roadmap Context) */}
                     <div>

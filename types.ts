@@ -1,5 +1,4 @@
 
-
 export enum Status {
   Active = 'Active',
   Paused = 'Paused',
@@ -31,28 +30,14 @@ export interface Ticket {
   title: string;
   description?: string;
   status: TicketStatus;
-  betId?: string; // Optional: Can be standalone in a Project
-  channelId?: string; // Optional: Can be standalone in a Project
-  projectId?: string; // Optional Context Link
+  channelId?: string; // Direct Parent
+  projectId?: string; // Direct Parent
   roadmapItemId?: string;
   assigneeId?: string;
   priority: Priority;
   dueDate?: string;
   createdAt: string;
-}
-
-export interface Bet {
-  id: string;
-  description: string;
-  hypothesis: string;
-  successCriteria: string;
-  status: Status;
-  channelId: string; // STRICT PARENT LINK
-  projectId?: string; // Optional Context Link
-  tickets: Ticket[];
-  ownerId?: string;
-  timeboxWeeks?: number;
-  startDate?: string;
+  linkedDocIds?: string[]; // IDs of ContextDocs linked to this ticket
 }
 
 export type ProjectHealth = 'On Track' | 'At Risk' | 'Off Track' | 'Completed';
@@ -75,7 +60,7 @@ export interface Project {
   startDate?: string;
   targetDate?: string;
   updates: ProjectUpdate[];
-  tickets: Ticket[]; // NEW: Independent Project Tickets
+  tickets: Ticket[]; 
 }
 
 export interface ChannelPrinciple {
@@ -87,7 +72,7 @@ export interface ChannelLink {
   id: string;
   title: string;
   url: string;
-  icon?: string; // e.g., 'doc', 'sheet', 'video'
+  icon?: string; 
 }
 
 export interface ChannelNote {
@@ -97,10 +82,9 @@ export interface ChannelNote {
   text: string;
 }
 
-// NEW: Lab Mode Plan Structure
 export interface ChannelPlan {
   id: string;
-  contextDump?: string; // Legacy/Fallback
+  contextDump?: string;
   audience: string;
   offer: string;
   mechanics: string;
@@ -116,13 +100,13 @@ export interface Channel {
   name: string;
   type?: ChannelType;
   campaignId: string;
-  bets: Bet[];
+  tickets: Ticket[]; // Tickets live directly on Channel
   principles: ChannelPrinciple[];
   tags: ChannelTag[];
-  links?: ChannelLink[]; // SOPs, Docs
-  notes?: ChannelNote[]; // Team remarks
-  memberIds?: string[]; // Team members assigned to this channel
-  plan?: ChannelPlan; // OPTIONAL: Lab Mode Plan
+  links?: ChannelLink[]; 
+  notes?: ChannelNote[]; 
+  memberIds?: string[]; 
+  plan?: ChannelPlan; 
 }
 
 export interface OperatingPrinciple {
@@ -132,13 +116,11 @@ export interface OperatingPrinciple {
   category: string;
 }
 
-// --- ROADMAP ARCHITECTURE ---
-
-export type RoadmapItemType = 'CONTENT' | 'LAUNCH' | 'THEME' | 'NOTE' | 'BET';
+export type RoadmapItemType = 'CONTENT' | 'LAUNCH' | 'THEME' | 'NOTE';
 
 export interface RoadmapItem {
   id: string;
-  channelId?: string; // Optional: If undefined, it likely belongs to Strategy Horizon (Project)
+  channelId?: string; 
   weekIndex: number;
   durationWeeks: number;
   title: string;
@@ -147,17 +129,13 @@ export interface RoadmapItem {
   type: RoadmapItemType;
   label?: string;
   
-  // Extended Properties
   priority?: Priority;
   attachments?: string[];
   externalLinks?: { title: string; url: string }[];
   
-  // Linkage
-  linkedBetId?: string;
   ticketId?: string;
-  projectId?: string; // Link to Project for color coding
+  projectId?: string; 
   
-  // Visuals
   color?: string;
   status?: Status;
 }
@@ -165,21 +143,31 @@ export interface RoadmapItem {
 export interface TimelineTag {
   id: string;
   weekIndex: number;
-  label: string; // 'LAUNCH' | 'THEME' | 'CUSTOM'
+  label: string; 
   title: string;
   color: string;
 }
 
-// --- KNOWLEDGE BASE (DOCS) ---
+// Deprecated conceptually, but kept for migration if needed, though mostly replaced by folders.
 export type DocType = 'STRATEGY' | 'PERSONA' | 'BRAND' | 'PROCESS';
+
+export interface DocFolder {
+  id: string;
+  name: string;
+  icon?: string; // Emoji
+  createdAt: string;
+}
 
 export interface ContextDoc {
   id: string;
   title: string;
-  content: string; // Markdown supported
-  type: DocType;
+  content: string; // HTML Content
+  type?: DocType; // Kept for legacy/compatibility
+  folderId?: string; // The folder this doc belongs to
   lastUpdated: string;
   isAiGenerated: boolean;
+  tags?: string[];
+  channelId?: string;
 }
 
 export interface Campaign {
@@ -194,7 +182,9 @@ export interface Campaign {
   principles: OperatingPrinciple[];
   roadmapItems: RoadmapItem[];
   timelineTags: TimelineTag[];
+  docFolders: DocFolder[]; // New Folders
   docs: ContextDoc[];
+  availableTags?: string[]; // Global tags list
 }
 
 export type ViewMode = 'ONBOARDING' | 'ROADMAP' | 'EXECUTION' | 'REVIEW' | 'DOCS';

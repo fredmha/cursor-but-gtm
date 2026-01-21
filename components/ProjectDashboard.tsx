@@ -1,12 +1,13 @@
+
 import React, { useState, useMemo, useEffect } from 'react';
 import { useStore, generateId } from '../store';
 import { Icons, PRIORITIES } from '../constants';
-import { Status, ProjectHealth, Priority, TicketStatus, Ticket, Bet, Channel } from '../types';
+import { Status, ProjectHealth, Priority, TicketStatus, Ticket, Channel } from '../types';
 import { TicketBoard } from './TicketBoard';
 import { TicketModal } from './TicketModal';
 
 interface ProjectDashboardProps {
-  projectId: string; // Changed from channelId
+  projectId: string; 
   isModal?: boolean;
   onClose?: () => void;
   onNavigateToBet?: (betId: string) => void;
@@ -47,12 +48,11 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
 
   // Merged Live Tickets for this Project (Channel Tickets + Independent Project Tickets)
   const projectTickets = useMemo(() => {
-     const channelTickets = (campaign?.channels || []).flatMap(c => c.bets).flatMap(b => b.tickets).filter(t => t.projectId === projectId);
+     const channelTickets = (campaign?.channels || []).flatMap(c => c.tickets).filter(t => t.projectId === projectId);
      const directTickets = project.tickets || [];
      return [...channelTickets, ...directTickets];
   }, [campaign, projectId, project.tickets]);
   
-  const activeBets = (campaign?.channels || []).flatMap(c => c.bets).filter(b => b.projectId === projectId && b.status !== Status.Killed);
   const projectLead = users.find(u => u.id === project.ownerId);
 
   const handlePostUpdate = () => {
@@ -83,43 +83,36 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
           priority: data.priority,
           assigneeId: data.assigneeId,
           channelId: data.channelId,
-          betId: data.betId,
-          projectId: projectId, // Force current project context? Or allow move? 
-          // The modal allows selecting project. Let's respect modal choice if changed, but default to current.
-          // Actually, if we are in ProjectDashboard(A), and user moves ticket to Project(B), it should disappear from here.
-          // Let's assume data.projectId is correct.
+          projectId: projectId, 
           createdAt: editingTicket?.createdAt || new Date().toISOString()
       };
       
-      // Override projectId with selected one, or fallback to current
       ticketData.projectId = data.projectId || projectId;
 
       // HANDLE EDIT (If we are editing an existing ticket)
       if (editingTicket) {
           const isLocationChanged = 
               (editingTicket.channelId !== ticketData.channelId) || 
-              (editingTicket.betId !== ticketData.betId) ||
               (editingTicket.projectId !== ticketData.projectId);
             
           if (isLocationChanged) {
               // 1. Delete from old location
-              if (editingTicket.channelId && editingTicket.betId) {
-                  deleteTicket(editingTicket.channelId, editingTicket.betId, editingTicket.id);
+              if (editingTicket.channelId) {
+                  deleteTicket(editingTicket.channelId, editingTicket.id);
               } else {
-                  // Was project ticket
                   deleteProjectTicket(projectId, editingTicket.id);
               }
 
               // 2. Add to new location
-              if (ticketData.channelId && ticketData.betId) {
-                  addTicket(ticketData.channelId, ticketData.betId, ticketData);
+              if (ticketData.channelId) {
+                  addTicket(ticketData.channelId, ticketData);
               } else {
                   addProjectTicket(ticketData.projectId || projectId, ticketData);
               }
           } else {
               // Just Update in place
-              if (ticketData.channelId && ticketData.betId) {
-                  updateTicket(ticketData.channelId, ticketData.betId, ticketData.id, ticketData);
+              if (ticketData.channelId) {
+                  updateTicket(ticketData.channelId, ticketData.id, ticketData);
               } else {
                   updateProjectTicket(projectId, ticketData.id, ticketData);
               }
@@ -127,8 +120,8 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
       } 
       // HANDLE CREATE (New Ticket)
       else {
-          if (ticketData.channelId && ticketData.betId) {
-            addTicket(ticketData.channelId, ticketData.betId, ticketData);
+          if (ticketData.channelId) {
+            addTicket(ticketData.channelId, ticketData);
           } else {
             addProjectTicket(projectId, ticketData);
           }
@@ -139,11 +132,11 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
   };
 
   const handleStatusChange = (ticketId: string, newStatus: TicketStatus) => {
-      // Find ticket to get channel/bet context
+      // Find ticket to get channel context
       const ticket = projectTickets.find(t => t.id === ticketId);
       if (ticket) {
-          if (ticket.channelId && ticket.betId) {
-             updateTicket(ticket.channelId, ticket.betId, ticketId, { status: newStatus });
+          if (ticket.channelId) {
+             updateTicket(ticket.channelId, ticketId, { status: newStatus });
           } else {
              updateProjectTicket(projectId, ticketId, { status: newStatus });
           }
@@ -332,23 +325,6 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
                          </div>
                     </div>
 
-                    {/* Participating Bets */}
-                    <div>
-                        <h3 className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-3">Linked Bets</h3>
-                        <div className="space-y-2">
-                            {activeBets.map(bet => (
-                                <div key={bet.id} className="text-xs p-2 rounded bg-white border border-zinc-200 text-zinc-700 shadow-sm">
-                                    <div className="truncate mb-1 font-medium">{bet.description}</div>
-                                    <div className="flex justify-between text-[10px] text-zinc-400">
-                                        <span>{campaign?.channels.find(c => c.id === bet.channelId)?.name}</span>
-                                        <span>{bet.tickets.length} tickets</span>
-                                    </div>
-                                </div>
-                            ))}
-                            {activeBets.length === 0 && <p className="text-xs text-zinc-500 italic">No linked bets.</p>}
-                        </div>
-                    </div>
-
                  </div>
              </div>
         </div>
@@ -362,15 +338,14 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
                     priority: editingTicket.priority,
                     assigneeId: editingTicket.assigneeId,
                     channelId: editingTicket.channelId,
-                    betId: editingTicket.betId,
                     projectId: editingTicket.projectId || projectId,
-                } : { projectId }} // PRE-FILL PROJECT ID on CREATE
+                } : { projectId }} 
                 context={{ channels, projects, users }}
                 onClose={() => { setShowNewTicketModal(false); setEditingTicket(null); }}
                 onSave={handleSaveTicket}
                 onDelete={editingTicket ? () => {
-                    if (editingTicket.channelId && editingTicket.betId) {
-                        deleteTicket(editingTicket.channelId, editingTicket.betId, editingTicket.id);
+                    if (editingTicket.channelId) {
+                        deleteTicket(editingTicket.channelId, editingTicket.id);
                     } else {
                         deleteProjectTicket(projectId, editingTicket.id);
                     }

@@ -1,21 +1,19 @@
 
-
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { Campaign, Channel, Bet, Ticket, TicketStatus, Status, User, Priority, RoadmapItem, Project, ProjectUpdate, ChannelLink, ChannelNote, TimelineTag, ChannelPlan, ContextDoc } from './types';
+import { Campaign, Channel, Ticket, TicketStatus, Status, User, Priority, RoadmapItem, Project, ProjectUpdate, ChannelLink, ChannelNote, TimelineTag, ChannelPlan, ContextDoc, DocFolder } from './types';
 
-// Safe ID Generator for environments without secure context
+// Safe ID Generator
 export const generateId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
     try {
       return crypto.randomUUID();
     } catch (e) {
-      // Fallback if randomUUID fails (e.g. non-secure context)
+      // Fallback
     }
   }
   return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
 };
 
-// Mock Users
 export const MOCK_USERS: User[] = [
   { id: 'u1', name: 'Founder', initials: 'FD', color: 'bg-indigo-500' },
   { id: 'u2', name: 'Growth Lead', initials: 'GL', color: 'bg-emerald-500' },
@@ -30,7 +28,6 @@ interface StoreState {
   setCampaign: (campaign: Campaign) => void;
   updateCampaign: (updates: Partial<Campaign>) => void;
   
-  // Execution Actions
   addChannel: (channel: Channel) => void;
   updateChannel: (channelId: string, updates: Partial<Channel>) => void;
   deleteChannel: (channelId: string) => void;
@@ -50,32 +47,35 @@ interface StoreState {
   deleteProject: (projectId: string) => void;
   addProjectUpdate: (projectId: string, update: ProjectUpdate) => void;
   
-  // Project Ticket Actions
   addProjectTicket: (projectId: string, ticket: Ticket) => void;
   updateProjectTicket: (projectId: string, ticketId: string, updates: Partial<Ticket>) => void;
   deleteProjectTicket: (projectId: string, ticketId: string) => void;
 
-  addBet: (channelId: string, bet: Bet) => void;
-  updateBet: (channelId: string, betId: string, updates: Partial<Bet>) => void;
+  addTicket: (channelId: string, ticket: Ticket) => void;
+  updateTicket: (channelId: string, ticketId: string, updates: Partial<Ticket>) => void;
+  deleteTicket: (channelId: string, ticketId: string) => void;
   
-  addTicket: (channelId: string, betId: string, ticket: Ticket) => void;
-  updateTicket: (channelId: string, betId: string, ticketId: string, updates: Partial<Ticket>) => void;
-  deleteTicket: (channelId: string, betId: string, ticketId: string) => void;
+  linkDocToTicket: (docId: string, ticketId: string, channelId?: string, projectId?: string) => void;
   
-  // Roadmap Actions
   addRoadmapItem: (item: RoadmapItem) => void;
   updateRoadmapItem: (itemId: string, updates: Partial<RoadmapItem>) => void;
   deleteRoadmapItem: (itemId: string) => void;
   moveRoadmapItem: (itemId: string, newChannelId: string, newWeekIndex: number) => void;
   
-  // Timeline Tag Actions
   addTimelineTag: (tag: TimelineTag) => void;
   deleteTimelineTag: (tagId: string) => void;
 
-  // Doc Actions
+  addDocFolder: (name: string, icon?: string) => void;
+  updateDocFolder: (folderId: string, updates: Partial<DocFolder>) => void;
+  renameDocFolder: (folderId: string, name: string) => void;
+  deleteDocFolder: (folderId: string) => void;
+  
   addDoc: (doc: ContextDoc) => void;
   updateDoc: (docId: string, updates: Partial<ContextDoc>) => void;
   deleteDoc: (docId: string) => void;
+  moveDoc: (docId: string, folderId: string | undefined) => void;
+  
+  addCampaignTag: (tag: string) => void;
 
   importAIPlan: (channelsData: any[]) => void;
   switchUser: (userId: string) => void;
@@ -92,10 +92,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const saved = localStorage.getItem('gtm-os-campaign');
     if (!saved) return null;
     
-    // MIGRATION LOGIC ON LOAD
     const data = JSON.parse(saved);
     
-    // Ensure all channels have arrays
+    // MIGRATION Logic
     if (data.channels) {
         data.channels = data.channels.map((c: any) => ({
             ...c,
@@ -104,27 +103,52 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             links: c.links || [],
             notes: c.notes || [],
             memberIds: c.memberIds || [],
-            plan: c.plan || undefined
+            plan: c.plan || undefined,
+            tickets: c.tickets || [] 
         }));
     }
 
-    // Ensure projects array exists
     if (!data.projects) {
         data.projects = [];
     } else {
-        // Ensure tickets array exists on projects
         data.projects = data.projects.map((p: any) => ({
             ...p,
             tickets: p.tickets || []
         }));
     }
 
-    if (!data.timelineTags) {
-        data.timelineTags = [];
+    if (!data.timelineTags) data.timelineTags = [];
+    if (!data.docs) data.docs = [];
+    
+    // Folder Migration
+    if (!data.docFolders) {
+        data.docFolders = [
+            { id: 'f_strategy', name: 'Strategy', icon: '♟️', createdAt: new Date().toISOString() },
+            { id: 'f_personas', name: 'Personas', icon: '👥', createdAt: new Date().toISOString() },
+            { id: 'f_brand', name: 'Brand', icon: '🎨', createdAt: new Date().toISOString() },
+            { id: 'f_process', name: 'Process', icon: '⚙️', createdAt: new Date().toISOString() },
+        ];
+        // Migrate existing docs to folders based on type
+        if (data.docs) {
+            data.docs = data.docs.map((d: any) => {
+                let folderId = undefined;
+                if (d.type === 'STRATEGY') folderId = 'f_strategy';
+                else if (d.type === 'PERSONA') folderId = 'f_personas';
+                else if (d.type === 'BRAND') folderId = 'f_brand';
+                else if (d.type === 'PROCESS') folderId = 'f_process';
+                return { ...d, folderId };
+            });
+        }
+    } else {
+        // Ensure icons exist if migrating from old version
+        data.docFolders = data.docFolders.map((f: any) => ({
+            ...f,
+            icon: f.icon || '📁'
+        }));
     }
-
-    if (!data.docs) {
-        data.docs = [];
+    
+    if (!data.availableTags) {
+        data.availableTags = ['Draft', 'Q4', 'Urgent', 'Review'];
     }
 
     return data;
@@ -151,6 +175,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       ...prev,
       channels: [...prev.channels, { 
           ...channel, 
+          tickets: [],
           principles: channel.principles || [], 
           tags: channel.tags || [], 
           links: [], 
@@ -327,7 +352,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             title: ticket.title,
             description: ticket.description,
             type: 'CONTENT',
-            linkedBetId: undefined,
             ticketId: finalTicket.id,
             projectId: projectId,
             status: ticket.status === TicketStatus.Done ? Status.Completed : Status.Active,
@@ -368,14 +392,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                   changed = true;
               }
           }
-          if (updates.title) {
-              updatedRItem.title = updates.title;
-              changed = true;
-          }
-          if (updates.assigneeId) {
-              updatedRItem.ownerIds = [updates.assigneeId];
-              changed = true;
-          }
+          if (updates.title) updatedRItem.title = updates.title;
+          if (updates.assigneeId) updatedRItem.ownerIds = [updates.assigneeId];
           if (changed) newRoadmapItems[rItemIndex] = updatedRItem;
       }
 
@@ -401,43 +419,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }) : null);
   };
 
-  const addBet = (channelId: string, bet: Bet) => {
-    if (!campaign) return;
-    setCampaignState(prev => prev ? ({
-      ...prev,
-      channels: prev.channels.map(c => 
-        c.id === channelId ? { ...c, bets: [...c.bets, bet] } : c
-      )
-    }) : null);
-  };
-
-  const updateBet = (channelId: string, betId: string, updates: Partial<Bet>) => {
-    if (!campaign) return;
-
-    let newRoadmapItems = [...(campaign.roadmapItems || [])];
-    const linkedItemIndex = newRoadmapItems.findIndex(i => i.linkedBetId === betId && i.type === 'BET');
-    
-    if (linkedItemIndex !== -1) {
-        const item = newRoadmapItems[linkedItemIndex];
-        const updatedItem = { ...item };
-        if (updates.description) updatedItem.title = updates.description;
-        if (updates.status) updatedItem.status = updates.status;
-        newRoadmapItems[linkedItemIndex] = updatedItem;
-    }
-
-    setCampaignState(prev => prev ? ({
-      ...prev,
-      channels: prev.channels.map(c => 
-        c.id === channelId ? {
-          ...c,
-          bets: c.bets.map(b => b.id === betId ? { ...b, ...updates } : b)
-        } : c
-      ),
-      roadmapItems: newRoadmapItems
-    }) : null);
-  };
-
-  const addTicket = (channelId: string, betId: string, ticket: Ticket) => {
+  const addTicket = (channelId: string, ticket: Ticket) => {
     if (!campaign) return;
     const shortId = `T-${Math.floor(Math.random() * 1000)}`;
     const finalTicket = { ...ticket, shortId, channelId };
@@ -456,7 +438,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             title: ticket.title,
             description: ticket.description,
             type: 'CONTENT',
-            linkedBetId: betId,
             ticketId: finalTicket.id,
             projectId: ticket.projectId,
             status: ticket.status === TicketStatus.Done ? Status.Completed : Status.Active,
@@ -471,15 +452,12 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       ...prev,
       roadmapItems: newRoadmapItems,
       channels: prev.channels.map(c => 
-        c.id === channelId ? {
-          ...c,
-          bets: c.bets.map(b => b.id === betId ? { ...b, tickets: [...b.tickets, finalTicket] } : b)
-        } : c
+        c.id === channelId ? { ...c, tickets: [...c.tickets, finalTicket] } : c
       )
     }) : null);
   };
 
-  const updateTicket = (channelId: string, betId: string, ticketId: string, updates: Partial<Ticket>) => {
+  const updateTicket = (channelId: string, ticketId: string, updates: Partial<Ticket>) => {
     if (!campaign) return;
     
     let newRoadmapItems = [...(campaign.roadmapItems || [])];
@@ -499,17 +477,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                  changed = true;
              }
          }
-         if (updates.title) {
-             updatedRItem.title = updates.title;
-             changed = true;
-         }
-         if (updates.assigneeId) {
-             updatedRItem.ownerIds = [updates.assigneeId];
-             changed = true;
-         }
-         if (changed) {
-             newRoadmapItems[rItemIndex] = updatedRItem;
-         }
+         if (updates.title) updatedRItem.title = updates.title;
+         if (updates.assigneeId) updatedRItem.ownerIds = [updates.assigneeId];
+         if (changed) newRoadmapItems[rItemIndex] = updatedRItem;
     }
 
     setCampaignState(prev => prev ? ({
@@ -518,16 +488,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       channels: prev.channels.map(c => 
         c.id === channelId ? {
           ...c,
-          bets: c.bets.map(b => b.id === betId ? {
-            ...b,
-            tickets: b.tickets.map(t => t.id === ticketId ? { ...t, ...updates } : t)
-          } : b)
+          tickets: c.tickets.map(t => t.id === ticketId ? { ...t, ...updates } : t)
         } : c
       )
     }) : null);
   };
 
-  const deleteTicket = (channelId: string, betId: string, ticketId: string) => {
+  const deleteTicket = (channelId: string, ticketId: string) => {
     if (!campaign) return;
     const newRoadmapItems = (campaign.roadmapItems || []).filter(i => i.ticketId !== ticketId);
 
@@ -537,57 +504,72 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       channels: prev.channels.map(c => 
         c.id === channelId ? {
           ...c,
-          bets: c.bets.map(b => b.id === betId ? {
-            ...b,
-            tickets: b.tickets.filter(t => t.id !== ticketId)
-          } : b)
+          tickets: c.tickets.filter(t => t.id !== ticketId)
         } : c
       )
     }) : null);
+  };
+  
+  const linkDocToTicket = (docId: string, ticketId: string, channelId?: string, projectId?: string) => {
+      if (channelId) {
+          const channel = campaign?.channels.find(c => c.id === channelId);
+          const ticket = channel?.tickets.find(t => t.id === ticketId);
+          if (ticket) {
+              const currentDocs = ticket.linkedDocIds || [];
+              if (!currentDocs.includes(docId)) {
+                  updateTicket(channelId, ticketId, { linkedDocIds: [...currentDocs, docId] });
+              }
+          }
+      } else if (projectId) {
+          const project = campaign?.projects.find(p => p.id === projectId);
+          const ticket = project?.tickets.find(t => t.id === ticketId);
+           if (ticket) {
+              const currentDocs = ticket.linkedDocIds || [];
+              if (!currentDocs.includes(docId)) {
+                  updateProjectTicket(projectId, ticketId, { linkedDocIds: [...currentDocs, docId] });
+              }
+          }
+      }
   };
 
   const addRoadmapItem = (item: RoadmapItem) => {
     if (!campaign) return;
     let newItem = { ...item };
     
-    if (newItem.linkedBetId && !newItem.ticketId) {
-        const bet = campaign.channels.flatMap(c => c.bets).find(b => b.id === newItem.linkedBetId);
-        if (bet) {
-             const ticketId = generateId();
-             const ticket: Ticket = {
-                 id: ticketId,
-                 shortId: `T-${Math.floor(Math.random() * 10000)}`,
-                 title: newItem.title,
-                 description: newItem.description,
-                 status: TicketStatus.Todo,
-                 betId: bet.id,
-                 channelId: bet.channelId,
-                 projectId: bet.projectId,
-                 roadmapItemId: newItem.id,
-                 assigneeId: newItem.ownerIds?.[0],
-                 priority: newItem.priority || 'Medium',
-                 createdAt: new Date().toISOString()
+    // Direct Channel Link (Create Ticket)
+    if (newItem.channelId && !newItem.ticketId) {
+         const ticketId = generateId();
+         const ticket: Ticket = {
+             id: ticketId,
+             shortId: `T-${Math.floor(Math.random() * 10000)}`,
+             title: newItem.title,
+             description: newItem.description,
+             status: TicketStatus.Todo,
+             channelId: newItem.channelId,
+             projectId: newItem.projectId,
+             roadmapItemId: newItem.id,
+             assigneeId: newItem.ownerIds?.[0],
+             priority: newItem.priority || 'Medium',
+             createdAt: new Date().toISOString()
+         };
+         
+         newItem.ticketId = ticketId;
+         
+         setCampaignState(prev => {
+             if (!prev) return null;
+             const newChannels = prev.channels.map(c => 
+                 c.id === newItem.channelId ? { ...c, tickets: [...c.tickets, ticket] } : c
+             );
+             return {
+                 ...prev,
+                 channels: newChannels,
+                 roadmapItems: [...(prev.roadmapItems || []), newItem]
              };
-             
-             newItem.ticketId = ticketId;
-             
-             setCampaignState(prev => {
-                 if (!prev) return null;
-                 const newChannels = prev.channels.map(c => 
-                     c.id === bet.channelId ? {
-                         ...c,
-                         bets: c.bets.map(b => b.id === bet.id ? { ...b, tickets: [...b.tickets, ticket] } : b)
-                     } : c
-                 );
-                 return {
-                     ...prev,
-                     channels: newChannels,
-                     roadmapItems: [...(prev.roadmapItems || []), newItem]
-                 };
-             });
-             return;
-        }
-    } else if (newItem.projectId && !newItem.channelId && !newItem.ticketId) {
+         });
+         return;
+    } 
+    // Direct Project Link (Create Project Ticket)
+    else if (newItem.projectId && !newItem.channelId && !newItem.ticketId) {
         const ticketId = generateId();
         const ticket: Ticket = {
             id: ticketId,
@@ -642,10 +624,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
          if (item.channelId) {
              newChannels = newChannels.map(c => ({
                  ...c,
-                 bets: c.bets.map(b => ({
-                     ...b,
-                     tickets: b.tickets.filter(t => t.id !== item.ticketId)
-                 }))
+                 tickets: c.tickets.filter(t => t.id !== item.ticketId)
              }));
          } else if (item.projectId) {
              newProjects = newProjects.map(p => ({
@@ -679,6 +658,41 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }) : null);
   };
 
+  // --- Folder Actions ---
+
+  const addDocFolder = (name: string, icon: string = '📁') => {
+      if (!campaign) return;
+      const folder: DocFolder = {
+          id: generateId(),
+          name,
+          icon,
+          createdAt: new Date().toISOString()
+      };
+      setCampaignState(prev => prev ? ({
+          ...prev,
+          docFolders: [...prev.docFolders, folder]
+      }) : null);
+  };
+
+  const updateDocFolder = (folderId: string, updates: Partial<DocFolder>) => {
+      if (!campaign) return;
+      setCampaignState(prev => prev ? ({
+          ...prev,
+          docFolders: prev.docFolders.map(f => f.id === folderId ? { ...f, ...updates } : f)
+      }) : null);
+  };
+
+  const deleteDocFolder = (folderId: string) => {
+      if (!campaign) return;
+      setCampaignState(prev => prev ? ({
+          ...prev,
+          docFolders: prev.docFolders.filter(f => f.id !== folderId),
+          docs: prev.docs.map(d => d.folderId === folderId ? { ...d, folderId: undefined } : d) // Move to Unsorted
+      }) : null);
+  };
+
+  // --- Doc Actions ---
+
   const addDoc = (doc: ContextDoc) => {
     if (!campaign) return;
     setCampaignState(prev => prev ? ({
@@ -703,22 +717,33 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }) : null);
   };
 
+  const moveDoc = (docId: string, folderId: string | undefined) => {
+      updateDoc(docId, { folderId });
+  };
+  
+  const addCampaignTag = (tag: string) => {
+      if (!campaign || (campaign.availableTags || []).includes(tag)) return;
+      setCampaignState(prev => prev ? ({
+          ...prev,
+          availableTags: [...(prev.availableTags || []), tag]
+      }) : null);
+  };
+
   const importAIPlan = (channelsData: any[]) => {
     if (!campaign) return;
     const newChannels: Channel[] = channelsData.map((c: any) => ({
       id: generateId(),
       name: c.name,
       campaignId: campaign.id,
-      bets: c.bets.map((b: any) => ({
+      tickets: c.tickets.map((t: any) => ({
         id: generateId(),
-        description: b.description,
-        hypothesis: b.hypothesis,
-        successCriteria: 'Define success metric',
-        status: Status.Draft,
+        shortId: `T-${Math.floor(Math.random() * 1000)}`,
+        title: t.title,
+        description: t.description,
+        status: TicketStatus.Todo,
         channelId: '', // Set in loop below
-        tickets: [],
-        ownerId: currentUser.id,
-        timeboxWeeks: 2
+        priority: 'Medium',
+        createdAt: new Date().toISOString()
       })),
       principles: [],
       tags: [],
@@ -728,7 +753,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }));
     
     newChannels.forEach(c => {
-      c.bets.forEach(b => b.channelId = c.id);
+      c.tickets.forEach(t => t.channelId = c.id);
     });
 
     setCampaignState(prev => prev ? ({
@@ -772,20 +797,25 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       addProjectTicket,
       updateProjectTicket,
       deleteProjectTicket,
-      addBet,
-      updateBet,
       addTicket,
       updateTicket,
       deleteTicket,
+      linkDocToTicket,
       addRoadmapItem,
       updateRoadmapItem,
       deleteRoadmapItem,
       moveRoadmapItem,
       addTimelineTag,
       deleteTimelineTag,
+      addDocFolder,
+      updateDocFolder,
+      renameDocFolder: (id, name) => updateDocFolder(id, { name }), // Compatibility
+      deleteDocFolder,
       addDoc,
       updateDoc,
       deleteDoc,
+      moveDoc,
+      addCampaignTag,
       importAIPlan,
       switchUser,
       reset

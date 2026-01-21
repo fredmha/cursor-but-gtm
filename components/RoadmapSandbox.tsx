@@ -1,11 +1,11 @@
+
 import React, { useState, useMemo } from 'react';
 import { useStore, generateId } from '../store';
 import { Icons, PRIORITIES } from '../constants';
-import { RoadmapItem, User, OperatingPrinciple, Priority, Bet, Status, TicketStatus, ChannelTag, Project, TimelineTag } from '../types';
+import { RoadmapItem, User, OperatingPrinciple, Priority, Status, TicketStatus, ChannelTag, Project, TimelineTag } from '../types';
 import { ProjectDashboard } from './ProjectDashboard';
 import { ChannelDashboard } from './ChannelDashboard';
 import { TicketModal } from './TicketModal';
-import { BetCreationModal } from './BetCreationModal';
 
 interface RoadmapSandboxProps {
   onNext?: () => void;
@@ -14,23 +14,11 @@ interface RoadmapSandboxProps {
 
 const WEEK_WIDTH = 200;
 const LEFT_PANEL_WIDTH = 280; 
-const ITEM_HEIGHT = 32; // Compact height
+const ITEM_HEIGHT = 32; 
 const ITEM_GAP = 4;
 const ROW_PADDING_TOP = 12;
 const ROW_PADDING_BOTTOM = 12;
 const MIN_ROW_HEIGHT = 120;
-
-const CONTEXT_COLORS = [
-    { label: 'Pink', value: 'bg-pink-500' },
-    { label: 'Purple', value: 'bg-purple-500' },
-    { label: 'Indigo', value: 'bg-indigo-500' },
-    { label: 'Cyan', value: 'bg-cyan-500' },
-    { label: 'Emerald', value: 'bg-emerald-500' },
-    { label: 'Amber', value: 'bg-amber-500' },
-    { label: 'Zinc', value: 'bg-zinc-500' },
-];
-
-// --- LAYOUT ENGINE ---
 
 interface LayoutItem extends RoadmapItem {
   _layout: {
@@ -91,9 +79,6 @@ const calculateLaneLayout = (items: RoadmapItem[]): { layoutItems: LayoutItem[],
   return { layoutItems, rowHeight };
 };
 
-
-// --- COMPONENTS ---
-
 // STRATEGY HORIZON COMPONENT
 const StrategyHorizon: React.FC<{
     projects: Project[];
@@ -101,9 +86,8 @@ const StrategyHorizon: React.FC<{
     roadmapItems: RoadmapItem[];
     campaignStart: Date;
     onProjectClick: (projectId: string) => void;
-    onTicketClick: (item: RoadmapItem) => void;
     weekCount: number;
-}> = ({ projects, users, roadmapItems, campaignStart, onProjectClick, onTicketClick, weekCount }) => {
+}> = ({ projects, users, roadmapItems, campaignStart, onProjectClick, weekCount }) => {
     
     return (
         <div className="min-w-max bg-background border-b border-border relative z-30">
@@ -118,13 +102,6 @@ const StrategyHorizon: React.FC<{
                 {projects.map(project => {
                     if (!project.startDate || !project.targetDate) return null;
                     
-                    const projectItems = roadmapItems.filter(i => i.projectId === project.id);
-                    const itemsByWeek: Record<number, RoadmapItem[]> = {};
-                    projectItems.forEach(item => {
-                        if (!itemsByWeek[item.weekIndex]) itemsByWeek[item.weekIndex] = [];
-                        itemsByWeek[item.weekIndex].push(item);
-                    });
-
                     const start = new Date(project.startDate);
                     const end = new Date(project.targetDate);
                     const campaignS = new Date(campaignStart);
@@ -230,7 +207,6 @@ const RoadmapCard: React.FC<{
     const top = item._layout?.top ?? 8;
     const height = item._layout?.height ?? ITEM_HEIGHT;
     
-    // RENDER: EXECUTION TASK (Bar)
     return (
         <div
             draggable
@@ -243,7 +219,6 @@ const RoadmapCard: React.FC<{
             <div className="flex items-center gap-2 w-full overflow-hidden pl-2">
                  <span className="text-xs font-medium text-zinc-700 truncate flex-1">{item.title}</span>
                  
-                 {/* Metadata Row (Inline) */}
                  <div className="flex items-center gap-2 shrink-0">
                     {(item.ownerIds && item.ownerIds.length > 0) && (
                         <div className="flex -space-x-1">
@@ -374,36 +349,28 @@ const WeekContextModal: React.FC<{
     );
 };
 
-// --- MAIN COMPONENT ---
-
 export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }) => {
   const { 
     campaign, 
-    addBet,
     addRoadmapItem, 
     addChannel,
-    updateChannel,
     deleteChannel,
     updateRoadmapItem,
     deleteRoadmapItem,
     deleteProject,
     addTimelineTag,
     deleteTimelineTag,
-    currentUser,
     users
   } = useStore();
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [showChannelModal, setShowChannelModal] = useState(false);
-  const [activeBetCreation, setActiveBetCreation] = useState<string | null>(null);
-  const [activeTicket, setActiveTicket] = useState<{ item: Partial<RoadmapItem>, bets: Bet[] } | null>(null);
+  const [activeTicket, setActiveTicket] = useState<{ item: Partial<RoadmapItem> } | null>(null);
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
-  const [expandedBets, setExpandedBets] = useState<Record<string, boolean>>({});
   const [activeDashboardChannel, setActiveDashboardChannel] = useState<string | null>(null);
   const [activeDashboardProject, setActiveDashboardProject] = useState<string | null>(null);
   const [activeWeekContext, setActiveWeekContext] = useState<number | null>(null);
 
-  // --- DATA ---
   const weeks = useMemo(() => {
     const start = campaign?.startDate ? new Date(campaign.startDate) : new Date();
     const w = [];
@@ -426,48 +393,19 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
 
   const channels = campaign?.channels || [];
   const projects = campaign?.projects || [];
-  const allBets = useMemo(() => channels.flatMap(c => c.bets), [channels]);
 
-  // --- ACTIONS ---
-  
   const handleSaveChannel = (name: string, tags: ChannelTag[]) => {
       addChannel({
           id: crypto.randomUUID(),
           name: name,
           campaignId: campaign?.id || '',
-          bets: [],
+          tickets: [],
           principles: [],
           tags: tags,
           links: [],
           notes: []
       });
       setShowChannelModal(false);
-  };
-
-  const handleDeleteBet = (channelId: string, betId: string) => {
-      if (!confirm('Are you sure you want to delete this bet?')) return;
-      const channel = channels.find(c => c.id === channelId);
-      if (!channel) return;
-      const newBets = channel.bets.filter(b => b.id !== betId);
-      updateChannel(channelId, { bets: newBets });
-  };
-
-  const handleSaveBet = (betData: Partial<Bet>) => {
-      if (!activeBetCreation) return;
-      addBet(activeBetCreation, {
-          id: crypto.randomUUID(),
-          description: betData.description!,
-          hypothesis: betData.hypothesis || '',
-          successCriteria: betData.successCriteria || 'TBD',
-          status: Status.Active,
-          channelId: activeBetCreation,
-          projectId: betData.projectId, // Link to project
-          tickets: [],
-          ownerId: currentUser.id,
-          timeboxWeeks: 2,
-          startDate: new Date().toISOString()
-      });
-      setActiveBetCreation(null);
   };
 
   const handleSaveTicket = (data: any) => {
@@ -483,7 +421,6 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
           durationWeeks: data.durationWeeks,
           ownerIds: data.assigneeId ? [data.assigneeId] : [],
           priority: data.priority,
-          linkedBetId: data.betId,
           projectId: data.projectId,
       };
 
@@ -501,7 +438,6 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
               durationWeeks: newItem.durationWeeks || 1,
               ownerIds: newItem.ownerIds || [],
               priority: newItem.priority || 'Medium',
-              linkedBetId: newItem.linkedBetId,
               projectId: newItem.projectId,
           });
       }
@@ -524,10 +460,6 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
       };
       updateRoadmapItem(draggedItemId, updates);
       setDraggedItemId(null);
-  };
-
-  const toggleBet = (id: string) => {
-      setExpandedBets(prev => ({...prev, [id]: !prev[id]}));
   };
 
   const handleSaveWeekTag = (tag: Partial<TimelineTag>) => {
@@ -573,7 +505,6 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
                                 <span className="text-[10px] text-zinc-400 font-mono uppercase mb-1">Week {i+1}</span>
                                 <span className="text-xs text-zinc-700 font-semibold mb-2">{date.toLocaleDateString(undefined, {month:'short', day:'numeric'})}</span>
                                 
-                                {/* Tags Stack */}
                                 <div className="flex flex-col gap-1 w-full px-2">
                                     {weekTags.map(tag => (
                                         <div key={tag.id} className={`text-[9px] font-bold text-white px-2 py-0.5 rounded-full flex items-center justify-center truncate shadow-sm ${tag.color}`}>
@@ -583,7 +514,6 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
                                     ))}
                                 </div>
                                 
-                                {/* Hover Add Button */}
                                 <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                     <div className="p-1 rounded bg-zinc-200 text-zinc-500 hover:text-zinc-900">
                                         <Icons.Plus className="w-3 h-3" />
@@ -602,7 +532,6 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
                 users={users}
                 campaignStart={campaign?.startDate ? new Date(campaign.startDate) : new Date()}
                 onProjectClick={setActiveDashboardProject}
-                onTicketClick={(item) => setActiveTicket({ item, bets: allBets })}
                 weekCount={weeks.length}
              />
 
@@ -610,7 +539,6 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
              <div className="min-w-max pb-32">
                  {channels.map(channel => {
                      const laneItems = (campaign?.roadmapItems || []).filter(i => i.channelId === channel.id);
-                     const bets = channel.bets.filter(b => b.status !== Status.Killed);
                      const { layoutItems, rowHeight } = calculateLaneLayout(laneItems);
 
                      return (
@@ -626,10 +554,8 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
                                     <div className="flex items-center gap-2 mb-1">
                                         <div className="p-1 rounded bg-white border border-border text-zinc-600 shadow-sm"><Icons.Zap className="w-3.5 h-3.5" /></div>
                                         <span className="font-semibold text-sm text-zinc-800">{channel.name}</span>
-                                        {bets.length > 0 && <span className="text-[10px] text-zinc-400 font-mono ml-2">{bets.length} Bets</span>}
                                     </div>
                                     
-                                    {/* TAGS DISPLAY */}
                                     <div className="flex gap-1.5 ml-8">
                                         {channel.tags?.map(tag => (
                                             <span 
@@ -641,44 +567,6 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
                                         ))}
                                     </div>
                                 </div>
-
-                                 {/* Bet Stack */}
-                                 <div className="flex-1 space-y-2 mb-3">
-                                     {bets.length === 0 && (
-                                         <button 
-                                            onClick={() => setActiveBetCreation(channel.id)}
-                                            className="text-[10px] font-bold text-zinc-400 hover:text-zinc-600 pl-8"
-                                         >
-                                            + Add Bet
-                                         </button>
-                                     )}
-                                     
-                                     {bets.length > 0 && (
-                                          <button 
-                                            onClick={() => setActiveBetCreation(channel.id)}
-                                            className="w-full py-1.5 border border-dashed border-zinc-200 text-[10px] text-zinc-400 hover:text-zinc-600 rounded hover:bg-white transition-colors uppercase font-bold mb-2"
-                                          >
-                                            + Add Bet
-                                          </button>
-                                     )}
-
-                                     {bets.map(bet => {
-                                         const isExpanded = expandedBets[bet.id];
-                                         return (
-                                             <div key={bet.id} className={`group/bet rounded transition-all ${isExpanded ? 'bg-white border border-border shadow-sm' : 'hover:bg-zinc-100'}`}>
-                                                 <div 
-                                                    onClick={() => toggleBet(bet.id)}
-                                                    className="p-2 cursor-pointer flex items-center gap-2"
-                                                 >
-                                                     <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${bet.status === Status.Active ? 'bg-emerald-500' : 'bg-zinc-300'}`}></div>
-                                                     <div className="flex-1 min-w-0">
-                                                         <div className="text-xs font-medium text-zinc-600 leading-snug truncate">{bet.description}</div>
-                                                     </div>
-                                                 </div>
-                                             </div>
-                                         )
-                                     })}
-                                 </div>
                              </div>
 
                              {/* RIGHT SIDE (Grid) */}
@@ -691,16 +579,8 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
                                          onDragOver={(e) => e.preventDefault()}
                                          onDrop={(e) => handleDrop(e, channel.id, i)}
                                          onClick={() => {
-                                             if (bets.length === 0) {
-                                                 setActiveBetCreation(channel.id);
-                                                 return;
-                                             }
-                                             const defaultBetId = bets.length > 0 ? bets[0].id : undefined;
-                                             // If default bet has a project, inherit it
-                                             const bet = bets.find(b => b.id === defaultBetId);
                                              setActiveTicket({ 
-                                                 item: { channelId: channel.id, weekIndex: i, title: '', linkedBetId: defaultBetId, projectId: bet?.projectId }, 
-                                                 bets: bets 
+                                                 item: { channelId: channel.id, weekIndex: i, title: '' } 
                                              })
                                          }}
                                      >
@@ -721,7 +601,7 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
                                          projects={projects}
                                          isDragging={draggedItemId === item.id}
                                          onDragStart={handleDragStart}
-                                         onClick={() => setActiveTicket({ item, bets })}
+                                         onClick={() => setActiveTicket({ item })}
                                      />
                                  ))}
                              </div>
@@ -751,15 +631,6 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
           />
       )}
 
-      {activeBetCreation && (
-          <BetCreationModal 
-              channelId={activeBetCreation}
-              onClose={() => setActiveBetCreation(null)}
-              onSave={handleSaveBet}
-              projects={projects}
-          />
-      )}
-
       {activeTicket && (
           <TicketModal 
               initialData={{
@@ -769,7 +640,6 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
                   priority: activeTicket.item.priority,
                   assigneeId: activeTicket.item.ownerIds?.[0],
                   channelId: activeTicket.item.channelId,
-                  betId: activeTicket.item.linkedBetId,
                   projectId: activeTicket.item.projectId,
                   durationWeeks: activeTicket.item.durationWeeks,
               }}
@@ -791,7 +661,6 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
           />
       )}
       
-      {/* CHANNEL DASHBOARD MODAL */}
       {activeDashboardChannel && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/20 backdrop-blur-sm animate-in fade-in duration-200">
             <div className="absolute inset-0" onClick={() => setActiveDashboardChannel(null)}></div>
@@ -806,7 +675,6 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
         </div>
       )}
 
-      {/* PROJECT DASHBOARD MODAL */}
       {activeDashboardProject && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/20 backdrop-blur-sm animate-in fade-in duration-200">
             <div className="absolute inset-0" onClick={() => setActiveDashboardProject(null)}></div>

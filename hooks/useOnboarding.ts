@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { useStore } from '../store';
 import { generateChannelsAndBets } from '../services/geminiService';
@@ -67,7 +68,8 @@ export const useOnboarding = () => {
       projects: campaign?.projects || [],
       roadmapItems: campaign?.roadmapItems || [],
       timelineTags: campaign?.timelineTags || [],
-      docs: campaign?.docs || []
+      docs: campaign?.docs || [],
+      docFolders: campaign?.docFolders || []
     };
     if (campaign) {
       updateCampaign(c);
@@ -130,7 +132,7 @@ export const useOnboarding = () => {
                       id: c.id || crypto.randomUUID(),
                       name: c.name!,
                       campaignId: campaign.id,
-                      bets: [],
+                      tickets: [],
                       principles: [],
                       tags: c.tags || []
                   });
