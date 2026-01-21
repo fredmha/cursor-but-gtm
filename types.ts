@@ -168,6 +168,7 @@ export interface ContextDoc {
   isAiGenerated: boolean;
   tags?: string[];
   channelId?: string;
+  icon?: string; // Emoji customization for file
 }
 
 export interface Campaign {

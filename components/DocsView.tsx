@@ -2,13 +2,137 @@
 import React, { useState, useMemo } from 'react';
 import { useStore, generateId } from '../store';
 import { Icons } from '../constants';
-import { ContextDoc, DocFolder, TicketStatus } from '../types';
+import { ContextDoc, DocFolder, TicketStatus, Ticket } from '../types';
 import { RichTextEditor } from './RichTextEditor';
 import { ICP_TEMPLATE, EMAIL_SEQUENCE_TEMPLATE, LINKEDIN_POST_TEMPLATE, REDDIT_POST_TEMPLATE, POSITIONING_MATRIX_TEMPLATE, SEO_BLOG_POST_TEMPLATE } from '../templates';
 import { TicketModal } from './TicketModal';
 
+interface NewDocModalProps {
+    onClose: () => void;
+    onCreate: (title: string, icon: string, templateContent: string) => void;
+}
+
+const NewDocModal: React.FC<NewDocModalProps> = ({ onClose, onCreate }) => {
+    const [title, setTitle] = useState('');
+    const [icon, setIcon] = useState('📄');
+    const [selectedTemplate, setSelectedTemplate] = useState<{name: string, content: string} | null>(null);
+
+    const templates = [
+        { name: 'Blank Document', content: '<h1>New Document</h1><p>Start typing...</p>' },
+        { name: 'Ideal Customer Profile (ICP)', content: ICP_TEMPLATE },
+        { name: 'Cold Email Sequence', content: EMAIL_SEQUENCE_TEMPLATE },
+        { name: 'LinkedIn Post', content: LINKEDIN_POST_TEMPLATE },
+        { name: 'Reddit Post', content: REDDIT_POST_TEMPLATE },
+        { name: 'Positioning Matrix', content: POSITIONING_MATRIX_TEMPLATE },
+        { name: 'SEO Blog Post', content: SEO_BLOG_POST_TEMPLATE },
+    ];
+
+    return (
+        <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/20 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="absolute inset-0" onClick={onClose}></div>
+            <div className="w-[500px] bg-white border border-zinc-100 rounded-xl shadow-2xl relative z-10 p-6 flex flex-col max-h-[80vh]">
+                <h3 className="text-lg font-bold text-zinc-900 mb-4">Create New Document</h3>
+                
+                <div className="space-y-4 mb-6">
+                    <div className="flex gap-4">
+                        <div className="w-16">
+                            <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1 block">Icon</label>
+                            <input 
+                                className="w-full bg-zinc-50 border border-zinc-200 rounded-lg p-2 text-center text-xl focus:outline-none focus:border-indigo-500"
+                                value={icon}
+                                onChange={e => setIcon(e.target.value)}
+                                maxLength={2}
+                            />
+                        </div>
+                        <div className="flex-1">
+                            <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1 block">Title</label>
+                            <input 
+                                autoFocus
+                                className="w-full bg-zinc-50 border border-zinc-200 rounded-lg p-2.5 text-zinc-900 focus:outline-none focus:border-indigo-500"
+                                placeholder="e.g. Q4 Strategy"
+                                value={title}
+                                onChange={e => setTitle(e.target.value)}
+                            />
+                        </div>
+                    </div>
+
+                    <div>
+                        <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2 block">Choose Template</label>
+                        <div className="grid grid-cols-2 gap-2 h-48 overflow-y-auto custom-scrollbar border border-zinc-100 rounded-lg p-1">
+                            {templates.map(t => (
+                                <button
+                                    key={t.name}
+                                    onClick={() => setSelectedTemplate(t)}
+                                    className={`text-left p-3 rounded-lg border text-xs transition-all ${
+                                        selectedTemplate?.name === t.name 
+                                        ? 'bg-indigo-50 border-indigo-200 text-indigo-700 ring-1 ring-indigo-200' 
+                                        : 'bg-white border-zinc-100 text-zinc-600 hover:border-zinc-300'
+                                    }`}
+                                >
+                                    <span className="font-semibold block mb-0.5">{t.name}</span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+
+                <div className="flex justify-end gap-2 mt-auto">
+                    <button onClick={onClose} className="px-4 py-2 text-xs font-bold text-zinc-500 hover:text-zinc-900">Cancel</button>
+                    <button 
+                        onClick={() => onCreate(title || 'Untitled', icon, selectedTemplate?.content || templates[0].content)}
+                        disabled={!selectedTemplate}
+                        className="px-6 py-2 bg-zinc-900 text-white text-xs font-bold rounded-lg hover:bg-zinc-800 disabled:opacity-50 shadow-sm"
+                    >
+                        Create Document
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const LinkTicketModal: React.FC<{
+    onClose: () => void;
+    onLink: (ticketId: string) => void;
+    tickets: Ticket[];
+}> = ({ onClose, onLink, tickets }) => {
+    const [search, setSearch] = useState('');
+    
+    const filteredTickets = tickets.filter(t => t.title.toLowerCase().includes(search.toLowerCase()) || t.shortId.toLowerCase().includes(search.toLowerCase()));
+
+    return (
+        <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/20 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="absolute inset-0" onClick={onClose}></div>
+            <div className="w-[400px] bg-white border border-zinc-100 rounded-xl shadow-2xl relative z-10 p-4 flex flex-col max-h-[60vh]">
+                <h3 className="text-sm font-bold text-zinc-900 mb-3">Link to Existing Ticket</h3>
+                <input 
+                    autoFocus
+                    className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2 text-sm mb-3 focus:outline-none focus:border-indigo-500"
+                    placeholder="Search tickets..."
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                />
+                <div className="flex-1 overflow-y-auto custom-scrollbar space-y-1">
+                    {filteredTickets.map(t => (
+                        <button
+                            key={t.id}
+                            onClick={() => onLink(t.id)}
+                            className="w-full text-left p-2 rounded hover:bg-zinc-50 flex items-center gap-2 group"
+                        >
+                            <span className="font-mono text-xs text-zinc-400 group-hover:text-zinc-600">{t.shortId}</span>
+                            <span className="text-xs text-zinc-700 font-medium truncate flex-1">{t.title}</span>
+                            {t.linkedDocIds && t.linkedDocIds.length > 0 && <Icons.Link className="w-3 h-3 text-indigo-400" />}
+                        </button>
+                    ))}
+                    {filteredTickets.length === 0 && <p className="text-xs text-zinc-400 text-center py-4">No tickets found.</p>}
+                </div>
+            </div>
+        </div>
+    );
+};
+
 export const DocsView: React.FC = () => {
-  const { campaign, addDoc, updateDoc, deleteDoc, addDocFolder, updateDocFolder, deleteDocFolder, moveDoc, addTicket, addCampaignTag, users } = useStore();
+  const { campaign, addDoc, updateDoc, deleteDoc, addDocFolder, updateDocFolder, deleteDocFolder, moveDoc, addTicket, linkDocToTicket, addCampaignTag, users } = useStore();
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [editingDoc, setEditingDoc] = useState<ContextDoc | null>(null);
   
@@ -22,11 +146,10 @@ export const DocsView: React.FC = () => {
   // Sorting
   const [sortOrder, setSortOrder] = useState<'NAME' | 'DATE'>('NAME');
 
-  // Template Menu State
-  const [showTemplateMenu, setShowTemplateMenu] = useState(false);
-  
-  // Ticket Modal State
+  // Modals
+  const [showNewDocModal, setShowNewDocModal] = useState(false);
   const [showTicketModal, setShowTicketModal] = useState(false);
+  const [showLinkTicketModal, setShowLinkTicketModal] = useState(false);
   
   // Tag Creation
   const [newTagInput, setNewTagInput] = useState('');
@@ -35,6 +158,7 @@ export const DocsView: React.FC = () => {
   const folders = campaign?.docFolders || [];
   const channels = campaign?.channels || [];
   const availableTags = campaign?.availableTags || ['Draft', 'Q4', 'Urgent', 'Review'];
+  const allTickets = [...(campaign?.channels.flatMap(c => c.tickets) || []), ...(campaign?.projects.flatMap(p => p.tickets) || [])];
   
   const sortedFolders = useMemo(() => {
       return [...folders].sort((a, b) => {
@@ -51,35 +175,21 @@ export const DocsView: React.FC = () => {
 
   const selectedDoc = docs.find(d => d.id === selectedDocId);
 
-  const handleCreateDoc = (folderId?: string) => {
-      const newDoc: ContextDoc = {
-          id: generateId(),
-          title: 'Untitled Document',
-          content: '<h1>New Document</h1><p>Start typing...</p>',
-          folderId: folderId,
-          lastUpdated: new Date().toISOString(),
-          isAiGenerated: false,
-          tags: []
-      };
-      addDoc(newDoc);
-      setSelectedDocId(newDoc.id);
-      setEditingDoc(null); // View mode initially
-  };
-
-  const handleCreateFromTemplate = (templateContent: string, title: string, folderId?: string) => {
+  const handleCreateDoc = (title: string, icon: string, content: string) => {
       const newDoc: ContextDoc = {
           id: generateId(),
           title: title,
-          content: templateContent,
-          folderId: folderId,
+          icon: icon,
+          content: content,
+          folderId: undefined, // Create in Unsorted by default or could pass current folder
           lastUpdated: new Date().toISOString(),
           isAiGenerated: false,
           tags: ['Draft']
       };
       addDoc(newDoc);
       setSelectedDocId(newDoc.id);
-      setEditingDoc(null);
-      setShowTemplateMenu(false);
+      setEditingDoc(null); 
+      setShowNewDocModal(false);
   };
 
   const handleSave = () => {
@@ -89,6 +199,7 @@ export const DocsView: React.FC = () => {
               content: editingDoc.content,
               channelId: editingDoc.channelId,
               tags: editingDoc.tags,
+              icon: editingDoc.icon,
               lastUpdated: new Date().toISOString()
           });
           setEditingDoc(null);
@@ -133,6 +244,21 @@ export const DocsView: React.FC = () => {
       setShowTicketModal(false);
   };
   
+  const handleLinkToTicket = (ticketId: string) => {
+      if (!selectedDoc) return;
+      // Need to find where the ticket lives to call the right update function, or update store to handle it generically
+      // store.linkDocToTicket handles finding it.
+      // We need to pass channelId or projectId if we know it, or let store search.
+      // Store implementation: linkDocToTicket(docId, ticketId, channelId?, projectId?)
+      // We need to find the ticket's container.
+      
+      const ticket = allTickets.find(t => t.id === ticketId);
+      if (ticket) {
+          linkDocToTicket(selectedDoc.id, ticket.id, ticket.channelId, ticket.projectId);
+      }
+      setShowLinkTicketModal(false);
+  };
+
   const toggleTag = (tag: string) => {
       if (!editingDoc) return;
       const tags = editingDoc.tags || [];
@@ -147,8 +273,27 @@ export const DocsView: React.FC = () => {
       if (newTagInput.trim()) {
           const tag = newTagInput.trim();
           addCampaignTag(tag);
-          toggleTag(tag); // Auto-add to doc
+          toggleTag(tag); 
           setNewTagInput('');
+      }
+  };
+
+  // --- Drag and Drop Handlers ---
+  const handleDragStart = (e: React.DragEvent, docId: string) => {
+      e.dataTransfer.setData('docId', docId);
+      e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+      e.preventDefault(); // Necessary to allow dropping
+      e.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleDrop = (e: React.DragEvent, folderId?: string) => {
+      e.preventDefault();
+      const docId = e.dataTransfer.getData('docId');
+      if (docId) {
+          moveDoc(docId, folderId);
       }
   };
 
@@ -171,74 +316,7 @@ export const DocsView: React.FC = () => {
                     <button onClick={() => setCreatingFolder(true)} className="p-1 text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 rounded" title="New Folder">
                         <Icons.Plus className="w-4 h-4" />
                     </button>
-                    
-                    <div className="relative">
-                        <button 
-                            onClick={() => setShowTemplateMenu(!showTemplateMenu)} 
-                            className="p-1 text-zinc-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors" 
-                            title="Create from Template"
-                        >
-                            <Icons.Layout className="w-4 h-4" />
-                        </button>
-                        
-                        {showTemplateMenu && (
-                            <div className="absolute top-full right-0 mt-2 w-56 bg-white border border-zinc-100 shadow-xl rounded-lg z-50 py-1 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-                                <div className="px-3 py-2 border-b border-zinc-50 text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
-                                    New Document
-                                </div>
-                                <button 
-                                    onClick={() => { handleCreateDoc(); setShowTemplateMenu(false); }}
-                                    className="w-full text-left px-4 py-2 text-xs text-zinc-700 hover:bg-zinc-50 hover:text-zinc-900 flex items-center gap-2"
-                                >
-                                    <Icons.FileText className="w-3.5 h-3.5" /> Blank Document
-                                </button>
-                                <div className="px-3 py-2 border-b border-zinc-50 text-[10px] font-bold text-zinc-400 uppercase tracking-wider mt-1">
-                                    Templates
-                                </div>
-                                <button 
-                                    onClick={() => handleCreateFromTemplate(ICP_TEMPLATE, 'Ideal Customer Profile')}
-                                    className="w-full text-left px-4 py-2 text-xs text-zinc-700 hover:bg-zinc-50 hover:text-zinc-900 flex items-center gap-2"
-                                >
-                                    <Icons.Circle className="w-3.5 h-3.5 text-indigo-500" /> ICP Definition
-                                </button>
-                                <button 
-                                    onClick={() => handleCreateFromTemplate(EMAIL_SEQUENCE_TEMPLATE, 'Cold Email Sequence')}
-                                    className="w-full text-left px-4 py-2 text-xs text-zinc-700 hover:bg-zinc-50 hover:text-zinc-900 flex items-center gap-2"
-                                >
-                                    <Icons.Circle className="w-3.5 h-3.5 text-emerald-500" /> Email Sequence
-                                </button>
-                                <button 
-                                    onClick={() => handleCreateFromTemplate(LINKEDIN_POST_TEMPLATE, 'LinkedIn Post')}
-                                    className="w-full text-left px-4 py-2 text-xs text-zinc-700 hover:bg-zinc-50 hover:text-zinc-900 flex items-center gap-2"
-                                >
-                                    <Icons.Circle className="w-3.5 h-3.5 text-blue-500" /> LinkedIn Post
-                                </button>
-                                <button 
-                                    onClick={() => handleCreateFromTemplate(REDDIT_POST_TEMPLATE, 'Reddit Post')}
-                                    className="w-full text-left px-4 py-2 text-xs text-zinc-700 hover:bg-zinc-50 hover:text-zinc-900 flex items-center gap-2"
-                                >
-                                    <Icons.Circle className="w-3.5 h-3.5 text-orange-500" /> Reddit Post
-                                </button>
-                                <button 
-                                    onClick={() => handleCreateFromTemplate(POSITIONING_MATRIX_TEMPLATE, 'Positioning Matrix')}
-                                    className="w-full text-left px-4 py-2 text-xs text-zinc-700 hover:bg-zinc-50 hover:text-zinc-900 flex items-center gap-2"
-                                >
-                                    <Icons.Circle className="w-3.5 h-3.5 text-purple-500" /> Positioning Matrix
-                                </button>
-                                <button 
-                                    onClick={() => handleCreateFromTemplate(SEO_BLOG_POST_TEMPLATE, 'SEO Blog Post')}
-                                    className="w-full text-left px-4 py-2 text-xs text-zinc-700 hover:bg-zinc-50 hover:text-zinc-900 flex items-center gap-2"
-                                >
-                                    <Icons.Circle className="w-3.5 h-3.5 text-amber-500" /> SEO Blog Post
-                                </button>
-                                
-                                {/* Overlay to close menu on outside click */}
-                                <div className="fixed inset-0 z-[-1]" onClick={() => setShowTemplateMenu(false)}></div>
-                            </div>
-                        )}
-                    </div>
-
-                    <button onClick={() => handleCreateDoc()} className="p-1 text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 rounded" title="Quick New Doc">
+                    <button onClick={() => setShowNewDocModal(true)} className="p-1 text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 rounded" title="New Document">
                         <Icons.Edit className="w-4 h-4" />
                     </button>
                 </div>
@@ -269,7 +347,11 @@ export const DocsView: React.FC = () => {
 
                 {/* Folders List */}
                 {folderDocs.map(folder => (
-                    <div key={folder.id}>
+                    <div 
+                        key={folder.id}
+                        onDragOver={handleDragOver}
+                        onDrop={(e) => handleDrop(e, folder.id)}
+                    >
                         <div className="group flex items-center justify-between px-2 py-1 mb-1 rounded hover:bg-zinc-100 cursor-default">
                             <div className="flex items-center gap-2 text-xs font-semibold text-zinc-500 tracking-wide">
                                 {renamingFolderId === folder.id ? (
@@ -304,19 +386,23 @@ export const DocsView: React.FC = () => {
                                 )}
                             </div>
                             <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button onClick={() => handleCreateDoc(folder.id)} className="text-zinc-400 hover:text-zinc-900"><Icons.Plus className="w-3 h-3"/></button>
                                 <button onClick={() => { if(confirm('Delete folder? Docs will move to Unsorted.')) deleteDocFolder(folder.id) }} className="text-zinc-400 hover:text-red-500"><Icons.Trash className="w-3 h-3"/></button>
                             </div>
                         </div>
-                        <div className="pl-4 space-y-0.5 border-l border-zinc-100 ml-3">
+                        <div className="pl-4 space-y-0.5 border-l border-zinc-100 ml-3 min-h-[10px]">
                             {folder.docs.map(doc => (
                                 <div 
                                     key={doc.id}
+                                    draggable
+                                    onDragStart={(e) => handleDragStart(e, doc.id)}
                                     onClick={() => { setSelectedDocId(doc.id); setEditingDoc(null); }}
                                     className={`px-3 py-1.5 rounded-md cursor-pointer text-xs flex items-center justify-between group transition-colors ${selectedDoc?.id === doc.id ? 'bg-white shadow-sm ring-1 ring-zinc-100 text-zinc-900 font-medium' : 'text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100'}`}
                                 >
-                                    <span className="truncate">{doc.title}</span>
-                                    {doc.isAiGenerated && <Icons.Sparkles className="w-3 h-3 text-purple-500 opacity-50" />}
+                                    <div className="flex items-center gap-2 truncate">
+                                        <span>{doc.icon || '📄'}</span>
+                                        <span className="truncate">{doc.title}</span>
+                                    </div>
+                                    {doc.isAiGenerated && <Icons.Sparkles className="w-3 h-3 text-purple-500 opacity-50 shrink-0" />}
                                 </div>
                             ))}
                             {folder.docs.length === 0 && <div className="px-3 text-[10px] text-zinc-300 italic">Empty</div>}
@@ -325,19 +411,27 @@ export const DocsView: React.FC = () => {
                 ))}
 
                 {/* Unsorted */}
-                <div>
+                <div 
+                    onDragOver={handleDragOver}
+                    onDrop={(e) => handleDrop(e, undefined)}
+                >
                     <div className="px-2 py-1 mb-1 text-xs font-semibold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
                         <Icons.FileText className="w-3 h-3" /> Unsorted
                     </div>
-                    <div className="pl-4 space-y-0.5 border-l border-zinc-100 ml-3">
+                    <div className="pl-4 space-y-0.5 border-l border-zinc-100 ml-3 min-h-[20px]">
                         {unsortedDocs.map(doc => (
                             <div 
                                 key={doc.id}
+                                draggable
+                                onDragStart={(e) => handleDragStart(e, doc.id)}
                                 onClick={() => { setSelectedDocId(doc.id); setEditingDoc(null); }}
                                 className={`px-3 py-1.5 rounded-md cursor-pointer text-xs flex items-center justify-between group transition-colors ${selectedDoc?.id === doc.id ? 'bg-white shadow-sm ring-1 ring-zinc-100 text-zinc-900 font-medium' : 'text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100'}`}
                             >
-                                <span className="truncate">{doc.title}</span>
-                                {doc.isAiGenerated && <Icons.Sparkles className="w-3 h-3 text-purple-500 opacity-50" />}
+                                <div className="flex items-center gap-2 truncate">
+                                    <span>{doc.icon || '📄'}</span>
+                                    <span className="truncate">{doc.title}</span>
+                                </div>
+                                {doc.isAiGenerated && <Icons.Sparkles className="w-3 h-3 text-purple-500 opacity-50 shrink-0" />}
                             </div>
                         ))}
                         {unsortedDocs.length === 0 && <div className="px-3 text-[10px] text-zinc-300 italic">No unsorted docs</div>}
@@ -399,6 +493,9 @@ export const DocsView: React.FC = () => {
                                 </>
                             ) : (
                                 <>
+                                    <button onClick={() => setShowLinkTicketModal(true)} className="px-3 py-1.5 text-xs font-bold text-zinc-600 hover:bg-zinc-100 rounded-lg transition-colors flex items-center gap-2 border border-zinc-200">
+                                        <Icons.Link className="w-3.5 h-3.5" /> Link Ticket
+                                    </button>
                                     <button onClick={() => setShowTicketModal(true)} className="px-3 py-1.5 text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors flex items-center gap-2">
                                         <Icons.Zap className="w-3.5 h-3.5" /> Create Ticket
                                     </button>
@@ -417,6 +514,16 @@ export const DocsView: React.FC = () => {
                                 <div className="space-y-6 flex flex-col h-full animate-in fade-in zoom-in-95 duration-200">
                                     {/* Edit Metadata Toolbar */}
                                     <div className="flex items-center gap-4 p-4 bg-white border border-zinc-200 rounded-lg shadow-sm">
+                                         <div className="w-16">
+                                             <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1 block">Icon</label>
+                                             <input 
+                                                value={editingDoc.icon || ''}
+                                                onChange={e => setEditingDoc({...editingDoc, icon: e.target.value})}
+                                                className="w-full text-center text-xl bg-zinc-50 border border-zinc-200 rounded p-1 focus:outline-none"
+                                                maxLength={2}
+                                                placeholder="📄"
+                                             />
+                                         </div>
                                          <div className="flex-1">
                                              <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1 block">Title</label>
                                              <input 
@@ -475,7 +582,8 @@ export const DocsView: React.FC = () => {
                                 </div>
                             ) : (
                                 <div className="bg-white rounded-xl shadow-sm border border-zinc-100 p-12 min-h-[80vh] animate-in fade-in duration-300">
-                                    <div className="mb-8 pb-4 border-b border-zinc-50">
+                                    <div className="mb-8 pb-4 border-b border-zinc-50 flex items-center gap-4">
+                                        <div className="text-4xl">{selectedDoc.icon || '📄'}</div>
                                         <h1 className="text-4xl font-bold text-zinc-900 mb-2">{selectedDoc.title}</h1>
                                     </div>
                                     <RichTextEditor 
@@ -497,6 +605,21 @@ export const DocsView: React.FC = () => {
                 </div>
             )}
         </div>
+
+        {showNewDocModal && (
+            <NewDocModal 
+                onClose={() => setShowNewDocModal(false)}
+                onCreate={handleCreateDoc}
+            />
+        )}
+
+        {showLinkTicketModal && (
+            <LinkTicketModal
+                tickets={allTickets}
+                onClose={() => setShowLinkTicketModal(false)}
+                onLink={handleLinkToTicket}
+            />
+        )}
 
         {showTicketModal && selectedDoc && (
             <TicketModal 
