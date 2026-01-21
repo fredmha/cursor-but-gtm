@@ -2,19 +2,21 @@
 import React, { useState, useMemo } from 'react';
 import { useStore, generateId } from '../store';
 import { Icons } from '../constants';
-import { ContextDoc, DocFolder, TicketStatus, Ticket } from '../types';
+import { ContextDoc, DocFolder, TicketStatus, Ticket, DocFormat } from '../types';
 import { RichTextEditor } from './RichTextEditor';
+import { CanvasEditor } from './CanvasEditor';
 import { ICP_TEMPLATE, EMAIL_SEQUENCE_TEMPLATE, LINKEDIN_POST_TEMPLATE, REDDIT_POST_TEMPLATE, POSITIONING_MATRIX_TEMPLATE, SEO_BLOG_POST_TEMPLATE } from '../templates';
 import { TicketModal } from './TicketModal';
 
 interface NewDocModalProps {
     onClose: () => void;
-    onCreate: (title: string, icon: string, templateContent: string) => void;
+    onCreate: (title: string, icon: string, templateContent: string, format: DocFormat) => void;
 }
 
 const NewDocModal: React.FC<NewDocModalProps> = ({ onClose, onCreate }) => {
     const [title, setTitle] = useState('');
     const [icon, setIcon] = useState('📄');
+    const [format, setFormat] = useState<DocFormat>('TEXT');
     const [selectedTemplate, setSelectedTemplate] = useState<{name: string, content: string} | null>(null);
 
     const templates = [
@@ -34,6 +36,22 @@ const NewDocModal: React.FC<NewDocModalProps> = ({ onClose, onCreate }) => {
                 <h3 className="text-lg font-bold text-zinc-900 mb-4">Create New Document</h3>
                 
                 <div className="space-y-4 mb-6">
+                    {/* Format Toggle */}
+                    <div className="flex bg-zinc-100 p-1 rounded-lg">
+                        <button 
+                            onClick={() => { setFormat('TEXT'); setIcon('📄'); }}
+                            className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-xs font-bold transition-all ${format === 'TEXT' ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-500 hover:text-zinc-700'}`}
+                        >
+                            <Icons.FileText className="w-4 h-4" /> Text Doc
+                        </button>
+                        <button 
+                            onClick={() => { setFormat('CANVAS'); setIcon('🎨'); }}
+                            className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-xs font-bold transition-all ${format === 'CANVAS' ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-500 hover:text-zinc-700'}`}
+                        >
+                            <Icons.Layout className="w-4 h-4" /> Canvas / Whiteboard
+                        </button>
+                    </div>
+
                     <div className="flex gap-4">
                         <div className="w-16">
                             <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1 block">Icon</label>
@@ -56,34 +74,35 @@ const NewDocModal: React.FC<NewDocModalProps> = ({ onClose, onCreate }) => {
                         </div>
                     </div>
 
-                    <div>
-                        <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2 block">Choose Template</label>
-                        <div className="grid grid-cols-2 gap-2 h-48 overflow-y-auto custom-scrollbar border border-zinc-100 rounded-lg p-1">
-                            {templates.map(t => (
-                                <button
-                                    key={t.name}
-                                    onClick={() => setSelectedTemplate(t)}
-                                    className={`text-left p-3 rounded-lg border text-xs transition-all ${
-                                        selectedTemplate?.name === t.name 
-                                        ? 'bg-indigo-50 border-indigo-200 text-indigo-700 ring-1 ring-indigo-200' 
-                                        : 'bg-white border-zinc-100 text-zinc-600 hover:border-zinc-300'
-                                    }`}
-                                >
-                                    <span className="font-semibold block mb-0.5">{t.name}</span>
-                                </button>
-                            ))}
+                    {format === 'TEXT' && (
+                        <div>
+                            <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2 block">Choose Template</label>
+                            <div className="grid grid-cols-2 gap-2 h-48 overflow-y-auto custom-scrollbar border border-zinc-100 rounded-lg p-1">
+                                {templates.map(t => (
+                                    <button
+                                        key={t.name}
+                                        onClick={() => setSelectedTemplate(t)}
+                                        className={`text-left p-3 rounded-lg border text-xs transition-all ${
+                                            selectedTemplate?.name === t.name 
+                                            ? 'bg-indigo-50 border-indigo-200 text-indigo-700 ring-1 ring-indigo-200' 
+                                            : 'bg-white border-zinc-100 text-zinc-600 hover:border-zinc-300'
+                                        }`}
+                                    >
+                                        <span className="font-semibold block mb-0.5">{t.name}</span>
+                                    </button>
+                                ))}
+                            </div>
                         </div>
-                    </div>
+                    )}
                 </div>
 
                 <div className="flex justify-end gap-2 mt-auto">
                     <button onClick={onClose} className="px-4 py-2 text-xs font-bold text-zinc-500 hover:text-zinc-900">Cancel</button>
                     <button 
-                        onClick={() => onCreate(title || 'Untitled', icon, selectedTemplate?.content || templates[0].content)}
-                        disabled={!selectedTemplate}
+                        onClick={() => onCreate(title || 'Untitled', icon, format === 'TEXT' ? (selectedTemplate?.content || templates[0].content) : '[]', format)}
                         className="px-6 py-2 bg-zinc-900 text-white text-xs font-bold rounded-lg hover:bg-zinc-800 disabled:opacity-50 shadow-sm"
                     >
-                        Create Document
+                        Create {format === 'CANVAS' ? 'Board' : 'Document'}
                     </button>
                 </div>
             </div>
@@ -175,13 +194,14 @@ export const DocsView: React.FC = () => {
 
   const selectedDoc = docs.find(d => d.id === selectedDocId);
 
-  const handleCreateDoc = (title: string, icon: string, content: string) => {
+  const handleCreateDoc = (title: string, icon: string, content: string, format: DocFormat) => {
       const newDoc: ContextDoc = {
           id: generateId(),
           title: title,
           icon: icon,
           content: content,
-          folderId: undefined, // Create in Unsorted by default or could pass current folder
+          format: format,
+          folderId: undefined, 
           lastUpdated: new Date().toISOString(),
           isAiGenerated: false,
           tags: ['Draft']
@@ -246,12 +266,6 @@ export const DocsView: React.FC = () => {
   
   const handleLinkToTicket = (ticketId: string) => {
       if (!selectedDoc) return;
-      // Need to find where the ticket lives to call the right update function, or update store to handle it generically
-      // store.linkDocToTicket handles finding it.
-      // We need to pass channelId or projectId if we know it, or let store search.
-      // Store implementation: linkDocToTicket(docId, ticketId, channelId?, projectId?)
-      // We need to find the ticket's container.
-      
       const ticket = allTickets.find(t => t.id === ticketId);
       if (ticket) {
           linkDocToTicket(selectedDoc.id, ticket.id, ticket.channelId, ticket.projectId);
@@ -285,7 +299,7 @@ export const DocsView: React.FC = () => {
   };
 
   const handleDragOver = (e: React.DragEvent) => {
-      e.preventDefault(); // Necessary to allow dropping
+      e.preventDefault(); 
       e.dataTransfer.dropEffect = 'move';
   };
 
@@ -573,24 +587,50 @@ export const DocsView: React.FC = () => {
                                          </div>
                                     </div>
 
+                                    {/* EDITOR SWITCH */}
                                     <div className="flex-1 min-h-[600px]">
-                                        <RichTextEditor 
-                                            initialContent={editingDoc.content} 
-                                            onChange={(html) => setEditingDoc({...editingDoc, content: html})}
-                                        />
+                                        {editingDoc.format === 'CANVAS' ? (
+                                            <CanvasEditor
+                                                initialContent={editingDoc.content}
+                                                onChange={(content) => setEditingDoc({ ...editingDoc, content })}
+                                            />
+                                        ) : (
+                                            <RichTextEditor 
+                                                initialContent={editingDoc.content} 
+                                                onChange={(html) => setEditingDoc({...editingDoc, content: html})}
+                                            />
+                                        )}
                                     </div>
                                 </div>
                             ) : (
-                                <div className="bg-white rounded-xl shadow-sm border border-zinc-100 p-12 min-h-[80vh] animate-in fade-in duration-300">
-                                    <div className="mb-8 pb-4 border-b border-zinc-50 flex items-center gap-4">
-                                        <div className="text-4xl">{selectedDoc.icon || '📄'}</div>
-                                        <h1 className="text-4xl font-bold text-zinc-900 mb-2">{selectedDoc.title}</h1>
-                                    </div>
-                                    <RichTextEditor 
-                                        initialContent={selectedDoc.content} 
-                                        onChange={() => {}} 
-                                        readOnly={true} 
-                                    />
+                                <div className={`bg-white rounded-xl shadow-sm border border-zinc-100 min-h-[80vh] animate-in fade-in duration-300 ${selectedDoc.format === 'CANVAS' ? 'p-0 overflow-hidden' : 'p-12'}`}>
+                                    {selectedDoc.format === 'CANVAS' ? (
+                                        <div className="h-full flex flex-col">
+                                            <div className="p-6 border-b border-zinc-50 flex items-center gap-4 bg-white z-10 relative">
+                                                <div className="text-4xl">{selectedDoc.icon || '🎨'}</div>
+                                                <h1 className="text-4xl font-bold text-zinc-900">{selectedDoc.title}</h1>
+                                            </div>
+                                            <div className="flex-1">
+                                                <CanvasEditor 
+                                                    initialContent={selectedDoc.content}
+                                                    onChange={() => {}}
+                                                    readOnly={true}
+                                                />
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <div className="mb-8 pb-4 border-b border-zinc-50 flex items-center gap-4">
+                                                <div className="text-4xl">{selectedDoc.icon || '📄'}</div>
+                                                <h1 className="text-4xl font-bold text-zinc-900 mb-2">{selectedDoc.title}</h1>
+                                            </div>
+                                            <RichTextEditor 
+                                                initialContent={selectedDoc.content} 
+                                                onChange={() => {}} 
+                                                readOnly={true} 
+                                            />
+                                        </>
+                                    )}
                                 </div>
                             )}
                         </div>

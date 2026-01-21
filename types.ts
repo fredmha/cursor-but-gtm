@@ -158,10 +158,34 @@ export interface DocFolder {
   createdAt: string;
 }
 
+export type DocFormat = 'TEXT' | 'CANVAS';
+
+export type CanvasNodeType = 'RECT' | 'CIRCLE' | 'STICKY' | 'TEXT' | 'IMAGE';
+
+export interface CanvasNode {
+  id: string;
+  type: CanvasNodeType;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  color: string;
+  text?: string;
+  src?: string; // For Images (Base64)
+}
+
+export interface CanvasEdge {
+  id: string;
+  fromNode: string;
+  toNode: string;
+  color?: string;
+}
+
 export interface ContextDoc {
   id: string;
   title: string;
-  content: string; // HTML Content
+  content: string; // HTML Content OR JSON string for Canvas
+  format?: DocFormat; // Defaults to TEXT
   type?: DocType; // Kept for legacy/compatibility
   folderId?: string; // The folder this doc belongs to
   lastUpdated: string;
