@@ -28,7 +28,10 @@ interface LayoutItem extends RoadmapItem {
 }
 
 const calculateLaneLayout = (items: RoadmapItem[]): { layoutItems: LayoutItem[], rowHeight: number } => {
-  const sorted = [...items].sort((a, b) => {
+  // Only calculate layout for scheduled items
+  const scheduledItems = items.filter(i => i.weekIndex >= 0);
+  
+  const sorted = [...scheduledItems].sort((a, b) => {
     if (a.weekIndex !== b.weekIndex) return a.weekIndex - b.weekIndex;
     if (a.durationWeeks !== b.durationWeeks) return b.durationWeeks - a.durationWeeks; 
     return a.id.localeCompare(b.id);
@@ -159,25 +162,32 @@ const StrategyHorizon: React.FC<{
 };
 
 const RoadmapCard: React.FC<{
-    item: LayoutItem;
+    item: RoadmapItem | LayoutItem;
     users: User[];
     projects: any[];
     isDragging: boolean;
     onDragStart: (e: React.DragEvent, id: string) => void;
     onClick: () => void;
-}> = ({ item, users, projects, isDragging, onDragStart, onClick }) => {
-    const left = item.weekIndex * WEEK_WIDTH;
-    const width = (item.durationWeeks || 1) * WEEK_WIDTH;
-    const top = item._layout?.top ?? 8;
-    const height = item._layout?.height ?? ITEM_HEIGHT;
+    isBacklog?: boolean;
+}> = ({ item, users, projects, isDragging, onDragStart, onClick, isBacklog = false }) => {
+    // For backlog items, styling is static. For layout items, use computed layout.
+    const style: React.CSSProperties = isBacklog 
+        ? { position: 'relative', width: 200 } 
+        : { 
+            position: 'absolute', 
+            left: (item.weekIndex * WEEK_WIDTH) + 4, 
+            width: ((item.durationWeeks || 1) * WEEK_WIDTH) - 8, 
+            top: (item as LayoutItem)._layout?.top ?? 8, 
+            height: (item as LayoutItem)._layout?.height ?? ITEM_HEIGHT 
+        };
     
     return (
         <div
             draggable
             onDragStart={(e) => onDragStart(e, item.id)}
             onClick={(e) => { e.stopPropagation(); onClick(); }}
-            className={`absolute rounded-md bg-white border border-zinc-200 hover:border-zinc-300 hover:shadow-sm transition-all cursor-move flex items-center px-2 shadow-sm z-20 group overflow-hidden ${isDragging ? 'opacity-50 ring-2 ring-indigo-500 scale-95' : ''}`}
-            style={{ left: left + 4, width: width - 8, top, height }}
+            className={`rounded-md bg-white border border-zinc-200 hover:border-zinc-300 hover:shadow-sm transition-all cursor-move flex items-center px-2 shadow-sm z-20 group overflow-hidden ${isDragging ? 'opacity-50 ring-2 ring-indigo-500 scale-95' : ''} ${isBacklog ? 'h-8 mb-0 shrink-0' : ''}`}
+            style={style}
         >
             <div className={`absolute left-0 top-0 bottom-0 w-1 rounded-l-md ${item.type === 'NOTE' ? 'bg-pink-400' : 'bg-indigo-500'}`}></div>
             <div className="flex items-center gap-2 w-full overflow-hidden pl-2">
@@ -486,73 +496,102 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
              {/* LANES CONTAINER */}
              <div className="min-w-max pb-32">
                  {channels.map(channel => {
-                     const laneItems = (campaign?.roadmapItems || []).filter(i => i.channelId === channel.id);
-                     const { layoutItems, rowHeight } = calculateLaneLayout(laneItems);
+                     const channelItems = (campaign?.roadmapItems || []).filter(i => i.channelId === channel.id);
+                     const { layoutItems, rowHeight } = calculateLaneLayout(channelItems);
+                     
+                     // Unscheduled items (weekIndex < 0)
+                     const unscheduledItems = channelItems.filter(i => i.weekIndex < 0);
 
                      return (
-                         <div key={channel.id} className="flex border-b border-zinc-100 relative bg-white group/lane" style={{ height: rowHeight }}>
+                         <div key={channel.id} className="flex flex-col border-b border-zinc-100 relative bg-white group/lane">
                              
-                             {/* LEFT SIDEBAR (Controls) */}
-                             <div className="shrink-0 border-r border-zinc-100 bg-zinc-50/30 p-4 flex flex-col" style={{ width: LEFT_PANEL_WIDTH, minHeight: rowHeight }}>
-                                 
-                                <div 
-                                    className="flex flex-col mb-3 group/header cursor-pointer hover:bg-zinc-100 p-2 -m-2 rounded transition-colors"
-                                    onClick={() => setActiveDashboardChannel(channel.id)}
-                                >
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <div className="p-1 rounded bg-white border border-zinc-200 text-zinc-600 shadow-sm"><Icons.Zap className="w-3.5 h-3.5" /></div>
-                                        <span className="font-semibold text-sm text-zinc-800">{channel.name}</span>
+                             {/* Scheduled Row */}
+                             <div className="flex" style={{ height: rowHeight }}>
+                                 {/* LEFT SIDEBAR (Controls) */}
+                                 <div className="shrink-0 border-r border-zinc-100 bg-zinc-50/30 p-4 flex flex-col" style={{ width: LEFT_PANEL_WIDTH, minHeight: rowHeight }}>
+                                     
+                                    <div 
+                                        className="flex flex-col mb-3 group/header cursor-pointer hover:bg-zinc-100 p-2 -m-2 rounded transition-colors"
+                                        onClick={() => setActiveDashboardChannel(channel.id)}
+                                    >
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <div className="p-1 rounded bg-white border border-zinc-200 text-zinc-600 shadow-sm"><Icons.Zap className="w-3.5 h-3.5" /></div>
+                                            <span className="font-semibold text-sm text-zinc-800">{channel.name}</span>
+                                        </div>
+                                        
+                                        <div className="flex gap-1.5 ml-8">
+                                            {channel.tags?.map(tag => (
+                                                <span 
+                                                    key={tag} 
+                                                    className={`text-[9px] font-medium uppercase tracking-wider text-zinc-500`}
+                                                >
+                                                    {tag}
+                                                </span>
+                                            ))}
+                                        </div>
                                     </div>
-                                    
-                                    <div className="flex gap-1.5 ml-8">
-                                        {channel.tags?.map(tag => (
-                                            <span 
-                                                key={tag} 
-                                                className={`text-[9px] font-medium uppercase tracking-wider text-zinc-500`}
-                                            >
-                                                {tag}
-                                            </span>
-                                        ))}
-                                    </div>
-                                </div>
-                             </div>
+                                 </div>
 
-                             {/* RIGHT SIDE (Grid) */}
-                             <div className="flex relative">
-                                 {weeks.map((_, i) => (
-                                     <div 
-                                         key={i} 
-                                         className="border-r border-zinc-100 h-full relative group/cell hover:bg-zinc-50 transition-colors"
-                                         style={{ width: WEEK_WIDTH }}
-                                         onDragOver={(e) => e.preventDefault()}
-                                         onDrop={(e) => handleDrop(e, channel.id, i)}
-                                         onClick={() => {
-                                             setActiveTicket({ 
-                                                 item: { channelId: channel.id, weekIndex: i, title: '' } 
-                                             })
-                                         }}
-                                     >
-                                         <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/cell:opacity-100 pointer-events-none">
-                                             <div className="w-6 h-6 rounded bg-zinc-100 flex items-center justify-center text-zinc-400">
-                                                 <Icons.Plus className="w-3 h-3" />
+                                 {/* RIGHT SIDE (Grid) */}
+                                 <div className="flex relative">
+                                     {weeks.map((_, i) => (
+                                         <div 
+                                             key={i} 
+                                             className="border-r border-zinc-100 h-full relative group/cell hover:bg-zinc-50 transition-colors"
+                                             style={{ width: WEEK_WIDTH }}
+                                             onDragOver={(e) => e.preventDefault()}
+                                             onDrop={(e) => handleDrop(e, channel.id, i)}
+                                             onClick={() => {
+                                                 setActiveTicket({ 
+                                                     item: { channelId: channel.id, weekIndex: i, title: '' } 
+                                                 })
+                                             }}
+                                         >
+                                             <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/cell:opacity-100 pointer-events-none">
+                                                 <div className="w-6 h-6 rounded bg-zinc-100 flex items-center justify-center text-zinc-400">
+                                                     <Icons.Plus className="w-3 h-3" />
+                                                 </div>
                                              </div>
                                          </div>
-                                     </div>
-                                 ))}
+                                     ))}
 
-                                 {/* Render Items */}
-                                 {layoutItems.map(item => (
-                                     <RoadmapCard 
-                                         key={item.id} 
-                                         item={item} 
-                                         users={users} 
-                                         projects={projects}
-                                         isDragging={draggedItemId === item.id}
-                                         onDragStart={handleDragStart}
-                                         onClick={() => setActiveTicket({ item })}
-                                     />
-                                 ))}
+                                     {/* Render Items */}
+                                     {layoutItems.map(item => (
+                                         <RoadmapCard 
+                                             key={item.id} 
+                                             item={item} 
+                                             users={users} 
+                                             projects={projects}
+                                             isDragging={draggedItemId === item.id}
+                                             onDragStart={handleDragStart}
+                                             onClick={() => setActiveTicket({ item })}
+                                         />
+                                     ))}
+                                 </div>
                              </div>
+
+                             {/* Unassigned / Backlog Row */}
+                             {unscheduledItems.length > 0 && (
+                                 <div className="flex bg-zinc-50/20 border-t border-zinc-50">
+                                     <div className="shrink-0 p-3 flex items-center justify-end border-r border-zinc-100 bg-zinc-50/50" style={{ width: LEFT_PANEL_WIDTH }}>
+                                         <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 mr-2">Unassigned</span>
+                                     </div>
+                                     <div className="flex-1 p-2 flex gap-2 overflow-x-auto custom-scrollbar">
+                                         {unscheduledItems.map(item => (
+                                             <RoadmapCard 
+                                                 key={item.id} 
+                                                 item={item} 
+                                                 users={users} 
+                                                 projects={projects}
+                                                 isDragging={draggedItemId === item.id}
+                                                 onDragStart={handleDragStart}
+                                                 onClick={() => setActiveTicket({ item })}
+                                                 isBacklog={true}
+                                             />
+                                         ))}
+                                     </div>
+                                 </div>
+                             )}
                          </div>
                      );
                  })}

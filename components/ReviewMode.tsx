@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { useStore } from '../store';
 import { Status, TicketStatus } from '../types';
 import { Icons } from '../constants';
-import { WeeklyReviewWizard } from './WeeklyReviewWizard';
+import { WeeklyReviewAgent } from './WeeklyReviewAgent';
 
 const MetricCard: React.FC<{
     label: string;
@@ -12,13 +12,13 @@ const MetricCard: React.FC<{
     color: string;
     icon: React.ReactNode;
 }> = ({ label, value, subtext, color, icon }) => (
-    <div className="bg-white border-zinc-100 border p-6 rounded-2xl relative overflow-hidden group transition-all">
+    <div className="bg-white p-6 rounded-2xl relative overflow-hidden group transition-all">
         <div className={`absolute top-4 right-4 opacity-10 group-hover:opacity-20 transition-opacity ${color}`}>
             {icon}
         </div>
         <div className="relative z-10">
             <h3 className="text-xs font-semibold uppercase text-zinc-400 tracking-wider mb-2">{label}</h3>
-            <div className={`text-3xl font-bold mb-2 text-zinc-900`}>{value}</div>
+            <div className={`text-3xl font-bold mb-2 text-zinc-800`}>{value}</div>
             <p className="text-[10px] text-zinc-500 font-medium">{subtext}</p>
         </div>
     </div>
@@ -26,7 +26,7 @@ const MetricCard: React.FC<{
 
 export const ReviewMode: React.FC = () => {
   const { campaign } = useStore();
-  const [showWizard, setShowWizard] = useState(false);
+  const [showAgent, setShowAgent] = useState(false);
 
   const allTickets = (campaign.channels || []).flatMap(c => c.tickets).concat((campaign.projects || []).flatMap(p => p.tickets));
   const activeProjects = campaign.projects || [];
@@ -44,10 +44,10 @@ export const ReviewMode: React.FC = () => {
             <p className="text-zinc-500 text-sm">Analyze health, velocity, and focus.</p>
           </div>
           <button 
-            onClick={() => setShowWizard(true)}
+            onClick={() => setShowAgent(true)}
             className="px-6 py-2 bg-zinc-900 text-white rounded-lg font-bold text-sm hover:bg-zinc-800 transition-all shadow-lg shadow-zinc-200 flex items-center gap-2"
           >
-            <Icons.Play className="w-4 h-4" /> Start Weekly Review
+            <Icons.Sparkles className="w-4 h-4 text-purple-400" /> Agent Mode
           </button>
       </div>
 
@@ -88,26 +88,24 @@ export const ReviewMode: React.FC = () => {
               <Icons.Layers className="w-4 h-4 text-zinc-400"/> Project Health Matrix
           </h3>
           <div className="overflow-hidden rounded-xl border border-zinc-100 bg-white">
-            <table className="w-full text-left">
-                <thead className="bg-zinc-50 text-[10px] uppercase font-semibold text-zinc-400 border-b border-zinc-100">
-                    <tr>
-                        <th className="px-6 py-3">Project</th>
-                        <th className="px-6 py-3 w-24">Status</th>
-                        <th className="px-6 py-3 w-48">Progress</th>
-                    </tr>
-                </thead>
-                <tbody className="divide-y divide-zinc-50">
+            <div className="w-full">
+                <div className="bg-zinc-50/50 text-[10px] uppercase font-semibold text-zinc-400 border-b border-zinc-100 flex">
+                    <div className="px-6 py-3 flex-1">Project</div>
+                    <div className="px-6 py-3 w-32">Status</div>
+                    <div className="px-6 py-3 w-48">Progress</div>
+                </div>
+                <div className="divide-y divide-zinc-50">
                     {activeProjects.map(project => {
                          const pTickets = (project.tickets || []).concat((campaign.channels || []).flatMap(c => c.tickets).filter(t => t.projectId === project.id));
                          const pCompletion = pTickets.length > 0 ? (pTickets.filter(t => t.status === TicketStatus.Done).length / pTickets.length) * 100 : 0;
                         
                         return (
-                            <tr key={project.id} className="hover:bg-zinc-50 transition-colors group">
-                                <td className="px-6 py-4">
+                            <div key={project.id} className="hover:bg-zinc-50 transition-colors group flex items-center">
+                                <div className="px-6 py-4 flex-1">
                                     <div className="text-sm font-medium text-zinc-900 mb-0.5">{project.name}</div>
                                     <div className="text-[10px] text-zinc-400 truncate max-w-md">{project.description}</div>
-                                </td>
-                                <td className="px-6 py-4">
+                                </div>
+                                <div className="px-6 py-4 w-32">
                                     <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded tracking-wide ${
                                             project.status === 'On Track' ? 'bg-emerald-50 text-emerald-600' :
                                             project.status === 'At Risk' ? 'bg-amber-50 text-amber-600' :
@@ -116,24 +114,24 @@ export const ReviewMode: React.FC = () => {
                                         }`}>
                                             {project.status}
                                         </span>
-                                </td>
-                                <td className="px-6 py-4">
+                                </div>
+                                <div className="px-6 py-4 w-48">
                                     <div className="flex items-center gap-3">
                                         <div className="flex-1 h-1.5 bg-zinc-100 rounded-full overflow-hidden">
                                             <div className={`h-full bg-emerald-500`} style={{ width: `${pCompletion}%` }}></div>
                                         </div>
                                         <span className="text-[10px] font-mono text-zinc-400 w-8 text-right">{Math.round(pCompletion)}%</span>
                                     </div>
-                                </td>
-                            </tr>
+                                </div>
+                            </div>
                         );
                     })}
-                </tbody>
-            </table>
+                </div>
+            </div>
           </div>
       </div>
       
-      {showWizard && <WeeklyReviewWizard onClose={() => setShowWizard(false)} />}
+      {showAgent && <WeeklyReviewAgent onClose={() => setShowAgent(false)} />}
     </div>
   );
 };

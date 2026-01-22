@@ -347,7 +347,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const newItem: RoadmapItem = {
             id: newItemId,
             channelId: undefined, 
-            weekIndex: 0, 
+            weekIndex: -1, // Unscheduled by default
             durationWeeks: 1,
             title: ticket.title,
             description: ticket.description,
@@ -433,7 +433,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const newItem: RoadmapItem = {
             id: newItemId,
             channelId: channelId,
-            weekIndex: 0, 
+            weekIndex: -1, // Unscheduled by default
             durationWeeks: 1,
             title: ticket.title,
             description: ticket.description,

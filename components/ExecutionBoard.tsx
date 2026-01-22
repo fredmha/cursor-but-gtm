@@ -5,6 +5,7 @@ import { TicketStatus, Ticket, Priority, Status, Channel, Project } from '../typ
 import { Icons, PRIORITIES } from '../constants';
 import { ProjectDashboard } from './ProjectDashboard';
 import { ChannelDashboard } from './ChannelDashboard';
+import { TicketModal } from './TicketModal';
 
 const STATUS_CONFIG = {
     [TicketStatus.Backlog]: { icon: Icons.Circle, color: 'text-zinc-300', bg: 'bg-zinc-50' },
@@ -92,10 +93,12 @@ const ProjectCreationModal: React.FC<{
 }
 
 export const ExecutionBoard: React.FC = () => {
-  const { campaign, users, currentUser, addChannel, addProject, deleteChannel, deleteProject } = useStore();
+  const { campaign, users, currentUser, addChannel, addProject, deleteChannel, deleteProject, addTicket, updateTicket, updateProjectTicket, deleteTicket, deleteProjectTicket, addProjectTicket } = useStore();
   
   const [view, setView] = useState<ViewState>({ type: 'MY_ISSUES' });
   const [showProjectModal, setShowProjectModal] = useState(false);
+  const [editingTicket, setEditingTicket] = useState<Ticket | null>(null);
+  const [showTicketModal, setShowTicketModal] = useState(false);
 
   const channels = campaign?.channels || [];
   const projects = campaign?.projects || [];
@@ -107,10 +110,14 @@ export const ExecutionBoard: React.FC = () => {
                 ...t, 
                 channelName: c.name,
               }))
-            ).filter(t => t.assigneeId === currentUser.id);
+            ).concat(projects.flatMap(p => p.tickets.map(t => ({
+                ...t,
+                projectName: p.name
+            }))))
+            .filter(t => t.assigneeId === currentUser.id);
       }
       return [];
-  }, [view, channels, currentUser.id]);
+  }, [view, channels, projects, currentUser.id]);
 
   const handleSaveProject = (data: { name: string; description: string; targetDate: string; priority: Priority }) => {
       const newId = generateId();
@@ -152,6 +159,59 @@ export const ExecutionBoard: React.FC = () => {
   const handleDeleteProject = (projectId: string) => {
       deleteProject(projectId);
       setView({ type: 'MY_ISSUES' });
+  };
+
+  const handleTicketClick = (ticket: Ticket) => {
+      setEditingTicket(ticket);
+      setShowTicketModal(true);
+  };
+
+  const handleSaveTicket = (data: any) => {
+      const ticketData: Ticket = {
+          id: data.id || generateId(),
+          shortId: editingTicket?.shortId || `T-${Math.floor(Math.random() * 10000)}`,
+          title: data.title,
+          description: data.description,
+          status: editingTicket?.status || TicketStatus.Todo,
+          priority: data.priority,
+          assigneeId: data.assigneeId,
+          channelId: data.channelId,
+          projectId: data.projectId,
+          createdAt: editingTicket?.createdAt || new Date().toISOString(),
+          linkedDocIds: data.linkedDocIds
+      };
+
+      if (editingTicket) {
+          const isLocationChanged = (editingTicket.channelId !== ticketData.channelId) || (editingTicket.projectId !== ticketData.projectId);
+          
+          if (isLocationChanged) {
+              // Remove from old
+              if (editingTicket.channelId) deleteTicket(editingTicket.channelId, editingTicket.id);
+              else if (editingTicket.projectId) deleteProjectTicket(editingTicket.projectId, editingTicket.id);
+              
+              // Add to new
+              if (ticketData.channelId) addTicket(ticketData.channelId, ticketData);
+              else if (ticketData.projectId) addProjectTicket(ticketData.projectId, ticketData);
+          } else {
+              // Update in place
+              if (ticketData.channelId) updateTicket(ticketData.channelId, ticketData.id, ticketData);
+              else if (ticketData.projectId) updateProjectTicket(ticketData.projectId, ticketData.id, ticketData);
+          }
+      } else {
+          // New ticket (though usually disabled in My Issues)
+          if (ticketData.channelId) addTicket(ticketData.channelId, ticketData);
+          else if (ticketData.projectId) addProjectTicket(ticketData.projectId, ticketData);
+      }
+      setShowTicketModal(false);
+      setEditingTicket(null);
+  };
+
+  const handleDeleteTicket = (id: string) => {
+      if (editingTicket) {
+          if (editingTicket.channelId) deleteTicket(editingTicket.channelId, id);
+          else if (editingTicket.projectId) deleteProjectTicket(editingTicket.projectId, id);
+      }
+      setShowTicketModal(false);
   };
 
   return (
@@ -269,11 +329,14 @@ export const ExecutionBoard: React.FC = () => {
                                         return (
                                             <tr 
                                                 key={ticket.id} 
+                                                onClick={() => handleTicketClick(ticket)}
                                                 className="group cursor-pointer hover:bg-surface transition-colors rounded-lg"
                                             >
                                                 <td className="px-4 py-3 text-xs font-mono text-zinc-400 rounded-l-lg">{ticket.shortId}</td>
                                                 <td className="px-4 py-3 text-sm text-zinc-800 font-medium">
                                                     {ticket.title}
+                                                    {ticket.channelId && <span className="ml-2 text-xs text-zinc-400 font-normal">in {channels.find(c => c.id === ticket.channelId)?.name}</span>}
+                                                    {ticket.projectId && <span className="ml-2 text-xs text-zinc-400 font-normal">in {projects.find(p => p.id === ticket.projectId)?.name}</span>}
                                                 </td>
                                                 <td className="px-4 py-3">
                                                     <div className="flex items-center gap-2">
@@ -311,6 +374,25 @@ export const ExecutionBoard: React.FC = () => {
           <ProjectCreationModal 
               onClose={() => setShowProjectModal(false)}
               onSave={handleSaveProject}
+          />
+      )}
+
+      {showTicketModal && editingTicket && (
+          <TicketModal 
+              initialData={{
+                  id: editingTicket.id,
+                  title: editingTicket.title,
+                  description: editingTicket.description,
+                  priority: editingTicket.priority,
+                  assigneeId: editingTicket.assigneeId,
+                  channelId: editingTicket.channelId,
+                  projectId: editingTicket.projectId,
+                  linkedDocIds: editingTicket.linkedDocIds
+              }} 
+              context={{ channels, projects, users, docs: campaign?.docs || [] }}
+              onClose={() => { setShowTicketModal(false); setEditingTicket(null); }}
+              onSave={handleSaveTicket}
+              onDelete={() => handleDeleteTicket(editingTicket.id)}
           />
       )}
     </div>

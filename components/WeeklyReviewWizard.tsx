@@ -1,4 +1,5 @@
 
+
 import React, { useState, useMemo, useEffect } from 'react';
 import { useStore, generateId } from '../store';
 import { Icons } from '../constants';
@@ -296,7 +297,7 @@ export const WeeklyReviewWizard: React.FC<WeeklyReviewWizardProps> = ({ onClose 
                   <div className="space-y-3">
                       <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider block text-center">Active Contexts</label>
                       <div className="flex flex-wrap justify-center gap-2">
-                          {[...(campaign?.projects || []), ...(campaign?.channels || [])].map((item: any) => {
+                          {[...(campaign?.projects || []), ...(campaign?.channels || [])].map((item) => {
                               const isSelected = selectedContextIds.includes(item.id);
                               return (
                                   <button
@@ -308,6 +309,7 @@ export const WeeklyReviewWizard: React.FC<WeeklyReviewWizardProps> = ({ onClose 
                                         : 'bg-white text-zinc-500 border-zinc-200 hover:border-zinc-300'
                                     }`}
                                   >
+                                      {/* @ts-ignore - 'type' field check */}
                                       {item.type === 'PROJECT' ? '🎯' : '⚡️'} {item.name}
                                   </button>
                               )
@@ -353,7 +355,7 @@ export const WeeklyReviewWizard: React.FC<WeeklyReviewWizardProps> = ({ onClose 
 
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                       {/* Render columns by Context */}
-                      {Array.from(new Set(generatedTickets.map(t => t.contextId))).map(ctxId => {
+                      {Array.from(new Set(generatedTickets.map(t => t.contextId))).map((ctxId: string) => {
                           const ctxName = getContextName(ctxId);
                           const items = generatedTickets.filter(t => t.contextId === ctxId);
                           
