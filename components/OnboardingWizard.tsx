@@ -1,6 +1,6 @@
+
 import React from 'react';
 import { useOnboarding } from '../hooks/useOnboarding';
-import { PrinciplesCanvas } from './PrinciplesCanvas';
 import { RoadmapSandbox } from './RoadmapSandbox';
 import { ChannelSetupModal } from './ChannelSetupModal';
 import { Icons } from '../constants';
@@ -14,89 +14,21 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onEnableLabM
   const { state, actions } = useOnboarding();
   const { currentUser } = useStore();
 
-  const { step, loading, formData, buckets, editingBucket, tempBucketName, principlesByCategory, campaign, showChannelModal } = state;
+  const { step, loading, formData, campaign, showChannelModal } = state;
   
-  const TOTAL_STEPS = 5;
+  const TOTAL_STEPS = 4;
 
-  // --- STEP 2: OPERATING PRINCIPLES (Full Screen) ---
+  // --- STEP 2: ROADMAP SANDBOX (Full Screen) ---
   if (step === 2) {
-    return (
-      <div className="fixed inset-0 bg-white flex flex-col z-50 font-sans text-zinc-900 animate-in fade-in duration-500">
-        
-        {/* Minimal Top Bar */}
-        <header className="h-14 border-b border-zinc-200 flex items-center justify-between px-6 bg-white/80 backdrop-blur-xl fixed top-0 left-0 right-0 z-40">
-           <div className="flex items-center gap-3">
-              <div className="w-6 h-6 bg-zinc-100 rounded flex items-center justify-center border border-zinc-200">
-                 <Icons.Target className="w-3 h-3 text-zinc-500" />
-              </div>
-              <div className="flex items-center gap-2 text-sm font-medium">
-                 <span className="text-zinc-400">Setup</span>
-                 <span className="text-zinc-300">/</span>
-                 <span className="text-zinc-900">Operating Principles</span>
-              </div>
-           </div>
-           
-           <div className="flex items-center gap-3">
-              <span className="text-[10px] uppercase font-mono text-zinc-400 tracking-wider">Session Active</span>
-              <div className={`w-2 h-2 rounded-full ${currentUser.color}`}></div>
-           </div>
-        </header>
-
-        {/* Main Canvas Area */}
-        <div className="flex-1 pt-14 pb-0 overflow-hidden relative">
-           <PrinciplesCanvas 
-               buckets={buckets}
-               principlesByCategory={principlesByCategory}
-               editingBucket={editingBucket}
-               tempBucketName={tempBucketName}
-               actions={actions}
-             />
-        </div>
-
-        {/* Floating Navigation Dock */}
-        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-50">
-           <div className="flex items-center gap-1 p-1.5 bg-white border border-zinc-200 rounded-full shadow-xl">
-              <button 
-                onClick={actions.handleBack}
-                className="px-6 py-2.5 rounded-full text-sm font-medium text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 transition-all flex items-center gap-2"
-              >
-                <span className="text-xs">←</span> Back
-              </button>
-              
-              <div className="w-px h-4 bg-zinc-200 mx-1"></div>
-              
-              <button 
-                onClick={actions.handleNext}
-                className="px-8 py-2.5 rounded-full text-sm font-bold bg-zinc-900 text-white hover:bg-zinc-800 transition-all flex items-center gap-2 shadow-lg"
-              >
-                Continue <Icons.ChevronRight className="w-4 h-4" />
-              </button>
-           </div>
-        </div>
-
-        {/* Background Ambient Effects */}
-        <div className="absolute bottom-0 left-0 w-full h-32 bg-gradient-to-t from-white to-transparent pointer-events-none z-30"></div>
-
-        {/* MODAL OVERLAY */}
-        {showChannelModal && (
-            <ChannelSetupModal 
-                existingChannels={campaign?.channels || []}
-                onComplete={actions.handleChannelSetupComplete}
-                onBack={() => actions.setShowChannelModal(false)}
-            />
-        )}
-      </div>
-    );
-  }
-
-  // --- STEP 3: ROADMAP SANDBOX (Full Screen) ---
-  if (step === 3) {
       return (
-          <RoadmapSandbox onNext={actions.handleNext} onBack={actions.handleBack} />
+          <div className="fixed inset-0 bg-white flex flex-col z-50 font-sans text-zinc-900 animate-in fade-in duration-500">
+             {/* Minimal Header included in RoadmapSandbox or just render it raw */}
+             <RoadmapSandbox onNext={actions.handleNext} onBack={actions.handleBack} />
+          </div>
       );
   }
 
-  // --- WIZARD CARD MODE (Step 1, 4, 5) ---
+  // --- WIZARD CARD MODE (Step 1, 3, 4) ---
   return (
     <div className="h-full flex flex-col items-center justify-center p-8 bg-zinc-50 relative overflow-hidden font-sans">
       {/* Background Decor */}
@@ -193,7 +125,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onEnableLabM
             </div>
           )}
 
-          {step === 4 && (
+          {step === 3 && (
             <div className="h-full overflow-y-auto p-8 custom-scrollbar">
               <div className="max-w-xl mx-auto text-center space-y-8 animate-in fade-in slide-in-from-right-4 duration-500 pt-12">
                  <div className="w-20 h-20 bg-purple-50 rounded-full flex items-center justify-center mx-auto mb-6 relative">
@@ -237,7 +169,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onEnableLabM
             </div>
           )}
 
-          {step === 5 && (
+          {step === 4 && (
             <div className="h-full overflow-y-auto p-8 custom-scrollbar">
               <div className="max-w-xl mx-auto text-center space-y-8 animate-in fade-in slide-in-from-right-4 duration-500 pt-12">
                  <div className="w-20 h-20 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-6">
@@ -249,7 +181,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onEnableLabM
                     <p className="text-zinc-500">Campaign structure initialized with {campaign?.channels.length} channels.</p>
                  </div>
 
-                 <div className="grid grid-cols-3 gap-4 text-center">
+                 <div className="grid grid-cols-2 gap-4 text-center">
                     <div className="bg-zinc-50 rounded p-4 border border-zinc-200">
                        <div className="text-2xl font-bold text-zinc-900 font-mono">{campaign?.channels.length}</div>
                        <div className="text-[10px] uppercase text-zinc-400 font-bold">Channels</div>
@@ -257,10 +189,6 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onEnableLabM
                     <div className="bg-zinc-50 rounded p-4 border border-zinc-200">
                        <div className="text-2xl font-bold text-zinc-900 font-mono">{campaign?.roadmapItems?.length || 0}</div>
                        <div className="text-[10px] uppercase text-zinc-400 font-bold">Roadmap Items</div>
-                    </div>
-                    <div className="bg-zinc-50 rounded p-4 border border-zinc-200">
-                       <div className="text-2xl font-bold text-zinc-900 font-mono">{formData.principles.length}</div>
-                       <div className="text-[10px] uppercase text-zinc-400 font-bold">Rules</div>
                     </div>
                  </div>
                  
@@ -286,7 +214,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onEnableLabM
                ← Back
             </button>
             
-            {step < 3 && (
+            {step < 2 && (
               <button 
                 onClick={actions.handleNext}
                 disabled={(!formData.quarter || !formData.objective) && step === 1}
@@ -306,6 +234,15 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onEnableLabM
            <span className="font-bold text-zinc-500">{currentUser.name.toUpperCase()}</span>
         </div>
       </div>
+
+      {/* MODAL OVERLAY - Rendered at root level so it stays visible during step transitions if needed, though usually logic handles it */}
+      {showChannelModal && (
+          <ChannelSetupModal 
+              existingChannels={campaign?.channels || []}
+              onComplete={actions.handleChannelSetupComplete}
+              onBack={() => actions.setShowChannelModal(false)}
+          />
+      )}
     </div>
   );
 };

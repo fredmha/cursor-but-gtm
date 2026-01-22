@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { useStore, generateId } from '../store';
-import { Icons, PRIORITIES } from '../constants';
+import { Icons } from '../constants';
 import { RoadmapItem, User, OperatingPrinciple, Priority, Status, TicketStatus, ChannelTag, Project, TimelineTag } from '../types';
 import { ProjectDashboard } from './ProjectDashboard';
 import { ChannelDashboard } from './ChannelDashboard';
@@ -90,9 +90,9 @@ const StrategyHorizon: React.FC<{
 }> = ({ projects, users, roadmapItems, campaignStart, onProjectClick, weekCount }) => {
     
     return (
-        <div className="min-w-max bg-background border-b border-border relative z-30">
+        <div className="min-w-max bg-white border-b border-zinc-100 relative z-30">
             <div className="flex flex-col">
-                <div className="shrink-0 border-b border-border bg-surface px-4 py-2">
+                <div className="shrink-0 border-b border-zinc-100 bg-zinc-50 px-4 py-2">
                     <div className="flex items-center gap-2 text-zinc-500">
                         <Icons.Target className="w-4 h-4" />
                         <span className="text-xs font-bold uppercase tracking-wider">Strategy Horizon</span>
@@ -117,9 +117,9 @@ const StrategyHorizon: React.FC<{
                     const colorClass = project.status === 'On Track' ? 'bg-emerald-500' : project.status === 'At Risk' ? 'bg-amber-500' : project.status === 'Off Track' ? 'bg-red-500' : 'bg-zinc-500';
 
                     return (
-                        <div key={project.id} className="flex border-b border-border group/row hover:bg-surface transition-colors h-14">
+                        <div key={project.id} className="flex border-b border-zinc-100 group/row hover:bg-zinc-50 transition-colors h-14">
                              {/* Project Header (Left) */}
-                             <div className="shrink-0 border-r border-border bg-surface/50 p-3 flex flex-col justify-center" style={{ width: LEFT_PANEL_WIDTH }}>
+                             <div className="shrink-0 border-r border-zinc-100 bg-zinc-50/50 p-3 flex flex-col justify-center" style={{ width: LEFT_PANEL_WIDTH }}>
                                  <div 
                                     onClick={() => onProjectClick(project.id)}
                                     className="flex items-center gap-2 cursor-pointer group"
@@ -130,18 +130,18 @@ const StrategyHorizon: React.FC<{
                              </div>
 
                              {/* Timeline (Right) */}
-                             <div className="relative flex-1 bg-background overflow-visible">
+                             <div className="relative flex-1 bg-white overflow-visible">
                                  {/* Vertical Lines */}
                                  <div className="absolute inset-0 flex pointer-events-none">
                                      {Array.from({ length: weekCount }).map((_, i) => (
-                                         <div key={i} className="border-r border-border/50 h-full" style={{ width: WEEK_WIDTH }}></div>
+                                         <div key={i} className="border-r border-zinc-100 h-full" style={{ width: WEEK_WIDTH }}></div>
                                      ))}
                                  </div>
 
                                  {/* The Main Project Bar */}
                                  <div 
                                     onClick={() => onProjectClick(project.id)}
-                                    className="absolute top-3 h-8 rounded-lg bg-surface border border-border hover:border-zinc-300 shadow-sm cursor-pointer group transition-all flex items-center px-3 gap-2 z-10 hover:z-20"
+                                    className="absolute top-3 h-8 rounded-lg bg-white border border-zinc-200 hover:border-zinc-300 shadow-sm cursor-pointer group transition-all flex items-center px-3 gap-2 z-10 hover:z-20"
                                     style={{ left: startOffsetPixels, width: widthPixels }}
                                  >
                                      <div className={`w-1.5 h-1.5 rounded-full ${colorClass}`}></div>
@@ -157,42 +157,6 @@ const StrategyHorizon: React.FC<{
         </div>
     );
 };
-
-const ContextSidebar: React.FC<{
-  isOpen: boolean;
-  setIsOpen: (v: boolean) => void;
-  groupedPrinciples: Record<string, OperatingPrinciple[]>;
-}> = ({ isOpen, setIsOpen, groupedPrinciples }) => (
-  <div className={`border-r border-border bg-surface flex flex-col transition-all duration-300 ${isOpen ? 'w-72' : 'w-12'} z-30 shrink-0`}>
-    <div className="h-10 border-b border-border flex items-center justify-between px-3 bg-surface">
-      {isOpen && <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Strategy Context</span>}
-      <button onClick={() => setIsOpen(!isOpen)} className="p-1 text-zinc-400 hover:text-zinc-600 transition-colors" title="Toggle Sidebar">
-        <Icons.Layout className="w-4 h-4" />
-      </button>
-    </div>
-    {isOpen && (
-      <div className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
-        {Object.entries(groupedPrinciples).map(([cat, principles]) => (
-          <div key={cat}>
-            <h4 className="text-[10px] font-bold text-zinc-500 font-mono uppercase mb-2 flex items-center gap-2">
-              <span className="w-1.5 h-1.5 rounded-full bg-zinc-300"></span> {cat}
-            </h4>
-            <div className="space-y-2">
-              {(principles as OperatingPrinciple[]).map(p => (
-                <div key={p.id} className="group relative bg-white border border-border rounded p-2 hover:shadow-sm transition-all">
-                  <div className="text-xs font-medium text-zinc-700 mb-1">{p.title || "Untitled Principle"}</div>
-                  <div className="text-[10px] text-zinc-500 leading-snug line-clamp-2 group-hover:line-clamp-none transition-all">
-                    {p.description}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-    )}
-  </div>
-);
 
 const RoadmapCard: React.FC<{
     item: LayoutItem;
@@ -212,7 +176,7 @@ const RoadmapCard: React.FC<{
             draggable
             onDragStart={(e) => onDragStart(e, item.id)}
             onClick={(e) => { e.stopPropagation(); onClick(); }}
-            className={`absolute rounded-md bg-white border border-border hover:border-zinc-300 hover:shadow-sm transition-all cursor-move flex items-center px-2 shadow-sm z-20 group overflow-hidden ${isDragging ? 'opacity-50 ring-2 ring-indigo-500 scale-95' : ''}`}
+            className={`absolute rounded-md bg-white border border-zinc-200 hover:border-zinc-300 hover:shadow-sm transition-all cursor-move flex items-center px-2 shadow-sm z-20 group overflow-hidden ${isDragging ? 'opacity-50 ring-2 ring-indigo-500 scale-95' : ''}`}
             style={{ left: left + 4, width: width - 8, top, height }}
         >
             <div className={`absolute left-0 top-0 bottom-0 w-1 rounded-l-md ${item.type === 'NOTE' ? 'bg-pink-400' : 'bg-indigo-500'}`}></div>
@@ -253,7 +217,7 @@ const ChannelCreationModal: React.FC<{
   return (
     <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="absolute inset-0" onClick={onClose}></div>
-      <div className="w-[400px] bg-white border border-border rounded-xl shadow-2xl relative z-10 p-6">
+      <div className="w-[400px] bg-white border border-zinc-100 rounded-xl shadow-2xl relative z-10 p-6">
         <h3 className="text-lg font-bold mb-4 text-zinc-900">Add Distribution Channel</h3>
         <input 
           autoFocus
@@ -303,7 +267,7 @@ const WeekContextModal: React.FC<{
     return (
         <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
             <div className="absolute inset-0" onClick={onClose}></div>
-            <div className="w-[400px] bg-white border border-border rounded-xl shadow-2xl relative z-10 p-6 text-zinc-900">
+            <div className="w-[400px] bg-white border border-zinc-100 rounded-xl shadow-2xl relative z-10 p-6 text-zinc-900">
                 <div className="flex justify-between items-center mb-4">
                     <h3 className="text-lg font-bold">Week {weekIndex + 1} Context</h3>
                     <span className="text-xs text-zinc-400 font-mono">{date.toLocaleDateString()}</span>
@@ -363,7 +327,6 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
     users
   } = useStore();
 
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [showChannelModal, setShowChannelModal] = useState(false);
   const [activeTicket, setActiveTicket] = useState<{ item: Partial<RoadmapItem> } | null>(null);
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
@@ -381,15 +344,6 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
     }
     return w;
   }, [campaign?.startDate]);
-
-  const groupedPrinciples = useMemo(() => {
-    return (campaign?.principles || []).reduce((acc, p) => {
-      const cat = p.category || 'GENERAL';
-      if (!acc[cat]) acc[cat] = [];
-      acc[cat].push(p);
-      return acc;
-    }, {} as Record<string, OperatingPrinciple[]>);
-  }, [campaign?.principles]);
 
   const channels = campaign?.channels || [];
   const projects = campaign?.projects || [];
@@ -473,22 +427,16 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
   };
 
   return (
-    <div className="h-full w-full flex flex-col relative bg-background font-sans text-primary select-none">
+    <div className="h-full w-full flex flex-col relative bg-white font-sans text-zinc-900 select-none">
       
       <div className="flex flex-1 overflow-hidden relative">
          
-         <ContextSidebar 
-            isOpen={isSidebarOpen} 
-            setIsOpen={setIsSidebarOpen} 
-            groupedPrinciples={groupedPrinciples} 
-         />
-
          {/* MAIN ROADMAP GRID */}
-         <div className="flex-1 overflow-auto bg-background relative custom-scrollbar flex flex-col">
+         <div className="flex-1 overflow-auto bg-white relative custom-scrollbar flex flex-col">
              
              {/* TIMELINE HEADER */}
-             <div className="flex sticky top-0 z-40 bg-background min-w-max border-b border-border">
-                 <div className="shrink-0 border-r border-border bg-surface p-3 flex items-end pb-3" style={{ width: LEFT_PANEL_WIDTH }}>
+             <div className="flex sticky top-0 z-40 bg-white min-w-max border-b border-zinc-100">
+                 <div className="shrink-0 border-r border-zinc-100 bg-zinc-50 p-3 flex items-end pb-3" style={{ width: LEFT_PANEL_WIDTH }}>
                      <span className="text-[10px] font-mono font-bold text-zinc-400 uppercase">Channels</span>
                  </div>
                  <div className="flex">
@@ -498,7 +446,7 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
                          return (
                             <div 
                                 key={i} 
-                                className="shrink-0 border-r border-border p-2 flex flex-col items-center bg-background group cursor-pointer relative hover:bg-surface transition-colors" 
+                                className="shrink-0 border-r border-zinc-100 p-2 flex flex-col items-center bg-white group cursor-pointer relative hover:bg-zinc-50 transition-colors" 
                                 style={{ width: WEEK_WIDTH }}
                                 onClick={() => setActiveWeekContext(i)}
                             >
@@ -542,17 +490,17 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
                      const { layoutItems, rowHeight } = calculateLaneLayout(laneItems);
 
                      return (
-                         <div key={channel.id} className="flex border-b border-border relative bg-background group/lane" style={{ height: rowHeight }}>
+                         <div key={channel.id} className="flex border-b border-zinc-100 relative bg-white group/lane" style={{ height: rowHeight }}>
                              
                              {/* LEFT SIDEBAR (Controls) */}
-                             <div className="shrink-0 border-r border-border bg-surface p-4 flex flex-col" style={{ width: LEFT_PANEL_WIDTH, minHeight: rowHeight }}>
+                             <div className="shrink-0 border-r border-zinc-100 bg-zinc-50/30 p-4 flex flex-col" style={{ width: LEFT_PANEL_WIDTH, minHeight: rowHeight }}>
                                  
                                 <div 
                                     className="flex flex-col mb-3 group/header cursor-pointer hover:bg-zinc-100 p-2 -m-2 rounded transition-colors"
                                     onClick={() => setActiveDashboardChannel(channel.id)}
                                 >
                                     <div className="flex items-center gap-2 mb-1">
-                                        <div className="p-1 rounded bg-white border border-border text-zinc-600 shadow-sm"><Icons.Zap className="w-3.5 h-3.5" /></div>
+                                        <div className="p-1 rounded bg-white border border-zinc-200 text-zinc-600 shadow-sm"><Icons.Zap className="w-3.5 h-3.5" /></div>
                                         <span className="font-semibold text-sm text-zinc-800">{channel.name}</span>
                                     </div>
                                     
@@ -574,7 +522,7 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
                                  {weeks.map((_, i) => (
                                      <div 
                                          key={i} 
-                                         className="border-r border-border/50 h-full relative group/cell hover:bg-surface transition-colors"
+                                         className="border-r border-zinc-100 h-full relative group/cell hover:bg-zinc-50 transition-colors"
                                          style={{ width: WEEK_WIDTH }}
                                          onDragOver={(e) => e.preventDefault()}
                                          onDrop={(e) => handleDrop(e, channel.id, i)}
@@ -610,10 +558,10 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
                  })}
 
                  {/* ADD CHANNEL BUTTON */}
-                 <div className="p-4 bg-background sticky left-0 w-full border-t border-border">
+                 <div className="p-4 bg-white sticky left-0 w-full border-t border-zinc-100">
                      <button 
                         onClick={() => setShowChannelModal(true)}
-                        className="flex items-center gap-2 px-4 py-2 rounded-lg border border-dashed border-zinc-300 text-zinc-500 hover:text-zinc-900 hover:border-zinc-400 hover:bg-surface transition-all text-xs font-bold uppercase tracking-wider"
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg border border-dashed border-zinc-300 text-zinc-500 hover:text-zinc-900 hover:border-zinc-400 hover:bg-zinc-50 transition-all text-xs font-bold uppercase tracking-wider"
                      >
                          <Icons.Plus className="w-4 h-4" />
                          Add Distribution Channel
@@ -623,6 +571,22 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
          </div>
       </div>
       
+      {/* NAVIGATION OVERLAY - Only if onNext/onBack provided (Wizard Mode) */}
+      {(onNext || onBack) && (
+          <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-50 flex gap-2">
+                {onBack && (
+                    <button onClick={onBack} className="px-6 py-2 bg-white border border-zinc-200 text-zinc-600 rounded-full shadow-lg font-bold text-sm hover:bg-zinc-50 transition-all">
+                        Back
+                    </button>
+                )}
+                {onNext && (
+                    <button onClick={onNext} className="px-8 py-2 bg-zinc-900 text-white rounded-full shadow-lg font-bold text-sm hover:bg-zinc-800 hover:scale-105 transition-all flex items-center gap-2">
+                        Next Phase <Icons.ChevronRight className="w-4 h-4" />
+                    </button>
+                )}
+          </div>
+      )}
+
       {/* MODALS */}
       {showChannelModal && (
           <ChannelCreationModal 
@@ -664,7 +628,7 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
       {activeDashboardChannel && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/20 backdrop-blur-sm animate-in fade-in duration-200">
             <div className="absolute inset-0" onClick={() => setActiveDashboardChannel(null)}></div>
-            <div className="w-[90vw] h-[85vh] bg-white border border-border rounded-xl shadow-2xl relative z-10 overflow-hidden">
+            <div className="w-[90vw] h-[85vh] bg-white border border-zinc-100 rounded-xl shadow-2xl relative z-10 overflow-hidden">
                 <ChannelDashboard 
                     channelId={activeDashboardChannel} 
                     isModal={true}
@@ -678,7 +642,7 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
       {activeDashboardProject && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/20 backdrop-blur-sm animate-in fade-in duration-200">
             <div className="absolute inset-0" onClick={() => setActiveDashboardProject(null)}></div>
-            <div className="w-[90vw] h-[85vh] bg-white border border-border rounded-xl shadow-2xl relative z-10 overflow-hidden">
+            <div className="w-[90vw] h-[85vh] bg-white border border-zinc-100 rounded-xl shadow-2xl relative z-10 overflow-hidden">
                 <ProjectDashboard 
                     projectId={activeDashboardProject} 
                     isModal={true}
