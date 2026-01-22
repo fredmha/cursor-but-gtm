@@ -166,6 +166,16 @@ export const ExecutionBoard: React.FC = () => {
       setShowTicketModal(true);
   };
 
+  const handleToggleStatus = (e: React.MouseEvent, ticket: Ticket) => {
+      e.stopPropagation();
+      const newStatus = ticket.status === TicketStatus.Done ? TicketStatus.Todo : TicketStatus.Done;
+      if (ticket.channelId) {
+          updateTicket(ticket.channelId, ticket.id, { status: newStatus });
+      } else if (ticket.projectId) {
+          updateProjectTicket(ticket.projectId, ticket.id, { status: newStatus });
+      }
+  };
+
   const handleSaveTicket = (data: any) => {
       const ticketData: Ticket = {
           id: data.id || generateId(),
@@ -340,7 +350,12 @@ export const ExecutionBoard: React.FC = () => {
                                                 </td>
                                                 <td className="px-4 py-3">
                                                     <div className="flex items-center gap-2">
-                                                        <StatusIcon className={`w-3.5 h-3.5 ${STATUS_CONFIG[ticket.status].color}`} />
+                                                        <button 
+                                                            onClick={(e) => handleToggleStatus(e, ticket)}
+                                                            className="p-1 -ml-1 rounded hover:bg-zinc-200 transition-colors"
+                                                        >
+                                                            <StatusIcon className={`w-3.5 h-3.5 ${STATUS_CONFIG[ticket.status].color}`} />
+                                                        </button>
                                                         <span className="text-xs text-zinc-500">{ticket.status}</span>
                                                     </div>
                                                 </td>

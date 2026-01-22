@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { StoreProvider, useStore } from './store';
 import { ExecutionBoard } from './components/ExecutionBoard';
@@ -42,8 +43,7 @@ const LandingPage: React.FC<{ onGetStarted: () => void }> = ({ onGetStarted }) =
 }
 
 const MainLayout: React.FC = () => {
-  const [view, setView] = useState<ViewMode>('ROADMAP');
-  const { campaign, users, currentUser, switchUser, reset } = useStore();
+  const { campaign, users, currentUser, switchUser, reset, currentView, setCurrentView } = useStore();
   
   // Feature Flag: Lab Mode
   const [isLabMode, setIsLabMode] = useState(false);
@@ -93,7 +93,7 @@ const MainLayout: React.FC = () => {
          {/* Navigation Links */}
          <div className="flex-1 px-3 space-y-0.5">
              {(['ROADMAP', 'EXECUTION', 'DOCS', 'REVIEW'] as ViewMode[]).map((v) => {
-                 const isActive = view === v;
+                 const isActive = currentView === v;
                  const icons: Record<ViewMode, React.FC<any>> = {
                      'ROADMAP': Icons.Kanban,
                      'EXECUTION': Icons.Zap,
@@ -106,7 +106,7 @@ const MainLayout: React.FC = () => {
                  return (
                      <button
                         key={v}
-                        onClick={() => setView(v)}
+                        onClick={() => setCurrentView(v)}
                         className={`w-full flex items-center gap-3 px-3 py-1.5 rounded-md text-sm transition-all group ${
                             isActive 
                             ? 'bg-white text-zinc-900 shadow-sm ring-1 ring-zinc-200/50' 
@@ -148,10 +148,10 @@ const MainLayout: React.FC = () => {
 
       {/* MAIN CONTENT AREA */}
       <main className="flex-1 overflow-hidden bg-background relative">
-          {view === 'ROADMAP' && <RoadmapSandbox />}
-          {view === 'EXECUTION' && <ExecutionBoard />}
-          {view === 'REVIEW' && <ReviewMode />}
-          {view === 'DOCS' && <DocsView />}
+          {currentView === 'ROADMAP' && <RoadmapSandbox />}
+          {currentView === 'EXECUTION' && <ExecutionBoard />}
+          {currentView === 'REVIEW' && <ReviewMode />}
+          {currentView === 'DOCS' && <DocsView />}
       </main>
 
     </div>

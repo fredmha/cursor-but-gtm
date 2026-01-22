@@ -5,6 +5,7 @@ import { Icons, PRIORITIES } from '../constants';
 import { GoogleGenAI, Content, Part } from "@google/genai";
 import { REVIEW_TOOLS, SYSTEM_INSTRUCTION, buildReviewContext } from '../services/reviewAgent';
 import { TicketStatus } from '../types';
+import { AgentTicketCard } from './AgentTicketCard';
 
 interface Message {
     id: string;
@@ -247,139 +248,108 @@ export const WeeklyReviewAgent: React.FC<{ onClose: () => void }> = ({ onClose }
         const { name, args, status } = action;
         const isPending = status === 'PENDING';
         
-        let content = null;
-        let icon = null;
-        let color = "border-zinc-200";
-
-        if (name === 'propose_reschedule') {
-            icon = <Icons.Clock className="w-4 h-4 text-amber-500" />;
-            color = "border-amber-200 bg-amber-50/50";
-            content = (
-                <div>
-                    <div className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-1">Reschedule Proposal</div>
-                    <div className="text-sm font-semibold text-zinc-900 mb-1">Move ticket to <span className="font-mono text-amber-600">{args.newDate}</span></div>
-                    <div className="text-xs text-zinc-500 italic">"{args.reason}"</div>
-                </div>
-            );
-        } 
-        else if (name === 'propose_status_change') {
-            icon = <Icons.CheckCircle className="w-4 h-4 text-emerald-500" />;
-            color = "border-emerald-200 bg-emerald-50/50";
-            content = (
-                <div>
-                    <div className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-1">Status Update</div>
-                    <div className="text-sm font-semibold text-zinc-900 mb-1">Mark ticket as <span className="font-bold">{args.status}</span></div>
-                    <div className="text-xs text-zinc-500 italic">"{args.reason}"</div>
-                </div>
-            );
-        }
-        else if (name === 'propose_ticket') {
-            icon = <Icons.PlusCircle className="w-4 h-4 text-indigo-500" />;
-            color = "border-indigo-200 bg-indigo-50/50";
-            
+        // High-Fidelity Ticket Proposal
+        if (name === 'propose_ticket') {
             const contextName = args.channelId 
                 ? campaign?.channels.find(c => c.id === args.channelId)?.name 
                 : campaign?.projects.find(p => p.id === args.projectId)?.name;
             
-            content = (
-                <div className="w-full mt-2">
-                    <div className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">New Ticket Proposal</div>
-                    
-                    <div className="bg-white rounded-xl border border-zinc-200 overflow-hidden shadow-sm">
-                        {/* Header Context Bar */}
-                        <div className="bg-zinc-50 border-b border-zinc-100 px-3 py-2 flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                                <div className="p-1 bg-white border border-zinc-200 rounded shadow-sm text-zinc-500">
-                                    <Icons.Target className="w-3 h-3" />
-                                </div>
-                                <span className="text-[10px] font-bold uppercase text-zinc-500 tracking-wider">
-                                    {contextName || 'General Task'}
-                                </span>
-                            </div>
-                            
-                            {/* Priority Selector */}
-                            <div className="flex gap-1">
-                                {isPending ? PRIORITIES.map(p => (
-                                    <button
-                                        key={p.value}
-                                        onClick={() => updateActionArgs(action.id, { priority: p.value })}
-                                        className={`w-4 h-4 rounded-full border flex items-center justify-center transition-all ${
-                                            args.priority === p.value 
-                                            ? `${p.color.replace('text-', 'bg-')} border-transparent scale-110 shadow-sm` 
-                                            : 'bg-white border-zinc-200 hover:border-zinc-300'
-                                        }`}
-                                        title={p.value}
-                                    >
-                                        {args.priority === p.value && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
-                                    </button>
-                                )) : (
-                                    <div className={`text-[9px] font-bold px-2 py-0.5 rounded border bg-white ${PRIORITIES.find(p => p.value === args.priority)?.color}`}>
-                                        {args.priority}
-                                    </div>
-                                )}
-                            </div>
-                        </div>
+            return (
+                <AgentTicketCard 
+                    key={action.id}
+                    actionId={action.id}
+                    args={args}
+                    status={status}
+                    contextName={contextName || 'General'}
+                    onUpdate={(updates) => updateActionArgs(action.id, updates)}
+                    onApprove={() => handleAction(action, true)}
+                    onReject={() => handleAction(action, false)}
+                />
+            );
+        }
 
-                        {/* Editable Content */}
-                        <div className="p-3 space-y-2">
-                            <input 
-                                disabled={!isPending}
-                                value={args.title}
-                                onChange={(e) => updateActionArgs(action.id, { title: e.target.value })}
-                                className="w-full text-sm font-bold text-zinc-900 placeholder-zinc-300 focus:outline-none bg-transparent"
-                                placeholder="Ticket Title"
-                            />
-                            <textarea
-                                disabled={!isPending}
-                                value={args.description || ''}
-                                onChange={(e) => updateActionArgs(action.id, { description: e.target.value })}
-                                className="w-full text-xs text-zinc-600 placeholder-zinc-300 focus:outline-none bg-transparent resize-none leading-relaxed"
-                                placeholder="Add description..."
-                                rows={2}
-                            />
-                        </div>
+        // Standard Actions (Reschedule / Status Change)
+        let content = null;
+        let icon = null;
+        // Styles for the header stripe
+        let stripeColor = "bg-zinc-100";
+        let iconColor = "text-zinc-500";
+        
+        if (name === 'propose_reschedule') {
+            icon = <Icons.Clock className="w-4 h-4" />;
+            stripeColor = "bg-amber-50";
+            iconColor = "text-amber-500";
+            content = (
+                <div>
+                    <div className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">Reschedule Proposal</div>
+                    <div className="text-lg font-semibold text-zinc-900 mb-1">
+                        Move to <span className="text-amber-600 bg-amber-50 px-2 rounded-md">{args.newDate}</span>
                     </div>
+                    <div className="text-sm text-zinc-500 italic">"{args.reason}"</div>
+                </div>
+            );
+        } 
+        else if (name === 'propose_status_change') {
+            icon = <Icons.CheckCircle className="w-4 h-4" />;
+            stripeColor = "bg-emerald-50";
+            iconColor = "text-emerald-500";
+            content = (
+                <div>
+                    <div className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">Status Update</div>
+                    <div className="text-lg font-semibold text-zinc-900 mb-1">
+                        Mark as <span className="font-bold text-emerald-600 bg-emerald-50 px-2 rounded-md">{args.status}</span>
+                    </div>
+                    <div className="text-sm text-zinc-500 italic">"{args.reason}"</div>
                 </div>
             );
         }
 
         return (
-            <div key={action.id} className={`my-4 p-4 rounded-xl border ${color} shadow-sm animate-in fade-in slide-in-from-bottom-2 duration-300 relative overflow-hidden`}>
-                <div className="flex gap-4">
-                    <div className="shrink-0 mt-1">{icon}</div>
-                    <div className="flex-1">
-                        {content}
-                    </div>
-                </div>
-                
-                {isPending ? (
-                    <div className="flex justify-end gap-2 mt-4">
-                        <button 
-                            onClick={() => handleAction(action, false)}
-                            className="px-3 py-1.5 bg-white border border-zinc-200 text-zinc-500 text-xs font-bold rounded-lg hover:bg-zinc-50 hover:text-zinc-900 transition-colors"
-                        >
-                            Reject
-                        </button>
-                        <button 
-                            onClick={() => handleAction(action, true)}
-                            className="px-4 py-1.5 bg-zinc-900 text-white text-xs font-bold rounded-lg hover:bg-zinc-800 transition-colors shadow-sm"
-                        >
-                            Approve
-                        </button>
-                    </div>
-                ) : (
-                    <div className="absolute top-3 right-3">
-                        {status === 'APPROVED' ? (
-                            <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full border border-emerald-100 flex items-center gap-1">
-                                <Icons.CheckCircle className="w-3 h-3" /> APPROVED
-                            </span>
+            <div key={action.id} className={`w-full my-6 bg-white border border-zinc-100 shadow-xl shadow-zinc-200/50 rounded-2xl overflow-hidden relative group animate-in fade-in slide-in-from-bottom-2 duration-300 ${!isPending ? 'opacity-70 grayscale-[0.5]' : ''}`}>
+                <div className="flex">
+                    {/* Left Stripe */}
+                    <div className={`w-1.5 ${stripeColor.replace('/50', '-500')}`} />
+                    
+                    <div className="flex-1 p-5">
+                         <div className="flex items-start gap-4">
+                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center border border-zinc-100 shadow-sm ${stripeColor} ${iconColor}`}>
+                                {icon}
+                            </div>
+                            <div className="flex-1">
+                                {content}
+                            </div>
+                        </div>
+
+                        {isPending ? (
+                            <div className="flex justify-end gap-3 mt-6">
+                                <button 
+                                    onClick={() => handleAction(action, false)}
+                                    className="px-4 py-2 bg-white border border-zinc-200 text-zinc-500 text-xs font-bold rounded-lg hover:bg-zinc-50 hover:text-zinc-900 transition-colors"
+                                >
+                                    Dismiss
+                                </button>
+                                <button 
+                                    onClick={() => handleAction(action, true)}
+                                    className="px-6 py-2 bg-zinc-900 text-white text-xs font-bold rounded-lg hover:bg-zinc-800 transition-colors shadow-lg shadow-zinc-200 hover:scale-105 active:scale-95"
+                                >
+                                    Confirm
+                                </button>
+                            </div>
                         ) : (
-                            <span className="text-[10px] font-bold text-zinc-400 bg-zinc-100 px-2 py-1 rounded-full border border-zinc-200">
-                                REJECTED
-                            </span>
+                            <div className="absolute top-5 right-5">
+                                {status === 'APPROVED' ? (
+                                    <div className="flex items-center gap-2 text-emerald-600 font-bold text-xs bg-emerald-50 px-3 py-1.5 rounded-full border border-emerald-100">
+                                        <Icons.CheckCircle className="w-3.5 h-3.5" /> Approved
+                                    </div>
+                                ) : (
+                                    <div className="flex items-center gap-2 text-zinc-400 font-bold text-xs bg-zinc-100 px-3 py-1.5 rounded-full border border-zinc-200">
+                                        Dismissed
+                                    </div>
+                                )}
+                            </div>
                         )}
                     </div>
-                )}
+                </div>
             </div>
         );
     };

@@ -1,5 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
+import { useStore } from '../store';
 import { Icons, PRIORITIES } from '../constants';
 import { User, Project, Channel, Priority, TicketStatus, ContextDoc } from '../types';
 
@@ -20,7 +21,7 @@ interface TicketModalProps {
         channels: Channel[];
         projects: Project[];
         users: User[];
-        docs?: ContextDoc[]; // Optional for now to support progressive migration
+        docs?: ContextDoc[]; 
     };
     onClose: () => void;
     onSave: (data: any) => void;
@@ -29,6 +30,7 @@ interface TicketModalProps {
 
 export const TicketModal: React.FC<TicketModalProps> = ({ initialData, context, onClose, onSave, onDelete }) => {
     const { channels, projects, users, docs = [] } = context;
+    const { initiateDocCreationForTicket } = useStore();
     
     // Form State
     const [title, setTitle] = useState(initialData?.title || '');
@@ -68,6 +70,15 @@ export const TicketModal: React.FC<TicketModalProps> = ({ initialData, context, 
         setLinkedDocIds(prev => 
             prev.includes(docId) ? prev.filter(id => id !== docId) : [...prev, docId]
         );
+    };
+
+    const handleDraftDoc = () => {
+        if (initialData?.id) {
+            initiateDocCreationForTicket(initialData.id);
+            onClose();
+        } else {
+            alert("Save the ticket first before creating a linked document.");
+        }
     };
 
     return (
@@ -184,9 +195,16 @@ export const TicketModal: React.FC<TicketModalProps> = ({ initialData, context, 
                     </div>
                     
                     {/* Docs Attachment */}
-                    {docs.length > 0 && (
-                        <div>
-                            <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2 block">Linked Documents</label>
+                    <div>
+                        <div className="flex items-center justify-between mb-2">
+                            <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">Linked Documents</label>
+                            {initialData?.id && (
+                                <button onClick={handleDraftDoc} className="text-[10px] font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-1 bg-indigo-50 px-2 py-0.5 rounded transition-colors">
+                                    <Icons.Plus className="w-3 h-3" /> Draft New
+                                </button>
+                            )}
+                        </div>
+                        {docs.length > 0 ? (
                             <div className="bg-zinc-50 border border-zinc-200 rounded-lg p-3 max-h-32 overflow-y-auto custom-scrollbar space-y-1">
                                 {docs.map(doc => (
                                     <div 
@@ -202,8 +220,12 @@ export const TicketModal: React.FC<TicketModalProps> = ({ initialData, context, 
                                     </div>
                                 ))}
                             </div>
-                        </div>
-                    )}
+                        ) : (
+                            <div className="bg-zinc-50 border border-dashed border-zinc-200 rounded-lg p-4 text-center text-xs text-zinc-400">
+                                No documents available. Create one to link.
+                            </div>
+                        )}
+                    </div>
 
                     {/* Duration Slider (Roadmap Context) */}
                     <div>

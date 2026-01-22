@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { Campaign, Channel, Ticket, TicketStatus, Status, User, Priority, RoadmapItem, Project, ProjectUpdate, ChannelLink, ChannelNote, TimelineTag, ChannelPlan, ContextDoc, DocFolder } from './types';
+import { Campaign, Channel, Ticket, TicketStatus, Status, User, Priority, RoadmapItem, Project, ProjectUpdate, ChannelLink, ChannelNote, TimelineTag, ChannelPlan, ContextDoc, DocFolder, ViewMode } from './types';
 
 // Safe ID Generator
 export const generateId = () => {
@@ -22,6 +22,9 @@ export const MOCK_USERS: User[] = [
 ];
 
 interface StoreState {
+  currentView: ViewMode;
+  setCurrentView: (view: ViewMode) => void;
+  
   campaign: Campaign | null;
   users: User[];
   currentUser: User;
@@ -80,6 +83,11 @@ interface StoreState {
   importAIPlan: (channelsData: any[]) => void;
   switchUser: (userId: string) => void;
   reset: () => void;
+
+  // Flow State
+  pendingTicketLink: string | null;
+  initiateDocCreationForTicket: (ticketId: string) => void;
+  clearPendingTicketLink: () => void;
 }
 
 const StoreContext = createContext<StoreState | undefined>(undefined);
@@ -87,6 +95,8 @@ const StoreContext = createContext<StoreState | undefined>(undefined);
 export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [users] = useState<User[]>(MOCK_USERS);
   const [currentUser, setCurrentUser] = useState<User>(MOCK_USERS[0]);
+  const [currentView, setCurrentView] = useState<ViewMode>('ROADMAP');
+  const [pendingTicketLink, setPendingTicketLink] = useState<string | null>(null);
 
   const [campaign, setCampaignState] = useState<Campaign | null>(() => {
     const saved = localStorage.getItem('gtm-os-campaign');
@@ -771,8 +781,22 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setCampaignState(null);
   };
 
+  const initiateDocCreationForTicket = (ticketId: string) => {
+      setPendingTicketLink(ticketId);
+      setCurrentView('DOCS');
+  };
+
+  const clearPendingTicketLink = () => {
+      setPendingTicketLink(null);
+  };
+
   return (
     <StoreContext.Provider value={{
+      currentView,
+      setCurrentView,
+      pendingTicketLink,
+      initiateDocCreationForTicket,
+      clearPendingTicketLink,
       campaign,
       users,
       currentUser,

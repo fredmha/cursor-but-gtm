@@ -170,9 +170,9 @@ const RoadmapCard: React.FC<{
     onClick: () => void;
     isBacklog?: boolean;
 }> = ({ item, users, projects, isDragging, onDragStart, onClick, isBacklog = false }) => {
-    // For backlog items, styling is static. For layout items, use computed layout.
+    // For backlog items, styling is static (full width in sidebar). For layout items, use computed layout.
     const style: React.CSSProperties = isBacklog 
-        ? { position: 'relative', width: 200 } 
+        ? { position: 'relative', width: '100%' } 
         : { 
             position: 'absolute', 
             left: (item.weekIndex * WEEK_WIDTH) + 4, 
@@ -506,9 +506,9 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
                          <div key={channel.id} className="flex flex-col border-b border-zinc-100 relative bg-white group/lane">
                              
                              {/* Scheduled Row */}
-                             <div className="flex" style={{ height: rowHeight }}>
-                                 {/* LEFT SIDEBAR (Controls) */}
-                                 <div className="shrink-0 border-r border-zinc-100 bg-zinc-50/30 p-4 flex flex-col" style={{ width: LEFT_PANEL_WIDTH, minHeight: rowHeight }}>
+                             <div className="flex" style={{ minHeight: rowHeight }}>
+                                 {/* LEFT SIDEBAR (Controls & Unassigned) */}
+                                 <div className="shrink-0 border-r border-zinc-100 bg-zinc-50/30 p-4 flex flex-col" style={{ width: LEFT_PANEL_WIDTH }}>
                                      
                                     <div 
                                         className="flex flex-col mb-3 group/header cursor-pointer hover:bg-zinc-100 p-2 -m-2 rounded transition-colors"
@@ -530,6 +530,27 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
                                             ))}
                                         </div>
                                     </div>
+
+                                    {/* UNASSIGNED / BACKLOG ITEMS */}
+                                    {unscheduledItems.length > 0 && (
+                                        <div className="mt-4 border-t border-zinc-200/50 pt-3 flex-1">
+                                            <div className="text-[9px] font-bold uppercase tracking-wider text-zinc-400 mb-2 pl-1">Unassigned</div>
+                                            <div className="flex flex-col gap-2">
+                                                {unscheduledItems.map(item => (
+                                                    <RoadmapCard 
+                                                        key={item.id} 
+                                                        item={item} 
+                                                        users={users} 
+                                                        projects={projects}
+                                                        isDragging={draggedItemId === item.id}
+                                                        onDragStart={handleDragStart}
+                                                        onClick={() => setActiveTicket({ item })}
+                                                        isBacklog={true}
+                                                    />
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
                                  </div>
 
                                  {/* RIGHT SIDE (Grid) */}
@@ -569,29 +590,6 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
                                      ))}
                                  </div>
                              </div>
-
-                             {/* Unassigned / Backlog Row */}
-                             {unscheduledItems.length > 0 && (
-                                 <div className="flex bg-zinc-50/20 border-t border-zinc-50">
-                                     <div className="shrink-0 p-3 flex items-center justify-end border-r border-zinc-100 bg-zinc-50/50" style={{ width: LEFT_PANEL_WIDTH }}>
-                                         <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 mr-2">Unassigned</span>
-                                     </div>
-                                     <div className="flex-1 p-2 flex gap-2 overflow-x-auto custom-scrollbar">
-                                         {unscheduledItems.map(item => (
-                                             <RoadmapCard 
-                                                 key={item.id} 
-                                                 item={item} 
-                                                 users={users} 
-                                                 projects={projects}
-                                                 isDragging={draggedItemId === item.id}
-                                                 onDragStart={handleDragStart}
-                                                 onClick={() => setActiveTicket({ item })}
-                                                 isBacklog={true}
-                                             />
-                                         ))}
-                                     </div>
-                                 </div>
-                             )}
                          </div>
                      );
                  })}

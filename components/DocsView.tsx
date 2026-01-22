@@ -1,5 +1,4 @@
-
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useStore, generateId } from '../store';
 import { Icons } from '../constants';
 import { ContextDoc, DocFolder, TicketStatus, Ticket, DocFormat } from '../types';
@@ -11,10 +10,11 @@ import { TicketModal } from './TicketModal';
 interface NewDocModalProps {
     onClose: () => void;
     onCreate: (title: string, icon: string, templateContent: string, format: DocFormat) => void;
+    initialTitle?: string;
 }
 
-const NewDocModal: React.FC<NewDocModalProps> = ({ onClose, onCreate }) => {
-    const [title, setTitle] = useState('');
+const NewDocModal: React.FC<NewDocModalProps> = ({ onClose, onCreate, initialTitle }) => {
+    const [title, setTitle] = useState(initialTitle || '');
     const [icon, setIcon] = useState('📄');
     const [format, setFormat] = useState<DocFormat>('TEXT');
     const [selectedTemplate, setSelectedTemplate] = useState<{name: string, content: string} | null>(null);
@@ -151,7 +151,7 @@ const LinkTicketModal: React.FC<{
 };
 
 export const DocsView: React.FC = () => {
-  const { campaign, addDoc, updateDoc, deleteDoc, addDocFolder, updateDocFolder, deleteDocFolder, moveDoc, addTicket, linkDocToTicket, addCampaignTag, users } = useStore();
+  const { campaign, addDoc, updateDoc, deleteDoc, addDocFolder, updateDocFolder, deleteDocFolder, moveDoc, addTicket, linkDocToTicket, addCampaignTag, pendingTicketLink, clearPendingTicketLink, users } = useStore();
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [editingDoc, setEditingDoc] = useState<ContextDoc | null>(null);
   
@@ -169,6 +169,7 @@ export const DocsView: React.FC = () => {
   const [showNewDocModal, setShowNewDocModal] = useState(false);
   const [showTicketModal, setShowTicketModal] = useState(false);
   const [showLinkTicketModal, setShowLinkTicketModal] = useState(false);
+  const [newDocTitle, setNewDocTitle] = useState('');
   
   // Tag Creation
   const [newTagInput, setNewTagInput] = useState('');
@@ -179,6 +180,18 @@ export const DocsView: React.FC = () => {
   const availableTags = campaign?.availableTags || ['Draft', 'Q4', 'Urgent', 'Review'];
   const allTickets = [...(campaign?.channels.flatMap(c => c.tickets) || []), ...(campaign?.projects.flatMap(p => p.tickets) || [])];
   
+  useEffect(() => {
+      if (pendingTicketLink) {
+          const ticket = allTickets.find(t => t.id === pendingTicketLink);
+          if (ticket) {
+              setNewDocTitle(`Doc for: ${ticket.title}`);
+              setShowNewDocModal(true);
+          } else {
+              clearPendingTicketLink();
+          }
+      }
+  }, [pendingTicketLink, allTickets, clearPendingTicketLink]);
+
   const sortedFolders = useMemo(() => {
       return [...folders].sort((a, b) => {
           if (sortOrder === 'NAME') return a.name.localeCompare(b.name);
@@ -207,9 +220,26 @@ export const DocsView: React.FC = () => {
           tags: ['Draft']
       };
       addDoc(newDoc);
+      
+      // Handle Pending Link
+      if (pendingTicketLink) {
+          const ticket = allTickets.find(t => t.id === pendingTicketLink);
+          if (ticket) {
+              linkDocToTicket(newDoc.id, ticket.id, ticket.channelId, ticket.projectId);
+          }
+          clearPendingTicketLink();
+          setNewDocTitle('');
+      }
+
       setSelectedDocId(newDoc.id);
       setEditingDoc(null); 
       setShowNewDocModal(false);
+  };
+
+  const handleCloseNewDocModal = () => {
+      setShowNewDocModal(false);
+      setNewDocTitle('');
+      if (pendingTicketLink) clearPendingTicketLink();
   };
 
   const handleSave = () => {
@@ -648,8 +678,9 @@ export const DocsView: React.FC = () => {
 
         {showNewDocModal && (
             <NewDocModal 
-                onClose={() => setShowNewDocModal(false)}
+                onClose={handleCloseNewDocModal}
                 onCreate={handleCreateDoc}
+                initialTitle={newDocTitle}
             />
         )}
 
