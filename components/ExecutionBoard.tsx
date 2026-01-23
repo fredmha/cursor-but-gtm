@@ -105,16 +105,10 @@ export const ExecutionBoard: React.FC = () => {
 
   const displayTickets = useMemo(() => {
       if (view.type === 'MY_ISSUES') {
-          return channels.flatMap(c => 
-              c.tickets.map(t => ({
-                ...t, 
-                channelName: c.name,
-              }))
-            ).concat(projects.flatMap(p => p.tickets.map(t => ({
-                ...t,
-                projectName: p.name
-            }))))
-            .filter(t => t.assigneeId === currentUser.id);
+          return [
+              ...channels.flatMap(c => c.tickets),
+              ...projects.flatMap(p => p.tickets)
+          ].filter(t => t.assigneeId === currentUser.id);
       }
       return [];
   }, [view, channels, projects, currentUser.id]);

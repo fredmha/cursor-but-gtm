@@ -1,10 +1,9 @@
 
-
 import React, { useState, useMemo, useEffect } from 'react';
 import { useStore, generateId } from '../store';
-import { Icons } from '../constants';
+import { Icons, PRIORITIES } from '../constants';
 import { generateWeeklyActionItems } from '../services/geminiService';
-import { TicketStatus, Ticket } from '../types';
+import { TicketStatus, Ticket, Priority } from '../types';
 
 interface WeeklyReviewWizardProps {
   onClose: () => void;
@@ -17,11 +16,13 @@ interface GeneratedTicket {
     title: string;
     description: string;
     contextId: string; // channelId or projectId
+    priority: Priority;
+    assigneeId: string;
     selected: boolean;
 }
 
 export const WeeklyReviewWizard: React.FC<WeeklyReviewWizardProps> = ({ onClose }) => {
-  const { campaign, addTicket, addDoc, addProjectTicket, currentUser, updateTicket, updateProjectTicket, deleteTicket, deleteProjectTicket } = useStore();
+  const { campaign, addTicket, addDoc, addProjectTicket, currentUser, updateTicket, updateProjectTicket, deleteTicket, deleteProjectTicket, users } = useStore();
   
   // --- STATE ---
   const [act, setAct] = useState<Act>('CLEANSE');
@@ -82,7 +83,7 @@ export const WeeklyReviewWizard: React.FC<WeeklyReviewWizardProps> = ({ onClose 
           // Move to next week (+7 days from now)
           const nextWeek = new Date();
           nextWeek.setDate(nextWeek.getDate() + 7);
-          const updates = { dueDate: nextWeek.toISOString(), status: TicketStatus.Todo }; // Reset status to Todo? Or keep InProgress. Let's keep status unless it's done. Actually let's just update date.
+          const updates = { dueDate: nextWeek.toISOString(), status: TicketStatus.Todo }; 
           
           if (isChannelTicket) updateTicket(parentId, ticket.id, updates);
           else updateProjectTicket(parentId, ticket.id, updates);
@@ -136,12 +137,16 @@ export const WeeklyReviewWizard: React.FC<WeeklyReviewWizardProps> = ({ onClose 
     // 3. Call AI
     const rawSuggestions = await generateWeeklyActionItems(ethos, "Resolved during triage.", availableContexts);
 
-    // 4. Map to State
+    // 4. Map to State with Validation
+    const validIds = new Set(availableContexts.map(c => c.id));
+    
     setGeneratedTickets(rawSuggestions.map((s: any) => ({
         id: generateId(),
         title: s.title,
         description: s.description,
-        contextId: s.contextId, // Expecting AI to return this
+        contextId: validIds.has(s.contextId) ? s.contextId : (availableContexts[0]?.id || ''),
+        priority: 'Medium',
+        assigneeId: currentUser.id,
         selected: true
     })));
 
@@ -151,16 +156,36 @@ export const WeeklyReviewWizard: React.FC<WeeklyReviewWizardProps> = ({ onClose 
 
   // --- ACT III: DRAFT LOGIC ---
 
+  const handleAddManualTicket = () => {
+      const newId = generateId();
+      // Default to first available context
+      const defaultContext = (campaign?.projects[0]?.id || campaign?.channels[0]?.id) || '';
+      
+      setGeneratedTickets(prev => [...prev, {
+          id: newId,
+          title: '',
+          description: '',
+          contextId: defaultContext,
+          priority: 'Medium',
+          assigneeId: currentUser.id,
+          selected: true
+      }]);
+  };
+
+  const handleRemoveDraftTicket = (id: string) => {
+      setGeneratedTickets(prev => prev.filter(t => t.id !== id));
+  };
+
   const handleFinalize = () => {
-      generatedTickets.filter(t => t.selected).forEach(t => {
+      generatedTickets.filter(t => t.selected && t.title.trim() !== '').forEach(t => {
           const newTicket: Ticket = {
               id: generateId(),
               shortId: `T-${Math.floor(Math.random() * 10000)}`,
               title: t.title,
               description: t.description,
               status: TicketStatus.Todo,
-              priority: 'Medium',
-              assigneeId: currentUser.id,
+              priority: t.priority,
+              assigneeId: t.assigneeId,
               createdAt: new Date().toISOString(),
               channelId: undefined, 
               projectId: undefined
@@ -182,11 +207,6 @@ export const WeeklyReviewWizard: React.FC<WeeklyReviewWizardProps> = ({ onClose 
           }
       });
       onClose();
-  };
-
-  // --- RENDER HELPERS ---
-  const getContextName = (id: string) => {
-      return campaign?.channels.find(c => c.id === id)?.name || campaign?.projects.find(p => p.id === id)?.name || 'Unknown';
   };
 
   return (
@@ -215,7 +235,7 @@ export const WeeklyReviewWizard: React.FC<WeeklyReviewWizardProps> = ({ onClose 
       </div>
 
       <div className="flex-1 overflow-y-auto bg-zinc-50/50 flex flex-col items-center">
-        <div className="w-full max-w-4xl py-12 px-6">
+        <div className="w-full max-w-5xl py-12 px-6">
           
           {/* --- ACT I: THE CLEANSE --- */}
           {act === 'CLEANSE' && (
@@ -350,51 +370,105 @@ export const WeeklyReviewWizard: React.FC<WeeklyReviewWizardProps> = ({ onClose 
               <div className="space-y-8 animate-in slide-in-from-right-4 fade-in duration-500">
                    <div className="text-center space-y-2 mb-8">
                       <h1 className="text-3xl font-bold tracking-tight">Tactical Plan</h1>
-                      <p className="text-zinc-500">Review and approve the generated tickets.</p>
+                      <p className="text-zinc-500">Review, edit, and finalize the plan.</p>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                      {/* Render columns by Context */}
-                      {Array.from(new Set(generatedTickets.map(t => t.contextId))).map((ctxId: string) => {
-                          const ctxName = getContextName(ctxId);
-                          const items = generatedTickets.filter(t => t.contextId === ctxId);
+                      {/* Manually render tickets without grouping to allow easy adding */}
+                      {generatedTickets.map(t => {
+                          const assignee = users.find(u => u.id === t.assigneeId);
                           
                           return (
-                              <div key={ctxId} className="space-y-4">
-                                  <div className="flex items-center gap-2 pb-2 border-b border-zinc-100">
-                                      <span className="text-xs font-bold text-zinc-900 uppercase tracking-wider">{ctxName}</span>
-                                      <span className="text-[10px] bg-zinc-100 text-zinc-500 px-1.5 py-0.5 rounded-full">{items.length}</span>
-                                  </div>
-                                  <div className="space-y-3">
-                                      {items.map(t => (
-                                          <div key={t.id} className={`bg-white border p-4 rounded-lg shadow-sm transition-all ${t.selected ? 'border-zinc-200' : 'opacity-50 border-zinc-100'}`}>
-                                               <div className="flex justify-between items-start mb-2">
-                                                   <input 
-                                                      type="checkbox"
-                                                      checked={t.selected}
-                                                      onChange={e => {
-                                                          setGeneratedTickets(prev => prev.map(pt => pt.id === t.id ? {...pt, selected: e.target.checked} : pt));
-                                                      }}
-                                                      className="mt-1 w-4 h-4 accent-zinc-900"
-                                                   />
-                                               </div>
-                                               <input 
-                                                  value={t.title}
-                                                  onChange={e => setGeneratedTickets(prev => prev.map(pt => pt.id === t.id ? {...pt, title: e.target.value} : pt))}
-                                                  className="w-full text-sm font-bold text-zinc-900 bg-transparent border-none p-0 focus:ring-0 mb-1"
-                                               />
-                                               <textarea 
-                                                  value={t.description}
-                                                  onChange={e => setGeneratedTickets(prev => prev.map(pt => pt.id === t.id ? {...pt, description: e.target.value} : pt))}
-                                                  className="w-full text-xs text-zinc-500 bg-transparent border-none p-0 focus:ring-0 resize-none"
-                                                  rows={2}
-                                               />
-                                          </div>
-                                      ))}
-                                  </div>
-                              </div>
-                          )
-                      })}
+                          <div key={t.id} className={`bg-white border p-4 rounded-lg shadow-sm transition-all group ${t.selected ? 'border-zinc-200' : 'opacity-50 border-zinc-100'}`}>
+                               <div className="flex justify-between items-start mb-2">
+                                   <input 
+                                      type="checkbox"
+                                      checked={t.selected}
+                                      onChange={e => {
+                                          setGeneratedTickets(prev => prev.map(pt => pt.id === t.id ? {...pt, selected: e.target.checked} : pt));
+                                      }}
+                                      className="mt-1 w-4 h-4 accent-zinc-900 cursor-pointer"
+                                   />
+                                   <div className="flex items-center gap-2">
+                                       <select
+                                          value={t.priority}
+                                          onChange={e => setGeneratedTickets(prev => prev.map(pt => pt.id === t.id ? {...pt, priority: e.target.value as Priority} : pt))}
+                                          className={`text-[10px] uppercase font-bold bg-transparent border-none focus:ring-0 cursor-pointer text-right w-20 ${
+                                              t.priority === 'Urgent' ? 'text-red-500' : 
+                                              t.priority === 'High' ? 'text-orange-500' : 
+                                              t.priority === 'Medium' ? 'text-blue-500' : 'text-zinc-400'
+                                          }`}
+                                       >
+                                           {PRIORITIES.map(p => <option key={p.value} value={p.value}>{p.value}</option>)}
+                                       </select>
+                                       <button onClick={() => handleRemoveDraftTicket(t.id)} className="text-zinc-300 hover:text-red-500"><Icons.XCircle className="w-3.5 h-3.5"/></button>
+                                   </div>
+                               </div>
+                               
+                               <input 
+                                  value={t.title}
+                                  onChange={e => setGeneratedTickets(prev => prev.map(pt => pt.id === t.id ? {...pt, title: e.target.value} : pt))}
+                                  className="w-full text-sm font-bold text-zinc-900 bg-transparent border-none p-0 focus:ring-0 mb-1 placeholder-zinc-300"
+                                  placeholder="Task Title"
+                               />
+                               <textarea 
+                                  value={t.description}
+                                  onChange={e => setGeneratedTickets(prev => prev.map(pt => pt.id === t.id ? {...pt, description: e.target.value} : pt))}
+                                  className="w-full text-xs text-zinc-500 bg-transparent border-none p-0 focus:ring-0 resize-none mb-3 placeholder-zinc-300"
+                                  rows={2}
+                                  placeholder="Description..."
+                               />
+
+                               {/* Controls Row */}
+                               <div className="flex items-center gap-2 pt-3 border-t border-zinc-50">
+                                   {/* Assignee */}
+                                   <div className="flex items-center gap-1 bg-zinc-50 px-2 py-1 rounded border border-zinc-100 flex-1 min-w-0">
+                                       {assignee ? (
+                                           <div className={`w-3 h-3 rounded-full ${assignee.color} shrink-0`}></div>
+                                       ) : <div className="w-3 h-3 rounded-full bg-zinc-200 shrink-0"></div>}
+                                       <select 
+                                            value={t.assigneeId}
+                                            onChange={e => setGeneratedTickets(prev => prev.map(pt => pt.id === t.id ? {...pt, assigneeId: e.target.value} : pt))}
+                                            className="bg-transparent text-[10px] text-zinc-600 font-medium focus:outline-none w-full cursor-pointer"
+                                       >
+                                           {users.map(u => (
+                                               <option key={u.id} value={u.id}>{u.name}</option>
+                                           ))}
+                                       </select>
+                                   </div>
+
+                                   {/* Context */}
+                                   <div className="flex items-center gap-1 bg-zinc-50 px-2 py-1 rounded border border-zinc-100 flex-1 min-w-0">
+                                       <Icons.Target className="w-3 h-3 text-zinc-400 shrink-0" />
+                                       <select 
+                                            value={t.contextId}
+                                            onChange={e => setGeneratedTickets(prev => prev.map(pt => pt.id === t.id ? {...pt, contextId: e.target.value} : pt))}
+                                            className="bg-transparent text-[10px] text-zinc-600 font-medium focus:outline-none w-full cursor-pointer"
+                                       >
+                                           <optgroup label="Projects">
+                                               {campaign?.projects.map(p => (
+                                                   <option key={p.id} value={p.id}>{p.name}</option>
+                                               ))}
+                                           </optgroup>
+                                           <optgroup label="Channels">
+                                               {campaign?.channels.map(c => (
+                                                   <option key={c.id} value={c.id}>{c.name}</option>
+                                               ))}
+                                           </optgroup>
+                                       </select>
+                                   </div>
+                               </div>
+                          </div>
+                      )})}
+
+                      {/* Add Button */}
+                      <button 
+                        onClick={handleAddManualTicket}
+                        className="border-2 border-dashed border-zinc-200 rounded-lg p-6 flex flex-col items-center justify-center gap-2 text-zinc-400 hover:text-zinc-600 hover:border-zinc-300 hover:bg-zinc-50 transition-all min-h-[200px]"
+                      >
+                          <Icons.PlusCircle className="w-8 h-8 opacity-50" />
+                          <span className="text-xs font-bold uppercase tracking-wider">Add Manual Ticket</span>
+                      </button>
                   </div>
 
                   <div className="flex justify-between items-center pt-8 border-t border-zinc-100">
@@ -403,7 +477,7 @@ export const WeeklyReviewWizard: React.FC<WeeklyReviewWizardProps> = ({ onClose 
                           onClick={handleFinalize}
                           className="px-8 py-3 bg-zinc-900 text-white rounded-lg font-bold hover:bg-zinc-800 transition-all shadow-lg"
                       >
-                          Finalize Plan ({generatedTickets.filter(t => t.selected).length} Tickets)
+                          Finalize Plan ({generatedTickets.filter(t => t.selected && t.title.trim() !== '').length} Tickets)
                       </button>
                   </div>
               </div>

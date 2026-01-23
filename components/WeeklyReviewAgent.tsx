@@ -23,7 +23,7 @@ interface PendingAction {
 }
 
 export const WeeklyReviewAgent: React.FC<{ onClose: () => void }> = ({ onClose }) => {
-    const { campaign, updateTicket, updateProjectTicket, deleteTicket, deleteProjectTicket, addTicket, addProjectTicket, currentUser } = useStore();
+    const { campaign, updateTicket, updateProjectTicket, deleteTicket, deleteProjectTicket, addTicket, addProjectTicket, currentUser, users } = useStore();
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
     const [isTyping, setIsTyping] = useState(false);
@@ -179,7 +179,7 @@ export const WeeklyReviewAgent: React.FC<{ onClose: () => void }> = ({ onClose }
                 }
             }
             else if (name === 'propose_ticket') {
-                const { title, description, channelId, projectId, priority } = args;
+                const { title, description, channelId, projectId, priority, assigneeId } = args;
                 const newTicket = {
                     id: generateId(),
                     shortId: `T-${Math.floor(Math.random() * 1000)}`,
@@ -187,7 +187,7 @@ export const WeeklyReviewAgent: React.FC<{ onClose: () => void }> = ({ onClose }
                     description,
                     priority: priority || 'Medium',
                     status: TicketStatus.Todo,
-                    assigneeId: currentUser.id,
+                    assigneeId: assigneeId || currentUser.id,
                     createdAt: new Date().toISOString()
                 };
 
@@ -250,17 +250,15 @@ export const WeeklyReviewAgent: React.FC<{ onClose: () => void }> = ({ onClose }
         
         // High-Fidelity Ticket Proposal
         if (name === 'propose_ticket') {
-            const contextName = args.channelId 
-                ? campaign?.channels.find(c => c.id === args.channelId)?.name 
-                : campaign?.projects.find(p => p.id === args.projectId)?.name;
-            
             return (
                 <AgentTicketCard 
                     key={action.id}
                     actionId={action.id}
                     args={args}
                     status={status}
-                    contextName={contextName || 'General'}
+                    users={users}
+                    channels={campaign?.channels || []}
+                    projects={campaign?.projects || []}
                     onUpdate={(updates) => updateActionArgs(action.id, updates)}
                     onApprove={() => handleAction(action, true)}
                     onReject={() => handleAction(action, false)}
