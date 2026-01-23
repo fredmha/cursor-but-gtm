@@ -484,6 +484,19 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
                             ...(campaign?.projects || []).flatMap(p => p.tickets)
                         ].filter(t => callout.ticketIds.includes(t.id));
 
+                        const statusOrder = [
+                            TicketStatus.Todo,
+                            TicketStatus.InProgress,
+                            TicketStatus.Backlog,
+                            TicketStatus.Blocked,
+                            TicketStatus.Done
+                        ];
+
+                        const columns = statusOrder.map(status => ({
+                            status,
+                            tickets: tickets.filter(t => t.status === status)
+                        }));
+
                         return (
                             <div key={callout.id} className="my-6">
                                 {callout.title && (
@@ -491,33 +504,48 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
                                         {callout.title}
                                     </div>
                                 )}
-                                {tickets.map(t => (
-                                    <AgentTicketCard
-                                        key={t.id}
-                                        actionId={t.id}
-                                        args={{
-                                            title: t.title,
-                                            description: t.description,
-                                            priority: t.priority,
-                                            channelId: t.channelId,
-                                            projectId: t.projectId,
-                                            assigneeId: t.assigneeId
-                                        }}
-                                        status="PENDING"
-                                        users={users}
-                                        channels={campaign?.channels || []}
-                                        projects={campaign?.projects || []}
-                                        onUpdate={(updates) => {
-                                            if (t.channelId) {
-                                                updateTicket(t.channelId, t.id, updates);
-                                            } else if (t.projectId) {
-                                                updateProjectTicket(t.projectId, t.id, updates);
-                                            }
-                                        }}
-                                        onApprove={() => {}}
-                                        onReject={() => {}}
-                                    />
-                                ))}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {columns.map(col => (
+                                        <div key={col.status} className="bg-white border border-zinc-200 rounded-xl p-3 shadow-sm">
+                                            <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">
+                                                {col.status}
+                                            </div>
+                                            <div className="space-y-3">
+                                                {col.tickets.length === 0 ? (
+                                                    <div className="text-xs text-zinc-400">No tasks</div>
+                                                ) : (
+                                                    col.tickets.map(t => (
+                                                        <AgentTicketCard
+                                                            key={t.id}
+                                                            actionId={t.id}
+                                                            args={{
+                                                                title: t.title,
+                                                                description: t.description,
+                                                                priority: t.priority,
+                                                                channelId: t.channelId,
+                                                                projectId: t.projectId,
+                                                                assigneeId: t.assigneeId
+                                                            }}
+                                                            status="PENDING"
+                                                            users={users}
+                                                            channels={campaign?.channels || []}
+                                                            projects={campaign?.projects || []}
+                                                            onUpdate={(updates) => {
+                                                                if (t.channelId) {
+                                                                    updateTicket(t.channelId, t.id, updates);
+                                                                } else if (t.projectId) {
+                                                                    updateProjectTicket(t.projectId, t.id, updates);
+                                                                }
+                                                            }}
+                                                            onApprove={() => {}}
+                                                            onReject={() => {}}
+                                                        />
+                                                    ))
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
                         );
                     })}

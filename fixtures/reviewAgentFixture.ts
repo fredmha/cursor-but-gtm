@@ -142,6 +142,8 @@ export const buildReviewAgentTestCampaign = (): Campaign => {
         name: 'Website Refresh',
         description: 'Improve landing page conversion rate.',
         status: 'On Track',
+        startDate: isoDate(weekStart),
+        targetDate: isoDate(nextWeek),
         updates: [],
         tickets: [
           {
@@ -184,8 +186,68 @@ export const buildReviewAgentTestCampaign = (): Campaign => {
       }
     ],
     principles: [],
-    roadmapItems: [],
-    timelineTags: [],
+    roadmapItems: [
+      {
+        id: 'r1',
+        channelId: 'c_paid',
+        weekIndex: 0,
+        durationWeeks: 2,
+        title: 'Prospecting Phase 1',
+        description: 'Initial ad launch and testing.',
+        ownerIds: ['u1'],
+        type: 'CONTENT',
+        priority: 'High'
+      },
+      {
+        id: 'r2',
+        channelId: 'c_paid',
+        weekIndex: 2,
+        durationWeeks: 1,
+        title: 'Retargeting Setup',
+        description: 'Building the mid-funnel content.',
+        ownerIds: ['u3'],
+        type: 'CONTENT',
+        priority: 'Medium'
+      },
+      {
+        id: 'r3',
+        channelId: 'c_content',
+        weekIndex: 0,
+        durationWeeks: 4,
+        title: 'Weekly Newsletter Series',
+        description: 'Consistency in email distribution.',
+        ownerIds: ['u1'],
+        type: 'CONTENT',
+        priority: 'High'
+      },
+      {
+        id: 'r4',
+        projectId: 'p_site',
+        weekIndex: 1,
+        durationWeeks: 2,
+        title: 'Hero Section Overhaul',
+        description: 'Main landing page structural changes.',
+        ownerIds: ['u1'],
+        type: 'LAUNCH',
+        priority: 'Urgent'
+      }
+    ],
+    timelineTags: [
+      {
+        id: 'tag1',
+        weekIndex: 0,
+        label: 'LAUNCH',
+        title: 'Campaign Kickoff',
+        color: 'bg-emerald-500'
+      },
+      {
+        id: 'tag2',
+        weekIndex: 3,
+        label: 'EVENT',
+        title: 'Project Milestone',
+        color: 'bg-indigo-500'
+      }
+    ],
     docFolders: [
       {
         id: 'f_strategy',

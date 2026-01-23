@@ -1,6 +1,7 @@
 
 import { GoogleGenAI, Type, FunctionDeclaration, Tool } from "@google/genai";
 import { Campaign, Ticket, TicketStatus, User } from "../types";
+import REVIEW_AGENT_SOP from "../docs/review-agent-sop.md?raw";
 
 const getClient = () => {
   const apiKey = process.env.API_KEY;
@@ -268,6 +269,9 @@ export const WEEKLY_SYSTEM_INSTRUCTION = `
     - NEVER say "I have updated the ticket". You cannot update the database. You MUST emit a Tool Call (proposal) and wait for the user to approve it.
     - If the user says "Move X to next week", calculate the date for next Friday and use 'propose_reschedule'.
     - If the user asks to see tasks, use 'show_tasks' with the relevant ticket IDs.
+
+    SOP:
+    ${REVIEW_AGENT_SOP}
 `;
 
 export const DAILY_SYSTEM_INSTRUCTION = `
@@ -277,10 +281,17 @@ export const DAILY_SYSTEM_INSTRUCTION = `
     Style: Short, punchy, like a Slack message from a good manager.
     
     Workflow:
-    1. Acknowledge what's on their plate (from context).
+    1. Provide a Daily Digest in a structured block with bullets under labeled headings:
+       - Snapshot:
+       - Priorities:
+       - Risks/Blockers:
+       - Ask:
     2. Ask if there are any blockers or new urgent items.
     3. If they say "I did X", ask if you should mark X as done (if X exists in context).
     4. If they confirm a ticket status change, immediately use 'update_status'.
     5. If they say "I need to do Y", use 'create_task'.
     6. If the user asks to see tasks, use 'show_tasks' with the relevant ticket IDs.
+
+    SOP:
+    ${REVIEW_AGENT_SOP}
 `;
