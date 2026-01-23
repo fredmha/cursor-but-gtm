@@ -17,11 +17,14 @@ export enum TicketStatus {
 
 export type Priority = 'Urgent' | 'High' | 'Medium' | 'Low' | 'None';
 
+export type Role = 'Admin' | 'Member';
+
 export interface User {
   id: string;
   name: string;
   initials: string;
   color: string;
+  role: Role;
 }
 
 export interface Ticket {
@@ -212,4 +215,4 @@ export interface Campaign {
   availableTags?: string[]; // Global tags list
 }
 
-export type ViewMode = 'ONBOARDING' | 'ROADMAP' | 'EXECUTION' | 'REVIEW' | 'DOCS';
+export type ViewMode = 'ONBOARDING' | 'ROADMAP' | 'EXECUTION' | 'REVIEW' | 'DOCS' | 'SETTINGS';

@@ -7,6 +7,7 @@ import { OnboardingWizard } from './components/OnboardingWizard';
 import { RoadmapSandbox } from './components/RoadmapSandbox';
 import { LabOnboarding } from './components/lab/LabOnboarding';
 import { DocsView } from './components/DocsView';
+import { SettingsView } from './components/SettingsView';
 import { ViewMode } from './types';
 import { Icons } from './constants';
 
@@ -99,7 +100,8 @@ const MainLayout: React.FC = () => {
                      'EXECUTION': Icons.Zap,
                      'DOCS': Icons.FileText,
                      'REVIEW': Icons.Target,
-                     'ONBOARDING': Icons.Sparkles
+                     'ONBOARDING': Icons.Sparkles,
+                     'SETTINGS': Icons.Settings
                  };
                  const Icon = icons[v];
                  
@@ -122,6 +124,20 @@ const MainLayout: React.FC = () => {
 
          {/* User Profile / Footer */}
          <div className="p-3 border-t border-border mt-auto">
+             
+             {/* Settings Link */}
+             <button
+                onClick={() => setCurrentView('SETTINGS')}
+                className={`w-full flex items-center gap-3 px-3 py-2 mb-2 rounded-md text-sm transition-all group ${
+                    currentView === 'SETTINGS'
+                    ? 'bg-white text-zinc-900 shadow-sm ring-1 ring-zinc-200/50' 
+                    : 'text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100'
+                }`}
+             >
+                 <Icons.Settings className={`w-4 h-4 ${currentView === 'SETTINGS' ? 'text-zinc-800' : 'text-zinc-400 group-hover:text-zinc-600'}`} />
+                 Settings
+             </button>
+
              <div className="flex items-center justify-between p-2 rounded-lg hover:bg-zinc-100 transition-colors cursor-pointer group">
                  <div className="flex items-center gap-2">
                      <div className={`w-6 h-6 rounded-full ${currentUser.color} text-white flex items-center justify-center text-[9px] font-bold shadow-sm`}>
@@ -152,6 +168,7 @@ const MainLayout: React.FC = () => {
           {currentView === 'EXECUTION' && <ExecutionBoard />}
           {currentView === 'REVIEW' && <ReviewMode />}
           {currentView === 'DOCS' && <DocsView />}
+          {currentView === 'SETTINGS' && <SettingsView />}
       </main>
 
     </div>

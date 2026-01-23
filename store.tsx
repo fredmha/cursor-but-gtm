@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { Campaign, Channel, Ticket, TicketStatus, Status, User, Priority, RoadmapItem, Project, ProjectUpdate, ChannelLink, ChannelNote, TimelineTag, ChannelPlan, ContextDoc, DocFolder, ViewMode } from './types';
+import { Campaign, Channel, Ticket, TicketStatus, Status, User, Priority, RoadmapItem, Project, ProjectUpdate, ChannelLink, ChannelNote, TimelineTag, ChannelPlan, ContextDoc, DocFolder, ViewMode, Role } from './types';
 
 // Safe ID Generator
 export const generateId = () => {
@@ -15,10 +15,10 @@ export const generateId = () => {
 };
 
 export const MOCK_USERS: User[] = [
-  { id: 'u1', name: 'Founder', initials: 'FD', color: 'bg-indigo-500' },
-  { id: 'u2', name: 'Growth Lead', initials: 'GL', color: 'bg-emerald-500' },
-  { id: 'u3', name: 'Engineer', initials: 'EN', color: 'bg-purple-500' },
-  { id: 'u4', name: 'Designer', initials: 'DS', color: 'bg-pink-500' },
+  { id: 'u1', name: 'Founder', initials: 'FD', color: 'bg-indigo-500', role: 'Admin' },
+  { id: 'u2', name: 'Growth Lead', initials: 'GL', color: 'bg-emerald-500', role: 'Member' },
+  { id: 'u3', name: 'Engineer', initials: 'EN', color: 'bg-purple-500', role: 'Member' },
+  { id: 'u4', name: 'Designer', initials: 'DS', color: 'bg-pink-500', role: 'Member' },
 ];
 
 interface StoreState {
@@ -31,6 +31,11 @@ interface StoreState {
   setCampaign: (campaign: Campaign) => void;
   updateCampaign: (updates: Partial<Campaign>) => void;
   
+  // User Actions
+  addUser: (name: string, role: Role) => void;
+  removeUser: (userId: string) => void;
+  updateUser: (userId: string, updates: Partial<User>) => void;
+
   addChannel: (channel: Channel) => void;
   updateChannel: (channelId: string, updates: Partial<Channel>) => void;
   deleteChannel: (channelId: string) => void;
@@ -93,8 +98,12 @@ interface StoreState {
 const StoreContext = createContext<StoreState | undefined>(undefined);
 
 export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [users] = useState<User[]>(MOCK_USERS);
-  const [currentUser, setCurrentUser] = useState<User>(MOCK_USERS[0]);
+  const [users, setUsers] = useState<User[]>(() => {
+      const saved = localStorage.getItem('gtm-os-users');
+      return saved ? JSON.parse(saved) : MOCK_USERS;
+  });
+  
+  const [currentUser, setCurrentUser] = useState<User>(users[0] || MOCK_USERS[0]);
   const [currentView, setCurrentView] = useState<ViewMode>('ROADMAP');
   const [pendingTicketLink, setPendingTicketLink] = useState<string | null>(null);
 
@@ -171,6 +180,38 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       localStorage.removeItem('gtm-os-campaign');
     }
   }, [campaign]);
+
+  useEffect(() => {
+      localStorage.setItem('gtm-os-users', JSON.stringify(users));
+  }, [users]);
+
+  // User Actions
+  const addUser = (name: string, role: Role) => {
+      const colors = ['bg-indigo-500', 'bg-emerald-500', 'bg-purple-500', 'bg-pink-500', 'bg-orange-500', 'bg-blue-500', 'bg-cyan-500'];
+      const newUser: User = {
+          id: generateId(),
+          name,
+          initials: name.substring(0, 2).toUpperCase(),
+          color: colors[Math.floor(Math.random() * colors.length)],
+          role
+      };
+      setUsers([...users, newUser]);
+  };
+
+  const removeUser = (userId: string) => {
+      if (users.length <= 1) return; // Prevent deleting last user
+      setUsers(users.filter(u => u.id !== userId));
+      if (currentUser.id === userId) {
+          setCurrentUser(users.find(u => u.id !== userId) || users[0]);
+      }
+  };
+
+  const updateUser = (userId: string, updates: Partial<User>) => {
+      setUsers(users.map(u => u.id === userId ? { ...u, ...updates } : u));
+      if (currentUser.id === userId) {
+          setCurrentUser(prev => ({ ...prev, ...updates }));
+      }
+  };
 
   const setCampaign = (c: Campaign) => setCampaignState(c);
 
@@ -802,6 +843,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       currentUser,
       setCampaign,
       updateCampaign,
+      addUser,
+      removeUser,
+      updateUser,
       addChannel,
       updateChannel,
       deleteChannel,
