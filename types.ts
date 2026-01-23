@@ -39,6 +39,7 @@ export interface Ticket {
   assigneeId?: string;
   priority: Priority;
   dueDate?: string;
+  startDate?: string;
   createdAt: string;
   linkedDocIds?: string[]; // IDs of ContextDocs linked to this ticket
 }
@@ -63,7 +64,7 @@ export interface Project {
   startDate?: string;
   targetDate?: string;
   updates: ProjectUpdate[];
-  tickets: Ticket[]; 
+  tickets: Ticket[];
 }
 
 export interface ChannelPrinciple {
@@ -75,7 +76,7 @@ export interface ChannelLink {
   id: string;
   title: string;
   url: string;
-  icon?: string; 
+  icon?: string;
 }
 
 export interface ChannelNote {
@@ -106,10 +107,10 @@ export interface Channel {
   tickets: Ticket[]; // Tickets live directly on Channel
   principles: ChannelPrinciple[];
   tags: ChannelTag[];
-  links?: ChannelLink[]; 
-  notes?: ChannelNote[]; 
-  memberIds?: string[]; 
-  plan?: ChannelPlan; 
+  links?: ChannelLink[];
+  notes?: ChannelNote[];
+  memberIds?: string[];
+  plan?: ChannelPlan;
 }
 
 export interface OperatingPrinciple {
@@ -123,7 +124,7 @@ export type RoadmapItemType = 'CONTENT' | 'LAUNCH' | 'THEME' | 'NOTE';
 
 export interface RoadmapItem {
   id: string;
-  channelId?: string; 
+  channelId?: string;
   weekIndex: number;
   durationWeeks: number;
   title: string;
@@ -131,14 +132,17 @@ export interface RoadmapItem {
   ownerIds?: string[];
   type: RoadmapItemType;
   label?: string;
-  
+
   priority?: Priority;
   attachments?: string[];
   externalLinks?: { title: string; url: string }[];
-  
+
   ticketId?: string;
-  projectId?: string; 
-  
+  projectId?: string;
+
+  startDate?: string;
+  endDate?: string;
+
   color?: string;
   status?: Status;
 }
@@ -146,7 +150,7 @@ export interface RoadmapItem {
 export interface TimelineTag {
   id: string;
   weekIndex: number;
-  label: string; 
+  label: string;
   title: string;
   color: string;
 }
@@ -158,6 +162,8 @@ export interface DocFolder {
   id: string;
   name: string;
   icon?: string; // Emoji
+  parentId?: string; // The parent folder ID for nesting
+  isRagIndexed?: boolean;
   createdAt: string;
 }
 
@@ -196,6 +202,11 @@ export interface ContextDoc {
   tags?: string[];
   channelId?: string;
   icon?: string; // Emoji customization for file
+  isRagIndexed?: boolean;
+  // Collaboration metadata
+  lastEditedBy?: string; // User ID
+  createdBy?: string; // User ID
+  createdAt?: string; // ISO timestamp
 }
 
 // Chat Types
@@ -233,11 +244,11 @@ export interface Campaign {
   docFolders: DocFolder[]; // New Folders
   docs: ContextDoc[];
   availableTags?: string[]; // Global tags list
-  
+
   // Agent / Review State
   lastDailyStandup?: string; // ISO Date
   lastWeeklyReview?: string; // ISO Date
-  dailyChatHistory?: ChatMessage[]; 
+  dailyChatHistory?: ChatMessage[];
   weeklyChatHistory?: ChatMessage[];
 }
 

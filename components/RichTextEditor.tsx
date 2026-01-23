@@ -44,7 +44,7 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({ initialContent, 
         if (editorRef.current) {
             editorRef.current.focus();
         }
-        handleInput(); 
+        handleInput();
     };
 
     const insertTable = () => {
@@ -75,10 +75,40 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({ initialContent, 
         execCmd('insertHTML', tableHTML);
     };
 
+    const insertCodeBlock = () => {
+        const codeHTML = `
+            <pre class="bg-zinc-900 text-zinc-100 p-4 rounded-lg my-4 overflow-x-auto font-mono text-sm"><code>// Your code here</code></pre>
+            <p><br /></p>
+        `;
+        execCmd('insertHTML', codeHTML);
+    };
+
+    const insertBlockquote = () => {
+        execCmd('formatBlock', 'BLOCKQUOTE');
+    };
+
+    const insertDivider = () => {
+        const dividerHTML = `<hr class="border-t border-zinc-200 my-6" /><p><br /></p>`;
+        execCmd('insertHTML', dividerHTML);
+    };
+
+    const insertCallout = () => {
+        const calloutHTML = `
+            <div class="bg-indigo-50 border-l-4 border-indigo-500 p-4 my-4 rounded-r-lg">
+                <div class="flex items-start gap-2">
+                    <span class="text-indigo-600 font-bold">💡</span>
+                    <p class="text-indigo-900 text-sm m-0">Add your note here...</p>
+                </div>
+            </div>
+            <p><br /></p>
+        `;
+        execCmd('insertHTML', calloutHTML);
+    };
+
     if (readOnly) {
         return (
-            <div 
-                className="prose prose-zinc prose-sm max-w-none text-zinc-700 outline-none"
+            <div
+                className="prose prose-zinc prose-sm max-w-none text-zinc-700 outline-none [&_pre]:bg-zinc-900 [&_pre]:text-zinc-100 [&_pre]:p-4 [&_pre]:rounded-lg [&_pre]:overflow-x-auto [&_blockquote]:border-l-4 [&_blockquote]:border-zinc-300 [&_blockquote]:pl-4 [&_blockquote]:italic [&_blockquote]:text-zinc-600"
                 dangerouslySetInnerHTML={{ __html: initialContent }}
             />
         );
@@ -88,12 +118,12 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({ initialContent, 
         <div className="flex flex-col h-full bg-white rounded-lg border border-zinc-100 shadow-sm relative group focus-within:border-zinc-300 focus-within:ring-1 focus-within:ring-zinc-100 transition-all">
             {/* Toolbar - Sticky */}
             <div className="flex flex-wrap items-center gap-1 p-2 border-b border-zinc-100 bg-zinc-50/50 rounded-t-lg sticky top-0 z-10 backdrop-blur-sm">
-                
+
                 {/* Text Styles */}
                 <div className="flex gap-0.5 bg-white border border-zinc-200 rounded-md p-0.5">
-                    <ToolbarButton isActive={activeFormats.includes('bold')} onClick={() => execCmd('bold')} icon={<span className="font-bold font-serif">B</span>} title="Bold" />
-                    <ToolbarButton isActive={activeFormats.includes('italic')} onClick={() => execCmd('italic')} icon={<span className="italic font-serif">I</span>} title="Italic" />
-                    <ToolbarButton isActive={activeFormats.includes('underline')} onClick={() => execCmd('underline')} icon={<span className="underline font-serif">U</span>} title="Underline" />
+                    <ToolbarButton isActive={activeFormats.includes('bold')} onClick={() => execCmd('bold')} icon={<span className="font-bold font-serif">B</span>} title="Bold (Ctrl+B)" />
+                    <ToolbarButton isActive={activeFormats.includes('italic')} onClick={() => execCmd('italic')} icon={<span className="italic font-serif">I</span>} title="Italic (Ctrl+I)" />
+                    <ToolbarButton isActive={activeFormats.includes('underline')} onClick={() => execCmd('underline')} icon={<span className="underline font-serif">U</span>} title="Underline (Ctrl+U)" />
                     <ToolbarButton onClick={() => execCmd('strikeThrough')} icon={<span className="line-through font-serif">S</span>} title="Strikethrough" />
                 </div>
 
@@ -108,7 +138,7 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({ initialContent, 
 
                 <div className="w-px h-6 bg-zinc-200 mx-1" />
 
-                {/* Lists & Indent */}
+                {/* Lists */}
                 <div className="flex gap-0.5 bg-white border border-zinc-200 rounded-md p-0.5">
                     <ToolbarButton isActive={activeFormats.includes('ul')} onClick={() => execCmd('insertUnorderedList')} icon={<Icons.List className="w-4 h-4" />} title="Bullet List" />
                     <ToolbarButton isActive={activeFormats.includes('ol')} onClick={() => execCmd('insertOrderedList')} icon="1." title="Numbered List" />
@@ -116,27 +146,37 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({ initialContent, 
 
                 <div className="w-px h-6 bg-zinc-200 mx-1" />
 
+                {/* Blocks */}
+                <div className="flex gap-0.5 bg-white border border-zinc-200 rounded-md p-0.5">
+                    <ToolbarButton onClick={insertBlockquote} icon={<Icons.Quote className="w-4 h-4" />} title="Blockquote" />
+                    <ToolbarButton onClick={insertCodeBlock} icon={<Icons.Code className="w-4 h-4" />} title="Code Block" />
+                    <ToolbarButton onClick={insertCallout} icon={<Icons.AlertCircle className="w-4 h-4" />} title="Callout" />
+                    <ToolbarButton onClick={insertDivider} icon={<Icons.Minus className="w-4 h-4" />} title="Divider" />
+                </div>
+
+                <div className="w-px h-6 bg-zinc-200 mx-1" />
+
                 {/* Inserts */}
                 <div className="flex gap-0.5 bg-white border border-zinc-200 rounded-md p-0.5">
                     <ToolbarButton onClick={insertTable} icon={<Icons.Kanban className="w-4 h-4" />} title="Insert Table" />
-                    <ToolbarButton onClick={() => execCmd('createLink', prompt('Enter URL:') || '')} icon={<Icons.GripVertical className="w-4 h-4 rotate-45" />} title="Link" />
+                    <ToolbarButton onClick={() => execCmd('createLink', prompt('Enter URL:') || '')} icon={<Icons.Link className="w-4 h-4" />} title="Link" />
                 </div>
 
-                 <div className="w-px h-6 bg-zinc-200 mx-1" />
-                 
-                 {/* Clear */}
-                 <ToolbarButton onClick={() => execCmd('removeFormat')} icon={<Icons.XCircle className="w-4 h-4" />} title="Clear Formatting" />
+                <div className="w-px h-6 bg-zinc-200 mx-1" />
+
+                {/* Clear */}
+                <ToolbarButton onClick={() => execCmd('removeFormat')} icon={<Icons.XCircle className="w-4 h-4" />} title="Clear Formatting" />
 
             </div>
 
             {/* Editable Area */}
-            <div 
+            <div
                 ref={editorRef}
                 contentEditable
                 onInput={handleInput}
                 onKeyUp={checkFormats}
                 onMouseUp={checkFormats}
-                className="flex-1 p-8 outline-none prose prose-zinc prose-sm max-w-none text-zinc-700 cursor-text overflow-y-auto"
+                className="flex-1 p-8 outline-none prose prose-zinc prose-sm max-w-none text-zinc-700 cursor-text overflow-y-auto [&_pre]:bg-zinc-900 [&_pre]:text-zinc-100 [&_pre]:p-4 [&_pre]:rounded-lg [&_pre]:overflow-x-auto [&_blockquote]:border-l-4 [&_blockquote]:border-zinc-300 [&_blockquote]:pl-4 [&_blockquote]:italic [&_blockquote]:text-zinc-600"
                 style={{ minHeight: '500px' }}
             />
         </div>
@@ -144,13 +184,12 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({ initialContent, 
 };
 
 const ToolbarButton: React.FC<{ onClick: () => void; icon: React.ReactNode; title: string; isActive?: boolean }> = ({ onClick, icon, title, isActive }) => (
-    <button 
+    <button
         onMouseDown={(e) => { e.preventDefault(); onClick(); }}
-        className={`p-1.5 rounded text-xs font-bold min-w-[28px] h-[28px] flex items-center justify-center transition-colors ${
-            isActive 
-            ? 'bg-zinc-900 text-white' 
-            : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900'
-        }`}
+        className={`p-1.5 rounded text-xs font-bold min-w-[28px] h-[28px] flex items-center justify-center transition-colors ${isActive
+                ? 'bg-zinc-900 text-white'
+                : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900'
+            }`}
         title={title}
         type="button"
     >

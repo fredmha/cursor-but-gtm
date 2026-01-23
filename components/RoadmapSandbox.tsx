@@ -8,78 +8,83 @@ import { ChannelDashboard } from './ChannelDashboard';
 import { TicketModal } from './TicketModal';
 
 interface RoadmapSandboxProps {
-  onNext?: () => void;
-  onBack?: () => void;
+    onNext?: () => void;
+    onBack?: () => void;
 }
 
 const WEEK_WIDTH = 200;
-const LEFT_PANEL_WIDTH = 280; 
-const ITEM_HEIGHT = 32; 
+const LEFT_PANEL_WIDTH = 280;
+const ITEM_HEIGHT = 32;
 const ITEM_GAP = 4;
 const ROW_PADDING_TOP = 12;
 const ROW_PADDING_BOTTOM = 12;
 const MIN_ROW_HEIGHT = 120;
 
 interface LayoutItem extends RoadmapItem {
-  _layout: {
-    top: number;
-    height: number;
-  };
+    _layout: {
+        top: number;
+        height: number;
+    };
 }
 
 const calculateLaneLayout = (items: RoadmapItem[]): { layoutItems: LayoutItem[], rowHeight: number } => {
-  // Only calculate layout for scheduled items
-  const scheduledItems = items.filter(i => i.weekIndex >= 0);
-  
-  const sorted = [...scheduledItems].sort((a, b) => {
-    if (a.weekIndex !== b.weekIndex) return a.weekIndex - b.weekIndex;
-    if (a.durationWeeks !== b.durationWeeks) return b.durationWeeks - a.durationWeeks; 
-    return a.id.localeCompare(b.id);
-  });
+    // Only calculate layout for scheduled items
+    const scheduledItems = items.filter(i => i.weekIndex >= 0 || i.startDate);
 
-  const layoutItems: LayoutItem[] = [];
-  const slots: LayoutItem[][] = []; 
+    const sorted = [...scheduledItems].sort((a, b) => {
+        const aStart = a.startDate ? new Date(a.startDate).getTime() : a.weekIndex;
+        const bStart = b.startDate ? new Date(b.startDate).getTime() : b.weekIndex;
+        if (aStart !== bStart) return aStart - bStart;
 
-  sorted.forEach(item => {
-    let placed = false;
-    let slotIndex = 0;
+        const aDur = a.durationWeeks || 1;
+        const bDur = b.durationWeeks || 1;
+        return bDur - aDur;
+    });
 
-    const itemStart = item.weekIndex;
-    const itemEnd = item.weekIndex + (item.durationWeeks || 1);
+    const layoutItems: LayoutItem[] = [];
+    const slots: LayoutItem[][] = [];
 
-    while (!placed) {
-      if (!slots[slotIndex]) {
-        slots[slotIndex] = [];
-      }
+    sorted.forEach(item => {
+        let placed = false;
+        let slotIndex = 0;
 
-      const hasCollision = slots[slotIndex].some(existing => {
-        const existingStart = existing.weekIndex;
-        const existingEnd = existing.weekIndex + (existing.durationWeeks || 1);
-        return itemStart < existingEnd && itemEnd > existingStart;
-      });
+        const itemStart = item.startDate ? new Date(item.startDate).getTime() : item.weekIndex;
+        const itemEnd = item.endDate ? new Date(item.endDate).getTime() : (item.startDate ? itemStart + (item.durationWeeks || 1) * 7 * 24 * 60 * 60 * 1000 : item.weekIndex + (item.durationWeeks || 1));
 
-      if (!hasCollision) {
-        const layoutItem: LayoutItem = {
-          ...item,
-          _layout: {
-            top: ROW_PADDING_TOP + slotIndex * (ITEM_HEIGHT + ITEM_GAP),
-            height: ITEM_HEIGHT
-          }
-        };
-        slots[slotIndex].push(layoutItem);
-        layoutItems.push(layoutItem);
-        placed = true;
-      } else {
-        slotIndex++;
-      }
-    }
-  });
+        while (!placed) {
+            if (!slots[slotIndex]) {
+                slots[slotIndex] = [];
+            }
 
-  const maxSlot = slots.length;
-  const contentHeight = ROW_PADDING_TOP + (maxSlot * (ITEM_HEIGHT + ITEM_GAP)) + ROW_PADDING_BOTTOM;
-  const rowHeight = Math.max(MIN_ROW_HEIGHT, contentHeight);
+            const hasCollision = slots[slotIndex].some(existing => {
+                const existingStart = existing.startDate ? new Date(existing.startDate).getTime() : existing.weekIndex;
+                const existingEnd = existing.endDate ? new Date(existing.endDate).getTime() : (existing.startDate ? existingStart + (existing.durationWeeks || 1) * 7 * 24 * 60 * 60 * 1000 : existing.weekIndex + (existing.durationWeeks || 1));
 
-  return { layoutItems, rowHeight };
+                return itemStart < existingEnd && itemEnd > existingStart;
+            });
+
+            if (!hasCollision) {
+                const layoutItem: LayoutItem = {
+                    ...item,
+                    _layout: {
+                        top: ROW_PADDING_TOP + slotIndex * (ITEM_HEIGHT + ITEM_GAP),
+                        height: ITEM_HEIGHT
+                    }
+                };
+                slots[slotIndex].push(layoutItem);
+                layoutItems.push(layoutItem);
+                placed = true;
+            } else {
+                slotIndex++;
+            }
+        }
+    });
+
+    const maxSlot = slots.length;
+    const contentHeight = ROW_PADDING_TOP + (maxSlot * (ITEM_HEIGHT + ITEM_GAP)) + ROW_PADDING_BOTTOM;
+    const rowHeight = Math.max(MIN_ROW_HEIGHT, contentHeight);
+
+    return { layoutItems, rowHeight };
 };
 
 // STRATEGY HORIZON COMPONENT
@@ -91,7 +96,7 @@ const StrategyHorizon: React.FC<{
     onProjectClick: (projectId: string) => void;
     weekCount: number;
 }> = ({ projects, users, roadmapItems, campaignStart, onProjectClick, weekCount }) => {
-    
+
     return (
         <div className="min-w-max bg-white border-b border-zinc-100 relative z-30">
             <div className="flex flex-col">
@@ -104,55 +109,55 @@ const StrategyHorizon: React.FC<{
 
                 {projects.map(project => {
                     if (!project.startDate || !project.targetDate) return null;
-                    
+
                     const start = new Date(project.startDate);
                     const end = new Date(project.targetDate);
                     const campaignS = new Date(campaignStart);
-                    
-                    const diffTime = Math.abs(start.getTime() - campaignS.getTime());
-                    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+
+                    const diffTime = start.getTime() - campaignS.getTime();
+                    const diffDays = diffTime / (1000 * 60 * 60 * 24);
                     const startOffsetPixels = (diffDays / 7) * WEEK_WIDTH;
-                    
-                    const durationTime = Math.abs(end.getTime() - start.getTime());
-                    const durationDays = Math.ceil(durationTime / (1000 * 60 * 60 * 24));
+
+                    const durationTime = end.getTime() - start.getTime();
+                    const durationDays = durationTime / (1000 * 60 * 60 * 24);
                     const widthPixels = Math.max((durationDays / 7) * WEEK_WIDTH, 50);
 
                     const colorClass = project.status === 'On Track' ? 'bg-emerald-500' : project.status === 'At Risk' ? 'bg-amber-500' : project.status === 'Off Track' ? 'bg-red-500' : 'bg-zinc-500';
 
                     return (
                         <div key={project.id} className="flex border-b border-zinc-100 group/row hover:bg-zinc-50 transition-colors h-14">
-                             {/* Project Header (Left) */}
-                             <div className="shrink-0 border-r border-zinc-100 bg-zinc-50/50 p-3 flex flex-col justify-center" style={{ width: LEFT_PANEL_WIDTH }}>
-                                 <div 
+                            {/* Project Header (Left) */}
+                            <div className="shrink-0 border-r border-zinc-100 bg-zinc-50/50 p-3 flex flex-col justify-center" style={{ width: LEFT_PANEL_WIDTH }}>
+                                <div
                                     onClick={() => onProjectClick(project.id)}
                                     className="flex items-center gap-2 cursor-pointer group"
-                                 >
+                                >
                                     <div className={`w-2 h-2 rounded-full ${colorClass}`}></div>
                                     <span className="text-sm font-semibold text-zinc-700 group-hover:text-zinc-900 truncate">{project.name}</span>
-                                 </div>
-                             </div>
+                                </div>
+                            </div>
 
-                             {/* Timeline (Right) */}
-                             <div className="relative flex-1 bg-white overflow-visible">
-                                 {/* Vertical Lines */}
-                                 <div className="absolute inset-0 flex pointer-events-none">
-                                     {Array.from({ length: weekCount }).map((_, i) => (
-                                         <div key={i} className="border-r border-zinc-100 h-full" style={{ width: WEEK_WIDTH }}></div>
-                                     ))}
-                                 </div>
+                            {/* Timeline (Right) */}
+                            <div className="relative flex-1 bg-white overflow-visible">
+                                {/* Vertical Lines */}
+                                <div className="absolute inset-0 flex pointer-events-none">
+                                    {Array.from({ length: weekCount }).map((_, i) => (
+                                        <div key={i} className="border-r border-zinc-100 h-full" style={{ width: WEEK_WIDTH }}></div>
+                                    ))}
+                                </div>
 
-                                 {/* The Main Project Bar */}
-                                 <div 
+                                {/* The Main Project Bar */}
+                                <div
                                     onClick={() => onProjectClick(project.id)}
                                     className="absolute top-3 h-8 rounded-lg bg-white border border-zinc-200 hover:border-zinc-300 shadow-sm cursor-pointer group transition-all flex items-center px-3 gap-2 z-10 hover:z-20"
                                     style={{ left: startOffsetPixels, width: widthPixels }}
-                                 >
-                                     <div className={`w-1.5 h-1.5 rounded-full ${colorClass}`}></div>
-                                     <div className="pl-1 overflow-hidden">
-                                         <div className="text-[10px] font-bold text-zinc-600 truncate">{project.name}</div>
-                                     </div>
-                                 </div>
-                             </div>
+                                >
+                                    <div className={`w-1.5 h-1.5 rounded-full ${colorClass}`}></div>
+                                    <div className="pl-1 overflow-hidden">
+                                        <div className="text-[10px] font-bold text-zinc-600 truncate">{project.name}</div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     );
                 })}
@@ -169,18 +174,37 @@ const RoadmapCard: React.FC<{
     onDragStart: (e: React.DragEvent, id: string) => void;
     onClick: () => void;
     isBacklog?: boolean;
-}> = ({ item, users, projects, isDragging, onDragStart, onClick, isBacklog = false }) => {
-    // For backlog items, styling is static (full width in sidebar). For layout items, use computed layout.
-    const style: React.CSSProperties = isBacklog 
-        ? { position: 'relative', width: '100%' } 
-        : { 
-            position: 'absolute', 
-            left: (item.weekIndex * WEEK_WIDTH) + 4, 
-            width: ((item.durationWeeks || 1) * WEEK_WIDTH) - 8, 
-            top: (item as LayoutItem)._layout?.top ?? 8, 
-            height: (item as LayoutItem)._layout?.height ?? ITEM_HEIGHT 
+    campaignStart?: Date;
+}> = ({ item, users, projects, isDragging, onDragStart, onClick, isBacklog = false, campaignStart }) => {
+
+    // Day precision calculation
+    let left = (item.weekIndex * WEEK_WIDTH) + 4;
+    let width = ((item.durationWeeks || 1) * WEEK_WIDTH) - 8;
+
+    if (!isBacklog && campaignStart && item.startDate) {
+        const start = new Date(item.startDate);
+        const diffTime = start.getTime() - campaignStart.getTime();
+        const diffDays = diffTime / (1000 * 60 * 60 * 24);
+        left = (diffDays / 7) * WEEK_WIDTH + 4;
+
+        if (item.endDate) {
+            const end = new Date(item.endDate);
+            const durationTime = end.getTime() - start.getTime();
+            const durationDays = durationTime / (1000 * 60 * 60 * 24);
+            width = Math.max((durationDays / 7) * WEEK_WIDTH - 8, 40); // Minimum width for visibility
+        }
+    }
+
+    const style: React.CSSProperties = isBacklog
+        ? { position: 'relative', width: '100%' }
+        : {
+            position: 'absolute',
+            left,
+            width,
+            top: (item as LayoutItem)._layout?.top ?? 8,
+            height: (item as LayoutItem)._layout?.height ?? ITEM_HEIGHT
         };
-    
+
     return (
         <div
             draggable
@@ -191,9 +215,9 @@ const RoadmapCard: React.FC<{
         >
             <div className={`absolute left-0 top-0 bottom-0 w-1 rounded-l-md ${item.type === 'NOTE' ? 'bg-pink-400' : 'bg-indigo-500'}`}></div>
             <div className="flex items-center gap-2 w-full overflow-hidden pl-2">
-                 <span className="text-xs font-medium text-zinc-700 truncate flex-1">{item.title}</span>
-                 
-                 <div className="flex items-center gap-2 shrink-0">
+                <span className="text-xs font-medium text-zinc-700 truncate flex-1">{item.title}</span>
+
+                <div className="flex items-center gap-2 shrink-0">
                     {(item.ownerIds && item.ownerIds.length > 0) && (
                         <div className="flex -space-x-1">
                             {item.ownerIds.slice(0, 2).map(uid => {
@@ -207,54 +231,54 @@ const RoadmapCard: React.FC<{
                             })}
                         </div>
                     )}
-                 </div>
+                </div>
             </div>
         </div>
     );
 };
 
 const ChannelCreationModal: React.FC<{
-  onClose: () => void;
-  onSave: (name: string, tags: ChannelTag[]) => void;
+    onClose: () => void;
+    onSave: (name: string, tags: ChannelTag[]) => void;
 }> = ({ onClose, onSave }) => {
-  const [name, setName] = useState('');
-  const [tags, setTags] = useState<ChannelTag[]>([]);
+    const [name, setName] = useState('');
+    const [tags, setTags] = useState<ChannelTag[]>([]);
 
-  const toggleTag = (tag: ChannelTag) => {
-    setTags(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]);
-  };
+    const toggleTag = (tag: ChannelTag) => {
+        setTags(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]);
+    };
 
-  return (
-    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="absolute inset-0" onClick={onClose}></div>
-      <div className="w-[400px] bg-white border border-zinc-100 rounded-xl shadow-2xl relative z-10 p-6">
-        <h3 className="text-lg font-bold mb-4 text-zinc-900">Add Distribution Channel</h3>
-        <input 
-          autoFocus
-          className="w-full border border-zinc-200 rounded p-2 mb-4 text-zinc-900 focus:outline-none focus:border-indigo-500" 
-          placeholder="Channel Name (e.g. SEO)"
-          value={name}
-          onChange={e => setName(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && name && onSave(name, tags)}
-        />
-        <div className="flex gap-2 mb-6">
-           {['Inbound', 'Outbound'].map(t => (
-             <button 
-               key={t}
-               onClick={() => toggleTag(t as ChannelTag)}
-               className={`px-3 py-1 rounded border text-xs font-bold transition-colors ${tags.includes(t as ChannelTag) ? 'bg-zinc-900 text-white border-zinc-900' : 'bg-white text-zinc-500 border-zinc-200 hover:border-zinc-300'}`}
-             >
-               {t}
-             </button>
-           ))}
+    return (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="absolute inset-0" onClick={onClose}></div>
+            <div className="w-[400px] bg-white border border-zinc-100 rounded-xl shadow-2xl relative z-10 p-6">
+                <h3 className="text-lg font-bold mb-4 text-zinc-900">Add Distribution Channel</h3>
+                <input
+                    autoFocus
+                    className="w-full border border-zinc-200 rounded p-2 mb-4 text-zinc-900 focus:outline-none focus:border-indigo-500"
+                    placeholder="Channel Name (e.g. SEO)"
+                    value={name}
+                    onChange={e => setName(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && name && onSave(name, tags)}
+                />
+                <div className="flex gap-2 mb-6">
+                    {['Inbound', 'Outbound'].map(t => (
+                        <button
+                            key={t}
+                            onClick={() => toggleTag(t as ChannelTag)}
+                            className={`px-3 py-1 rounded border text-xs font-bold transition-colors ${tags.includes(t as ChannelTag) ? 'bg-zinc-900 text-white border-zinc-900' : 'bg-white text-zinc-500 border-zinc-200 hover:border-zinc-300'}`}
+                        >
+                            {t}
+                        </button>
+                    ))}
+                </div>
+                <div className="flex justify-end gap-2">
+                    <button onClick={onClose} className="px-4 py-2 text-xs font-bold text-zinc-500 hover:text-zinc-900">Cancel</button>
+                    <button onClick={() => onSave(name, tags)} disabled={!name} className="px-4 py-2 bg-zinc-900 text-white rounded text-xs font-bold disabled:opacity-50 hover:bg-zinc-800">Create</button>
+                </div>
+            </div>
         </div>
-        <div className="flex justify-end gap-2">
-           <button onClick={onClose} className="px-4 py-2 text-xs font-bold text-zinc-500 hover:text-zinc-900">Cancel</button>
-           <button onClick={() => onSave(name, tags)} disabled={!name} className="px-4 py-2 bg-zinc-900 text-white rounded text-xs font-bold disabled:opacity-50 hover:bg-zinc-800">Create</button>
-        </div>
-      </div>
-    </div>
-  );
+    );
 };
 
 const WeekContextModal: React.FC<{
@@ -269,7 +293,7 @@ const WeekContextModal: React.FC<{
     const [newTagTitle, setNewTagTitle] = useState('');
 
     const handleAdd = () => {
-        if(!newTagTitle) return;
+        if (!newTagTitle) return;
         onSaveTag({ weekIndex, label: newTagLabel, title: newTagTitle, color: 'bg-indigo-500' });
         setNewTagTitle('');
     };
@@ -282,15 +306,15 @@ const WeekContextModal: React.FC<{
                     <h3 className="text-lg font-bold">Week {weekIndex + 1} Context</h3>
                     <span className="text-xs text-zinc-400 font-mono">{date.toLocaleDateString()}</span>
                 </div>
-                
+
                 <div className="space-y-2 mb-6">
                     {tags.map(tag => (
                         <div key={tag.id} className="flex items-center justify-between bg-zinc-50 p-2 rounded border border-zinc-100">
-                             <div className="flex items-center gap-2">
-                                 <span className="text-[10px] font-bold bg-zinc-200 px-1.5 py-0.5 rounded text-zinc-600">{tag.label}</span>
-                                 <span className="text-sm font-medium">{tag.title}</span>
-                             </div>
-                             <button onClick={() => onDeleteTag(tag.id)} className="text-zinc-400 hover:text-red-500"><Icons.XCircle className="w-4 h-4"/></button>
+                            <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-bold bg-zinc-200 px-1.5 py-0.5 rounded text-zinc-600">{tag.label}</span>
+                                <span className="text-sm font-medium">{tag.title}</span>
+                            </div>
+                            <button onClick={() => onDeleteTag(tag.id)} className="text-zinc-400 hover:text-red-500"><Icons.XCircle className="w-4 h-4" /></button>
                         </div>
                     ))}
                     {tags.length === 0 && <p className="text-xs text-zinc-400 italic">No tags for this week.</p>}
@@ -299,7 +323,7 @@ const WeekContextModal: React.FC<{
                 <div className="border-t border-zinc-100 pt-4">
                     <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2">Add Marker</label>
                     <div className="flex gap-2 mb-2">
-                        <select 
+                        <select
                             className="bg-zinc-50 border border-zinc-200 rounded p-2 text-xs font-bold focus:outline-none"
                             value={newTagLabel}
                             onChange={e => setNewTagLabel(e.target.value)}
@@ -308,14 +332,14 @@ const WeekContextModal: React.FC<{
                             <option value="THEME">THEME</option>
                             <option value="EVENT">EVENT</option>
                         </select>
-                        <input 
+                        <input
                             className="flex-1 bg-zinc-50 border border-zinc-200 rounded p-2 text-xs focus:outline-none focus:border-indigo-500"
                             placeholder="Title (e.g. Product Hunt)"
                             value={newTagTitle}
                             onChange={e => setNewTagTitle(e.target.value)}
                             onKeyDown={e => e.key === 'Enter' && handleAdd()}
                         />
-                        <button onClick={handleAdd} disabled={!newTagTitle} className="p-2 bg-zinc-900 text-white rounded hover:bg-zinc-700 disabled:opacity-50"><Icons.Plus className="w-4 h-4"/></button>
+                        <button onClick={handleAdd} disabled={!newTagTitle} className="p-2 bg-zinc-900 text-white rounded hover:bg-zinc-700 disabled:opacity-50"><Icons.Plus className="w-4 h-4" /></button>
                     </div>
                 </div>
             </div>
@@ -324,372 +348,380 @@ const WeekContextModal: React.FC<{
 };
 
 export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }) => {
-  const { 
-    campaign, 
-    addRoadmapItem, 
-    addChannel,
-    deleteChannel,
-    updateRoadmapItem,
-    deleteRoadmapItem,
-    deleteProject,
-    addTimelineTag,
-    deleteTimelineTag,
-    users
-  } = useStore();
+    const {
+        campaign,
+        addRoadmapItem,
+        addChannel,
+        deleteChannel,
+        updateRoadmapItem,
+        deleteRoadmapItem,
+        deleteProject,
+        addTimelineTag,
+        deleteTimelineTag,
+        users
+    } = useStore();
 
-  const [showChannelModal, setShowChannelModal] = useState(false);
-  const [activeTicket, setActiveTicket] = useState<{ item: Partial<RoadmapItem> } | null>(null);
-  const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
-  const [activeDashboardChannel, setActiveDashboardChannel] = useState<string | null>(null);
-  const [activeDashboardProject, setActiveDashboardProject] = useState<string | null>(null);
-  const [activeWeekContext, setActiveWeekContext] = useState<number | null>(null);
+    const [showChannelModal, setShowChannelModal] = useState(false);
+    const [activeTicket, setActiveTicket] = useState<{ item: Partial<RoadmapItem> } | null>(null);
+    const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
+    const [activeDashboardChannel, setActiveDashboardChannel] = useState<string | null>(null);
+    const [activeDashboardProject, setActiveDashboardProject] = useState<string | null>(null);
+    const [activeWeekContext, setActiveWeekContext] = useState<number | null>(null);
 
-  const weeks = useMemo(() => {
-    const start = campaign?.startDate ? new Date(campaign.startDate) : new Date();
-    const w = [];
-    for(let i=0; i<12; i++) {
-        const d = new Date(start);
-        d.setDate(d.getDate() + (i*7));
-        w.push(d);
-    }
-    return w;
-  }, [campaign?.startDate]);
+    const weeks = useMemo(() => {
+        const start = campaign?.startDate ? new Date(campaign.startDate) : new Date();
+        const w = [];
+        for (let i = 0; i < 12; i++) {
+            const d = new Date(start);
+            d.setDate(d.getDate() + (i * 7));
+            w.push(d);
+        }
+        return w;
+    }, [campaign?.startDate]);
 
-  const channels = campaign?.channels || [];
-  const projects = campaign?.projects || [];
+    const channels = campaign?.channels || [];
+    const projects = campaign?.projects || [];
 
-  const handleSaveChannel = (name: string, tags: ChannelTag[]) => {
-      addChannel({
-          id: crypto.randomUUID(),
-          name: name,
-          campaignId: campaign?.id || '',
-          tickets: [],
-          principles: [],
-          tags: tags,
-          links: [],
-          notes: []
-      });
-      setShowChannelModal(false);
-  };
+    const handleSaveChannel = (name: string, tags: ChannelTag[]) => {
+        addChannel({
+            id: crypto.randomUUID(),
+            name: name,
+            campaignId: campaign?.id || '',
+            tickets: [],
+            principles: [],
+            tags: tags,
+            links: [],
+            notes: []
+        });
+        setShowChannelModal(false);
+    };
 
-  const handleSaveTicket = (data: any) => {
-      if (!activeTicket) return;
-      
-      const newItem: Partial<RoadmapItem> = {
-          id: data.id,
-          channelId: data.channelId || activeTicket.item.channelId,
-          weekIndex: activeTicket.item.weekIndex,
-          title: data.title,
-          description: data.description,
-          type: 'CONTENT',
-          durationWeeks: data.durationWeeks,
-          ownerIds: data.assigneeId ? [data.assigneeId] : [],
-          priority: data.priority,
-          projectId: data.projectId,
-      };
+    const handleSaveTicket = (data: any) => {
+        if (!activeTicket) return;
 
-      if (newItem.id) {
-          updateRoadmapItem(newItem.id, newItem);
-      } else {
-          addRoadmapItem({
-              id: crypto.randomUUID(),
-              channelId: newItem.channelId,
-              weekIndex: newItem.weekIndex!,
-              title: newItem.title!,
-              description: newItem.description || '',
-              type: newItem.type || 'CONTENT',
-              label: 'Ticket',
-              durationWeeks: newItem.durationWeeks || 1,
-              ownerIds: newItem.ownerIds || [],
-              priority: newItem.priority || 'Medium',
-              projectId: newItem.projectId,
-          });
-      }
-      setActiveTicket(null);
-  };
+        const newItem: Partial<RoadmapItem> = {
+            id: data.id,
+            channelId: data.channelId || activeTicket.item.channelId,
+            weekIndex: activeTicket.item.weekIndex,
+            title: data.title,
+            description: data.description,
+            type: 'CONTENT',
+            durationWeeks: data.durationWeeks,
+            startDate: data.startDate,
+            endDate: data.endDate,
+            ownerIds: data.assigneeId ? [data.assigneeId] : [],
+            priority: data.priority,
+            projectId: data.projectId,
+        };
 
-  const handleDragStart = (e: React.DragEvent, id: string) => {
-      setDraggedItemId(id);
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', id);
-  };
+        if (newItem.id) {
+            updateRoadmapItem(newItem.id, newItem);
+        } else {
+            addRoadmapItem({
+                id: crypto.randomUUID(),
+                channelId: newItem.channelId,
+                weekIndex: newItem.weekIndex!,
+                title: newItem.title!,
+                description: newItem.description || '',
+                type: newItem.type || 'CONTENT',
+                label: 'Ticket',
+                durationWeeks: newItem.durationWeeks || 1,
+                ownerIds: newItem.ownerIds || [],
+                priority: newItem.priority || 'Medium',
+                projectId: newItem.projectId,
+                startDate: newItem.startDate,
+                endDate: newItem.endDate,
+            });
+        }
+        setActiveTicket(null);
+    };
 
-  const handleDrop = (e: React.DragEvent, channelId: string, weekIndex: number) => {
-      e.preventDefault();
-      if (!draggedItemId) return;
-      
-      const updates: Partial<RoadmapItem> = {
-          channelId,
-          weekIndex
-      };
-      updateRoadmapItem(draggedItemId, updates);
-      setDraggedItemId(null);
-  };
+    const handleDragStart = (e: React.DragEvent, id: string) => {
+        setDraggedItemId(id);
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', id);
+    };
 
-  const handleSaveWeekTag = (tag: Partial<TimelineTag>) => {
-      addTimelineTag({
-          id: generateId(),
-          weekIndex: tag.weekIndex!,
-          label: tag.label || 'LAUNCH',
-          title: tag.title || 'Marker',
-          color: tag.color || 'bg-zinc-500'
-      });
-  };
+    const handleDrop = (e: React.DragEvent, channelId: string, weekIndex: number) => {
+        e.preventDefault();
+        if (!draggedItemId) return;
 
-  return (
-    <div className="h-full w-full flex flex-col relative bg-white font-sans text-zinc-900 select-none">
-      
-      <div className="flex flex-1 overflow-hidden relative">
-         
-         {/* MAIN ROADMAP GRID */}
-         <div className="flex-1 overflow-auto bg-white relative custom-scrollbar flex flex-col">
-             
-             {/* TIMELINE HEADER */}
-             <div className="flex sticky top-0 z-40 bg-white min-w-max border-b border-zinc-100">
-                 <div className="shrink-0 border-r border-zinc-100 bg-zinc-50 p-3 flex items-end pb-3" style={{ width: LEFT_PANEL_WIDTH }}>
-                     <span className="text-[10px] font-mono font-bold text-zinc-400 uppercase">Channels</span>
-                 </div>
-                 <div className="flex">
-                     {weeks.map((date, i) => {
-                         const weekTags = (campaign?.timelineTags || []).filter(t => t.weekIndex === i);
-                         
-                         return (
-                            <div 
-                                key={i} 
-                                className="shrink-0 border-r border-zinc-100 p-2 flex flex-col items-center bg-white group cursor-pointer relative hover:bg-zinc-50 transition-colors" 
-                                style={{ width: WEEK_WIDTH }}
-                                onClick={() => setActiveWeekContext(i)}
-                            >
-                                <span className="text-[10px] text-zinc-400 font-mono uppercase mb-1">Week {i+1}</span>
-                                <span className="text-xs text-zinc-700 font-semibold mb-2">{date.toLocaleDateString(undefined, {month:'short', day:'numeric'})}</span>
-                                
-                                <div className="flex flex-col gap-1 w-full px-2">
-                                    {weekTags.map(tag => (
-                                        <div key={tag.id} className={`text-[9px] font-bold text-white px-2 py-0.5 rounded-full flex items-center justify-center truncate shadow-sm ${tag.color}`}>
-                                            <span className="opacity-75 mr-1">{tag.label}:</span>
-                                            {tag.title}
-                                        </div>
-                                    ))}
-                                </div>
-                                
-                                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <div className="p-1 rounded bg-zinc-200 text-zinc-500 hover:text-zinc-900">
-                                        <Icons.Plus className="w-3 h-3" />
-                                    </div>
-                                </div>
-                            </div>
-                        )
-                     })}
-                 </div>
-             </div>
+        const updates: Partial<RoadmapItem> = {
+            channelId,
+            weekIndex
+        };
+        updateRoadmapItem(draggedItemId, updates);
+        setDraggedItemId(null);
+    };
 
-             {/* STRATEGY HORIZON (Projects) */}
-             <StrategyHorizon 
-                projects={projects}
-                roadmapItems={campaign?.roadmapItems || []}
-                users={users}
-                campaignStart={campaign?.startDate ? new Date(campaign.startDate) : new Date()}
-                onProjectClick={setActiveDashboardProject}
-                weekCount={weeks.length}
-             />
+    const handleSaveWeekTag = (tag: Partial<TimelineTag>) => {
+        addTimelineTag({
+            id: generateId(),
+            weekIndex: tag.weekIndex!,
+            label: tag.label || 'LAUNCH',
+            title: tag.title || 'Marker',
+            color: tag.color || 'bg-zinc-500'
+        });
+    };
 
-             {/* LANES CONTAINER */}
-             <div className="min-w-max pb-32">
-                 {channels.map(channel => {
-                     const channelItems = (campaign?.roadmapItems || []).filter(i => i.channelId === channel.id);
-                     const { layoutItems, rowHeight } = calculateLaneLayout(channelItems);
-                     
-                     // Unscheduled items (weekIndex < 0)
-                     const unscheduledItems = channelItems.filter(i => i.weekIndex < 0);
+    return (
+        <div className="h-full w-full flex flex-col relative bg-white font-sans text-zinc-900 select-none">
 
-                     return (
-                         <div key={channel.id} className="flex flex-col border-b border-zinc-100 relative bg-white group/lane">
-                             
-                             {/* Scheduled Row */}
-                             <div className="flex" style={{ minHeight: rowHeight }}>
-                                 {/* LEFT SIDEBAR (Controls & Unassigned) */}
-                                 <div className="shrink-0 border-r border-zinc-100 bg-zinc-50/30 p-4 flex flex-col" style={{ width: LEFT_PANEL_WIDTH }}>
-                                     
-                                    <div 
-                                        className="flex flex-col mb-3 group/header cursor-pointer hover:bg-zinc-100 p-2 -m-2 rounded transition-colors"
-                                        onClick={() => setActiveDashboardChannel(channel.id)}
+            <div className="flex flex-1 overflow-hidden relative">
+
+                {/* MAIN ROADMAP GRID */}
+                <div className="flex-1 overflow-auto bg-white relative custom-scrollbar flex flex-col">
+
+                    {/* TIMELINE HEADER */}
+                    <div className="flex sticky top-0 z-40 bg-white min-w-max border-b border-zinc-100">
+                        <div className="shrink-0 border-r border-zinc-100 bg-zinc-50 p-3 flex items-end pb-3" style={{ width: LEFT_PANEL_WIDTH }}>
+                            <span className="text-[10px] font-mono font-bold text-zinc-400 uppercase">Channels</span>
+                        </div>
+                        <div className="flex">
+                            {weeks.map((date, i) => {
+                                const weekTags = (campaign?.timelineTags || []).filter(t => t.weekIndex === i);
+
+                                return (
+                                    <div
+                                        key={i}
+                                        className="shrink-0 border-r border-zinc-100 p-2 flex flex-col items-center bg-white group cursor-pointer relative hover:bg-zinc-50 transition-colors"
+                                        style={{ width: WEEK_WIDTH }}
+                                        onClick={() => setActiveWeekContext(i)}
                                     >
-                                        <div className="flex items-center gap-2 mb-1">
-                                            <div className="p-1 rounded bg-white border border-zinc-200 text-zinc-600 shadow-sm"><Icons.Zap className="w-3.5 h-3.5" /></div>
-                                            <span className="font-semibold text-sm text-zinc-800">{channel.name}</span>
+                                        <span className="text-[10px] text-zinc-400 font-mono uppercase mb-1">Week {i + 1}</span>
+                                        <span className="text-xs text-zinc-700 font-semibold mb-2">{date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
+
+                                        <div className="flex flex-col gap-1 w-full px-2">
+                                            {weekTags.map(tag => (
+                                                <div key={tag.id} className={`text-[9px] font-bold text-white px-2 py-0.5 rounded-full flex items-center justify-center truncate shadow-sm ${tag.color}`}>
+                                                    <span className="opacity-75 mr-1">{tag.label}:</span>
+                                                    {tag.title}
+                                                </div>
+                                            ))}
                                         </div>
-                                        
-                                        <div className="flex gap-1.5 ml-8">
-                                            {channel.tags?.map(tag => (
-                                                <span 
-                                                    key={tag} 
-                                                    className={`text-[9px] font-medium uppercase tracking-wider text-zinc-500`}
+
+                                        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <div className="p-1 rounded bg-zinc-200 text-zinc-500 hover:text-zinc-900">
+                                                <Icons.Plus className="w-3 h-3" />
+                                            </div>
+                                        </div>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    </div>
+
+                    {/* STRATEGY HORIZON (Projects) */}
+                    <StrategyHorizon
+                        projects={projects}
+                        roadmapItems={campaign?.roadmapItems || []}
+                        users={users}
+                        campaignStart={campaign?.startDate ? new Date(campaign.startDate) : new Date()}
+                        onProjectClick={setActiveDashboardProject}
+                        weekCount={weeks.length}
+                    />
+
+                    {/* LANES CONTAINER */}
+                    <div className="min-w-max pb-32">
+                        {channels.map(channel => {
+                            const channelItems = (campaign?.roadmapItems || []).filter(i => i.channelId === channel.id);
+                            const { layoutItems, rowHeight } = calculateLaneLayout(channelItems);
+
+                            // Unscheduled items (weekIndex < 0)
+                            const unscheduledItems = channelItems.filter(i => i.weekIndex < 0);
+
+                            return (
+                                <div key={channel.id} className="flex flex-col border-b border-zinc-100 relative bg-white group/lane">
+
+                                    {/* Scheduled Row */}
+                                    <div className="flex" style={{ minHeight: rowHeight }}>
+                                        {/* LEFT SIDEBAR (Controls & Unassigned) */}
+                                        <div className="shrink-0 border-r border-zinc-100 bg-zinc-50/30 p-4 flex flex-col" style={{ width: LEFT_PANEL_WIDTH }}>
+
+                                            <div
+                                                className="flex flex-col mb-3 group/header cursor-pointer hover:bg-zinc-100 p-2 -m-2 rounded transition-colors"
+                                                onClick={() => setActiveDashboardChannel(channel.id)}
+                                            >
+                                                <div className="flex items-center gap-2 mb-1">
+                                                    <div className="p-1 rounded bg-white border border-zinc-200 text-zinc-600 shadow-sm"><Icons.Zap className="w-3.5 h-3.5" /></div>
+                                                    <span className="font-semibold text-sm text-zinc-800">{channel.name}</span>
+                                                </div>
+
+                                                <div className="flex gap-1.5 ml-8">
+                                                    {channel.tags?.map(tag => (
+                                                        <span
+                                                            key={tag}
+                                                            className={`text-[9px] font-medium uppercase tracking-wider text-zinc-500`}
+                                                        >
+                                                            {tag}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            </div>
+
+                                            {/* UNASSIGNED / BACKLOG ITEMS */}
+                                            {unscheduledItems.length > 0 && (
+                                                <div className="mt-4 border-t border-zinc-200/50 pt-3 flex-1">
+                                                    <div className="text-[9px] font-bold uppercase tracking-wider text-zinc-400 mb-2 pl-1">Unassigned</div>
+                                                    <div className="flex flex-col gap-2">
+                                                        {unscheduledItems.map(item => (
+                                                            <RoadmapCard
+                                                                key={item.id}
+                                                                item={item}
+                                                                users={users}
+                                                                projects={projects}
+                                                                isDragging={draggedItemId === item.id}
+                                                                onDragStart={handleDragStart}
+                                                                onClick={() => setActiveTicket({ item })}
+                                                                isBacklog={true}
+                                                                campaignStart={campaign?.startDate ? new Date(campaign.startDate) : new Date()}
+                                                            />
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* RIGHT SIDE (Grid) */}
+                                        <div className="flex relative">
+                                            {weeks.map((_, i) => (
+                                                <div
+                                                    key={i}
+                                                    className="border-r border-zinc-100 h-full relative group/cell hover:bg-zinc-50 transition-colors"
+                                                    style={{ width: WEEK_WIDTH }}
+                                                    onDragOver={(e) => e.preventDefault()}
+                                                    onDrop={(e) => handleDrop(e, channel.id, i)}
+                                                    onClick={() => {
+                                                        setActiveTicket({
+                                                            item: { channelId: channel.id, weekIndex: i, title: '' }
+                                                        })
+                                                    }}
                                                 >
-                                                    {tag}
-                                                </span>
+                                                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/cell:opacity-100 pointer-events-none">
+                                                        <div className="w-6 h-6 rounded bg-zinc-100 flex items-center justify-center text-zinc-400">
+                                                            <Icons.Plus className="w-3 h-3" />
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+
+                                            {/* Render Items */}
+                                            {layoutItems.map(item => (
+                                                <RoadmapCard
+                                                    key={item.id}
+                                                    item={item}
+                                                    users={users}
+                                                    projects={projects}
+                                                    isDragging={draggedItemId === item.id}
+                                                    onDragStart={handleDragStart}
+                                                    onClick={() => setActiveTicket({ item })}
+                                                    campaignStart={campaign?.startDate ? new Date(campaign.startDate) : new Date()}
+                                                />
                                             ))}
                                         </div>
                                     </div>
+                                </div>
+                            );
+                        })}
 
-                                    {/* UNASSIGNED / BACKLOG ITEMS */}
-                                    {unscheduledItems.length > 0 && (
-                                        <div className="mt-4 border-t border-zinc-200/50 pt-3 flex-1">
-                                            <div className="text-[9px] font-bold uppercase tracking-wider text-zinc-400 mb-2 pl-1">Unassigned</div>
-                                            <div className="flex flex-col gap-2">
-                                                {unscheduledItems.map(item => (
-                                                    <RoadmapCard 
-                                                        key={item.id} 
-                                                        item={item} 
-                                                        users={users} 
-                                                        projects={projects}
-                                                        isDragging={draggedItemId === item.id}
-                                                        onDragStart={handleDragStart}
-                                                        onClick={() => setActiveTicket({ item })}
-                                                        isBacklog={true}
-                                                    />
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-                                 </div>
-
-                                 {/* RIGHT SIDE (Grid) */}
-                                 <div className="flex relative">
-                                     {weeks.map((_, i) => (
-                                         <div 
-                                             key={i} 
-                                             className="border-r border-zinc-100 h-full relative group/cell hover:bg-zinc-50 transition-colors"
-                                             style={{ width: WEEK_WIDTH }}
-                                             onDragOver={(e) => e.preventDefault()}
-                                             onDrop={(e) => handleDrop(e, channel.id, i)}
-                                             onClick={() => {
-                                                 setActiveTicket({ 
-                                                     item: { channelId: channel.id, weekIndex: i, title: '' } 
-                                                 })
-                                             }}
-                                         >
-                                             <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/cell:opacity-100 pointer-events-none">
-                                                 <div className="w-6 h-6 rounded bg-zinc-100 flex items-center justify-center text-zinc-400">
-                                                     <Icons.Plus className="w-3 h-3" />
-                                                 </div>
-                                             </div>
-                                         </div>
-                                     ))}
-
-                                     {/* Render Items */}
-                                     {layoutItems.map(item => (
-                                         <RoadmapCard 
-                                             key={item.id} 
-                                             item={item} 
-                                             users={users} 
-                                             projects={projects}
-                                             isDragging={draggedItemId === item.id}
-                                             onDragStart={handleDragStart}
-                                             onClick={() => setActiveTicket({ item })}
-                                         />
-                                     ))}
-                                 </div>
-                             </div>
-                         </div>
-                     );
-                 })}
-
-                 {/* ADD CHANNEL BUTTON */}
-                 <div className="p-4 bg-white sticky left-0 w-full border-t border-zinc-100">
-                     <button 
-                        onClick={() => setShowChannelModal(true)}
-                        className="flex items-center gap-2 px-4 py-2 rounded-lg border border-dashed border-zinc-300 text-zinc-500 hover:text-zinc-900 hover:border-zinc-400 hover:bg-zinc-50 transition-all text-xs font-bold uppercase tracking-wider"
-                     >
-                         <Icons.Plus className="w-4 h-4" />
-                         Add Distribution Channel
-                     </button>
-                 </div>
-             </div>
-         </div>
-      </div>
-      
-      {/* NAVIGATION OVERLAY - Only if onNext/onBack provided (Wizard Mode) */}
-      {(onNext || onBack) && (
-          <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-50 flex gap-2">
-                {onBack && (
-                    <button onClick={onBack} className="px-6 py-2 bg-white border border-zinc-200 text-zinc-600 rounded-full shadow-lg font-bold text-sm hover:bg-zinc-50 transition-all">
-                        Back
-                    </button>
-                )}
-                {onNext && (
-                    <button onClick={onNext} className="px-8 py-2 bg-zinc-900 text-white rounded-full shadow-lg font-bold text-sm hover:bg-zinc-800 hover:scale-105 transition-all flex items-center gap-2">
-                        Next Phase <Icons.ChevronRight className="w-4 h-4" />
-                    </button>
-                )}
-          </div>
-      )}
-
-      {/* MODALS */}
-      {showChannelModal && (
-          <ChannelCreationModal 
-             onClose={() => setShowChannelModal(false)} 
-             onSave={handleSaveChannel} 
-          />
-      )}
-
-      {activeTicket && (
-          <TicketModal 
-              initialData={{
-                  id: activeTicket.item.id,
-                  title: activeTicket.item.title,
-                  description: activeTicket.item.description,
-                  priority: activeTicket.item.priority,
-                  assigneeId: activeTicket.item.ownerIds?.[0],
-                  channelId: activeTicket.item.channelId,
-                  projectId: activeTicket.item.projectId,
-                  durationWeeks: activeTicket.item.durationWeeks,
-              }}
-              context={{ channels, projects, users }}
-              onClose={() => setActiveTicket(null)}
-              onSave={handleSaveTicket}
-              onDelete={deleteRoadmapItem}
-          />
-      )}
-      
-      {activeWeekContext !== null && (
-          <WeekContextModal 
-             weekIndex={activeWeekContext}
-             date={weeks[activeWeekContext]}
-             tags={(campaign?.timelineTags || []).filter(t => t.weekIndex === activeWeekContext)}
-             onClose={() => setActiveWeekContext(null)}
-             onSaveTag={handleSaveWeekTag}
-             onDeleteTag={deleteTimelineTag}
-          />
-      )}
-      
-      {activeDashboardChannel && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/20 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="absolute inset-0" onClick={() => setActiveDashboardChannel(null)}></div>
-            <div className="w-[90vw] h-[85vh] bg-white border border-zinc-100 rounded-xl shadow-2xl relative z-10 overflow-hidden">
-                <ChannelDashboard 
-                    channelId={activeDashboardChannel} 
-                    isModal={true}
-                    onClose={() => setActiveDashboardChannel(null)}
-                    onDelete={() => { deleteChannel(activeDashboardChannel!); setActiveDashboardChannel(null); }}
-                />
+                        {/* ADD CHANNEL BUTTON */}
+                        <div className="p-4 bg-white sticky left-0 w-full border-t border-zinc-100">
+                            <button
+                                onClick={() => setShowChannelModal(true)}
+                                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-dashed border-zinc-300 text-zinc-500 hover:text-zinc-900 hover:border-zinc-400 hover:bg-zinc-50 transition-all text-xs font-bold uppercase tracking-wider"
+                            >
+                                <Icons.Plus className="w-4 h-4" />
+                                Add Distribution Channel
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
-        </div>
-      )}
 
-      {activeDashboardProject && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/20 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="absolute inset-0" onClick={() => setActiveDashboardProject(null)}></div>
-            <div className="w-[90vw] h-[85vh] bg-white border border-zinc-100 rounded-xl shadow-2xl relative z-10 overflow-hidden">
-                <ProjectDashboard 
-                    projectId={activeDashboardProject} 
-                    isModal={true}
-                    onClose={() => setActiveDashboardProject(null)}
-                    onDelete={() => { deleteProject(activeDashboardProject!); setActiveDashboardProject(null); }}
+            {/* NAVIGATION OVERLAY - Only if onNext/onBack provided (Wizard Mode) */}
+            {(onNext || onBack) && (
+                <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-50 flex gap-2">
+                    {onBack && (
+                        <button onClick={onBack} className="px-6 py-2 bg-white border border-zinc-200 text-zinc-600 rounded-full shadow-lg font-bold text-sm hover:bg-zinc-50 transition-all">
+                            Back
+                        </button>
+                    )}
+                    {onNext && (
+                        <button onClick={onNext} className="px-8 py-2 bg-zinc-900 text-white rounded-full shadow-lg font-bold text-sm hover:bg-zinc-800 hover:scale-105 transition-all flex items-center gap-2">
+                            Next Phase <Icons.ChevronRight className="w-4 h-4" />
+                        </button>
+                    )}
+                </div>
+            )}
+
+            {/* MODALS */}
+            {showChannelModal && (
+                <ChannelCreationModal
+                    onClose={() => setShowChannelModal(false)}
+                    onSave={handleSaveChannel}
                 />
-            </div>
-        </div>
-      )}
+            )}
 
-    </div>
-  );
+            {activeTicket && (
+                <TicketModal
+                    initialData={{
+                        id: activeTicket.item.id,
+                        title: activeTicket.item.title,
+                        description: activeTicket.item.description,
+                        priority: activeTicket.item.priority,
+                        assigneeId: activeTicket.item.ownerIds?.[0],
+                        channelId: activeTicket.item.channelId,
+                        projectId: activeTicket.item.projectId,
+                        durationWeeks: activeTicket.item.durationWeeks,
+                        startDate: activeTicket.item.startDate,
+                        endDate: activeTicket.item.endDate,
+                    }}
+                    context={{ channels, projects, users }}
+                    onClose={() => setActiveTicket(null)}
+                    onSave={handleSaveTicket}
+                    onDelete={deleteRoadmapItem}
+                />
+            )}
+
+            {activeWeekContext !== null && (
+                <WeekContextModal
+                    weekIndex={activeWeekContext}
+                    date={weeks[activeWeekContext]}
+                    tags={(campaign?.timelineTags || []).filter(t => t.weekIndex === activeWeekContext)}
+                    onClose={() => setActiveWeekContext(null)}
+                    onSaveTag={handleSaveWeekTag}
+                    onDeleteTag={deleteTimelineTag}
+                />
+            )}
+
+            {activeDashboardChannel && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/20 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="absolute inset-0" onClick={() => setActiveDashboardChannel(null)}></div>
+                    <div className="w-[90vw] h-[85vh] bg-white border border-zinc-100 rounded-xl shadow-2xl relative z-10 overflow-hidden">
+                        <ChannelDashboard
+                            channelId={activeDashboardChannel}
+                            isModal={true}
+                            onClose={() => setActiveDashboardChannel(null)}
+                            onDelete={() => { deleteChannel(activeDashboardChannel!); setActiveDashboardChannel(null); }}
+                        />
+                    </div>
+                </div>
+            )}
+
+            {activeDashboardProject && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/20 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="absolute inset-0" onClick={() => setActiveDashboardProject(null)}></div>
+                    <div className="w-[90vw] h-[85vh] bg-white border border-zinc-100 rounded-xl shadow-2xl relative z-10 overflow-hidden">
+                        <ProjectDashboard
+                            projectId={activeDashboardProject}
+                            isModal={true}
+                            onClose={() => setActiveDashboardProject(null)}
+                            onDelete={() => { deleteProject(activeDashboardProject!); setActiveDashboardProject(null); }}
+                        />
+                    </div>
+                </div>
+            )}
+
+        </div>
+    );
 };

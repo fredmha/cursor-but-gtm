@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { useStore, generateId } from '../store';
 import { Icons, PRIORITIES } from '../constants';
 import { GoogleGenAI, Content, Part } from "@google/genai";
@@ -10,6 +10,7 @@ import {
 } from '../services/reviewAgent';
 import { TicketStatus, ChatMessage, ChatPart } from '../types';
 import { AgentTicketCard } from './AgentTicketCard';
+import { buildReviewAgentTestCampaign } from '../fixtures/reviewAgentFixture';
 
 interface PendingAction {
     id: string; 
@@ -19,26 +20,62 @@ interface PendingAction {
     status: 'PENDING' | 'APPROVED' | 'REJECTED';
 }
 
-export const ReviewMode: React.FC = () => {
+interface TaskCallout {
+    id: string;
+    title?: string;
+    ticketIds: string[];
+}
+
+interface ReviewModeProps {
+    initialMode?: 'DAILY' | 'WEEKLY';
+}
+
+export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' }) => {
     const { 
-        campaign, currentUser, 
+        campaign, currentUser, setCampaign,
         updateTicket, updateProjectTicket, deleteTicket, deleteProjectTicket, addTicket, addProjectTicket,
         updateChatHistory, completeReviewSession, users
     } = useStore();
 
-    const [mode, setMode] = useState<'DAILY' | 'WEEKLY'>('DAILY');
+    const [mode, setMode] = useState<'DAILY' | 'WEEKLY'>(initialMode);
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [input, setInput] = useState('');
     const [isTyping, setIsTyping] = useState(false);
     const [pendingActions, setPendingActions] = useState<PendingAction[]>([]);
+    const [clientError, setClientError] = useState<string | null>(null);
+    const [taskCallouts, setTaskCallouts] = useState<TaskCallout[]>([]);
     
-    const client = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const apiKey = "AIzaSyAvHokD5AdbLMPbKyFEgpTfq0HI7NTJ4cQ";
+    const client = useMemo(() => {
+        if (!apiKey) return null;
+        try {
+            return new GoogleGenAI({ apiKey });
+        } catch (e) {
+            console.error("Gemini Client Error:", e);
+            return null;
+        }
+    }, [apiKey]);
     const chatRef = useRef<any>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
+    const isDev = import.meta.env.DEV;
+
+    useEffect(() => {
+        if (!apiKey) {
+            setClientError(null);
+            return;
+        }
+        setClientError(client ? null : "Failed to initialize AI client. Check your API key.");
+    }, [apiKey, client]);
+
+    const clearChatState = () => {
+        setMessages([]);
+        setPendingActions([]);
+        setTaskCallouts([]);
+    };
 
     // --- Load History / Init Session ---
     useEffect(() => {
-        if (!campaign) return;
+        if (!campaign || !client) return;
         
         // Load existing history or start fresh
         const history = mode === 'DAILY' ? campaign.dailyChatHistory : campaign.weeklyChatHistory;
@@ -99,6 +136,41 @@ export const ReviewMode: React.FC = () => {
         }
     };
 
+    const handleResetChat = () => {
+        clearChatState();
+        updateChatHistory(mode, []);
+        if (campaign && client) {
+            initChat([]);
+        }
+    };
+
+    const handleLoadTestData = () => {
+        const testCampaign = buildReviewAgentTestCampaign();
+        setCampaign(testCampaign);
+        clearChatState();
+    };
+
+    const handleShowTasksCalls = async (calls: PendingAction[]) => {
+        if (!chatRef.current) return;
+        setIsTyping(true);
+        for (const call of calls) {
+            try {
+                const toolResponse = {
+                    functionResponse: {
+                        name: call.name,
+                        id: call.callId || call.id,
+                        response: { result: "Displayed tasks in chat." }
+                    }
+                };
+                const response = await chatRef.current.sendMessage({ message: [toolResponse] });
+                processResponse(response);
+            } catch (e) {
+                console.error("Show tasks tool error:", e);
+            }
+        }
+        setIsTyping(false);
+    };
+
     // --- Processing ---
     const processResponse = (response: any) => {
         if (response.candidates && response.candidates[0]) {
@@ -128,14 +200,27 @@ export const ReviewMode: React.FC = () => {
                     args: tc.functionCall!.args,
                     status: 'PENDING' as const
                 }));
-                setPendingActions(prev => [...prev, ...newActions]);
+                setPendingActions(prev => [...prev, ...newActions.filter(a => a.name !== 'show_tasks')]);
+
+                const showTaskCalls = newActions.filter(a => a.name === 'show_tasks');
+                if (showTaskCalls.length > 0) {
+                    setTaskCallouts(prev => [
+                        ...prev,
+                        ...showTaskCalls.map(call => ({
+                            id: call.id,
+                            title: call.args?.title,
+                            ticketIds: Array.isArray(call.args?.ticketIds) ? call.args.ticketIds : []
+                        }))
+                    ]);
+                    void handleShowTasksCalls(showTaskCalls);
+                }
             }
         }
     };
 
     // --- Interaction ---
     const handleSend = async () => {
-        if (!input.trim() || isTyping) return;
+        if (!input.trim() || isTyping || !chatRef.current) return;
         const text = input;
         setInput('');
 
@@ -226,10 +311,14 @@ export const ReviewMode: React.FC = () => {
             // --- DAILY ACTIONS ---
             else if (name === 'update_status') {
                 const { ticketId, status } = args;
-                // Simplified lookup for brevity, ideally share logic
                 const cT = (campaign?.channels || []).flatMap(c => c.tickets).find(t => t.id === ticketId);
                 if (cT && cT.channelId) {
                     updateTicket(cT.channelId, ticketId, { status: status === 'Done' ? TicketStatus.Done : TicketStatus.InProgress });
+                } else {
+                    const pT = (campaign?.projects || []).flatMap(p => p.tickets).find(t => t.id === ticketId);
+                    if (pT && pT.projectId) {
+                        updateProjectTicket(pT.projectId, ticketId, { status: status === 'Done' ? TicketStatus.Done : TicketStatus.InProgress });
+                    }
                 }
             }
         }
@@ -244,6 +333,7 @@ export const ReviewMode: React.FC = () => {
                     response: { result: approved ? "Action executed." : "User rejected." }
                 }
             };
+            if (!chatRef.current) return;
             const response = await chatRef.current.sendMessage({ message: [toolResponse] });
             processResponse(response);
         } catch (e) {
@@ -256,10 +346,20 @@ export const ReviewMode: React.FC = () => {
     // --- Render ---
     useEffect(() => {
         scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages, pendingActions, isTyping]);
+    }, [messages, pendingActions, taskCallouts, isTyping]);
 
     return (
         <div className="h-full flex flex-col bg-white">
+            {!apiKey && (
+                <div className="px-6 py-4 bg-amber-50 border-b border-amber-100 text-amber-800 text-sm">
+                    Gemini API key is missing. Set `GEMINI_API_KEY` in your environment to enable the Review Agent.
+                </div>
+            )}
+            {clientError && (
+                <div className="px-6 py-4 bg-red-50 border-b border-red-100 text-red-700 text-sm">
+                    {clientError}
+                </div>
+            )}
             
             {/* Top Bar: Mode Switcher */}
             <div className="shrink-0 h-16 border-b border-zinc-100 flex items-center justify-between px-8 bg-white/80 backdrop-blur-md sticky top-0 z-20">
@@ -288,6 +388,22 @@ export const ReviewMode: React.FC = () => {
                     <span className="text-[10px] font-mono text-zinc-400">
                         LAST SESSION: {mode === 'DAILY' ? (campaign?.lastDailyStandup ? new Date(campaign.lastDailyStandup).toLocaleDateString() : 'NEVER') : (campaign?.lastWeeklyReview ? new Date(campaign.lastWeeklyReview).toLocaleDateString() : 'NEVER')}
                     </span>
+                    {isDev && (
+                        <button
+                            onClick={handleLoadTestData}
+                            className="px-2 py-1 text-[10px] font-bold text-zinc-600 bg-zinc-100 rounded-md hover:bg-zinc-200 transition-colors"
+                            title="Load test data"
+                        >
+                            Load Test Data
+                        </button>
+                    )}
+                    <button
+                        onClick={handleResetChat}
+                        className="px-2 py-1 text-[10px] font-bold text-zinc-500 hover:text-zinc-900 bg-zinc-100 rounded-md transition-colors"
+                        title="Reset chat"
+                    >
+                        Reset Chat
+                    </button>
                     <button 
                         onClick={() => completeReviewSession(mode)}
                         className="p-2 text-zinc-400 hover:text-emerald-500 transition-colors"
@@ -360,6 +476,51 @@ export const ReviewMode: React.FC = () => {
                             )}
                         </div>
                     ))}
+
+                    {/* Task Callouts */}
+                    {taskCallouts.map(callout => {
+                        const tickets = [
+                            ...(campaign?.channels || []).flatMap(c => c.tickets),
+                            ...(campaign?.projects || []).flatMap(p => p.tickets)
+                        ].filter(t => callout.ticketIds.includes(t.id));
+
+                        return (
+                            <div key={callout.id} className="my-6">
+                                {callout.title && (
+                                    <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2">
+                                        {callout.title}
+                                    </div>
+                                )}
+                                {tickets.map(t => (
+                                    <AgentTicketCard
+                                        key={t.id}
+                                        actionId={t.id}
+                                        args={{
+                                            title: t.title,
+                                            description: t.description,
+                                            priority: t.priority,
+                                            channelId: t.channelId,
+                                            projectId: t.projectId,
+                                            assigneeId: t.assigneeId
+                                        }}
+                                        status="PENDING"
+                                        users={users}
+                                        channels={campaign?.channels || []}
+                                        projects={campaign?.projects || []}
+                                        onUpdate={(updates) => {
+                                            if (t.channelId) {
+                                                updateTicket(t.channelId, t.id, updates);
+                                            } else if (t.projectId) {
+                                                updateProjectTicket(t.projectId, t.id, updates);
+                                            }
+                                        }}
+                                        onApprove={() => {}}
+                                        onReject={() => {}}
+                                    />
+                                ))}
+                            </div>
+                        );
+                    })}
 
                     {isTyping && (
                         <div className="flex justify-start mb-6">
