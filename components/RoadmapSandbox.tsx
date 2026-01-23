@@ -27,18 +27,34 @@ interface LayoutItem extends RoadmapItem {
     };
 }
 
-const calculateLaneLayout = (items: RoadmapItem[]): { layoutItems: LayoutItem[], rowHeight: number } => {
+const calculateLaneLayout = (items: RoadmapItem[], campaignStart?: Date): { layoutItems: LayoutItem[], rowHeight: number } => {
     // Only calculate layout for scheduled items
     const scheduledItems = items.filter(i => i.weekIndex >= 0 || i.startDate);
 
-    const sorted = [...scheduledItems].sort((a, b) => {
-        const aStart = a.startDate ? new Date(a.startDate).getTime() : a.weekIndex;
-        const bStart = b.startDate ? new Date(b.startDate).getTime() : b.weekIndex;
-        if (aStart !== bStart) return aStart - bStart;
+    const getNormalizedTime = (item: RoadmapItem) => {
+        if (item.startDate && campaignStart) {
+            const start = new Date(item.startDate);
+            const diffTime = start.getTime() - campaignStart.getTime();
+            const startWeek = diffTime / (1000 * 60 * 60 * 24 * 7);
 
-        const aDur = a.durationWeeks || 1;
-        const bDur = b.durationWeeks || 1;
-        return bDur - aDur;
+            let endWeek = startWeek + (item.durationWeeks || 1);
+            if (item.endDate) {
+                const end = new Date(item.endDate);
+                endWeek = (end.getTime() - campaignStart.getTime()) / (1000 * 60 * 60 * 24 * 7);
+            }
+            return { start: startWeek, end: endWeek };
+        }
+        return {
+            start: item.weekIndex,
+            end: item.weekIndex + (item.durationWeeks || 1)
+        };
+    };
+
+    const sorted = [...scheduledItems].sort((a, b) => {
+        const aTime = getNormalizedTime(a);
+        const bTime = getNormalizedTime(b);
+        if (aTime.start !== bTime.start) return aTime.start - bTime.start;
+        return (bTime.end - bTime.start) - (aTime.end - aTime.start);
     });
 
     const layoutItems: LayoutItem[] = [];
@@ -47,9 +63,7 @@ const calculateLaneLayout = (items: RoadmapItem[]): { layoutItems: LayoutItem[],
     sorted.forEach(item => {
         let placed = false;
         let slotIndex = 0;
-
-        const itemStart = item.startDate ? new Date(item.startDate).getTime() : item.weekIndex;
-        const itemEnd = item.endDate ? new Date(item.endDate).getTime() : (item.startDate ? itemStart + (item.durationWeeks || 1) * 7 * 24 * 60 * 60 * 1000 : item.weekIndex + (item.durationWeeks || 1));
+        const itemTime = getNormalizedTime(item);
 
         while (!placed) {
             if (!slots[slotIndex]) {
@@ -57,10 +71,8 @@ const calculateLaneLayout = (items: RoadmapItem[]): { layoutItems: LayoutItem[],
             }
 
             const hasCollision = slots[slotIndex].some(existing => {
-                const existingStart = existing.startDate ? new Date(existing.startDate).getTime() : existing.weekIndex;
-                const existingEnd = existing.endDate ? new Date(existing.endDate).getTime() : (existing.startDate ? existingStart + (existing.durationWeeks || 1) * 7 * 24 * 60 * 60 * 1000 : existing.weekIndex + (existing.durationWeeks || 1));
-
-                return itemStart < existingEnd && itemEnd > existingStart;
+                const existingTime = getNormalizedTime(existing);
+                return itemTime.start < existingTime.end && itemTime.end > existingTime.start;
             });
 
             if (!hasCollision) {
@@ -110,17 +122,19 @@ const StrategyHorizon: React.FC<{
                 {projects.map(project => {
                     if (!project.startDate || !project.targetDate) return null;
 
-                    const start = new Date(project.startDate);
+                    const startRaw = new Date(project.startDate);
                     const end = new Date(project.targetDate);
                     const campaignS = new Date(campaignStart);
 
+                    if (end <= campaignS) return null;
+
+                    const start = startRaw < campaignS ? campaignS : startRaw;
+
                     const diffTime = start.getTime() - campaignS.getTime();
-                    const diffDays = diffTime / (1000 * 60 * 60 * 24);
-                    const startOffsetPixels = (diffDays / 7) * WEEK_WIDTH;
+                    const startOffsetPixels = (diffTime / (1000 * 60 * 60 * 24 * 7)) * WEEK_WIDTH;
 
                     const durationTime = end.getTime() - start.getTime();
-                    const durationDays = durationTime / (1000 * 60 * 60 * 24);
-                    const widthPixels = Math.max((durationDays / 7) * WEEK_WIDTH, 50);
+                    const widthPixels = Math.max((durationTime / (1000 * 60 * 60 * 24 * 7)) * WEEK_WIDTH, 40);
 
                     const colorClass = project.status === 'On Track' ? 'bg-emerald-500' : project.status === 'At Risk' ? 'bg-amber-500' : project.status === 'Off Track' ? 'bg-red-500' : 'bg-zinc-500';
 
@@ -182,16 +196,19 @@ const RoadmapCard: React.FC<{
     let width = ((item.durationWeeks || 1) * WEEK_WIDTH) - 8;
 
     if (!isBacklog && campaignStart && item.startDate) {
-        const start = new Date(item.startDate);
-        const diffTime = start.getTime() - campaignStart.getTime();
-        const diffDays = diffTime / (1000 * 60 * 60 * 24);
-        left = (diffDays / 7) * WEEK_WIDTH + 4;
+        const startRaw = new Date(item.startDate);
+        const campaignS = new Date(campaignStart);
+        const end = item.endDate ? new Date(item.endDate) : null;
 
-        if (item.endDate) {
-            const end = new Date(item.endDate);
+        if (end && end <= campaignS) return null;
+
+        const start = startRaw < campaignS ? campaignS : startRaw;
+        const diffTime = start.getTime() - campaignS.getTime();
+        left = (diffTime / (1000 * 60 * 60 * 24 * 7)) * WEEK_WIDTH + 4;
+
+        if (end) {
             const durationTime = end.getTime() - start.getTime();
-            const durationDays = durationTime / (1000 * 60 * 60 * 24);
-            width = Math.max((durationDays / 7) * WEEK_WIDTH - 8, 40); // Minimum width for visibility
+            width = Math.max((durationTime / (1000 * 60 * 60 * 24 * 7)) * WEEK_WIDTH - 8, 40);
         }
     }
 
@@ -525,7 +542,8 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
                     <div className="min-w-max pb-32">
                         {channels.map(channel => {
                             const channelItems = (campaign?.roadmapItems || []).filter(i => i.channelId === channel.id);
-                            const { layoutItems, rowHeight } = calculateLaneLayout(channelItems);
+                            const campStart = campaign?.startDate ? new Date(campaign.startDate) : new Date();
+                            const { layoutItems, rowHeight } = calculateLaneLayout(channelItems, campStart);
 
                             // Unscheduled items (weekIndex < 0)
                             const unscheduledItems = channelItems.filter(i => i.weekIndex < 0);

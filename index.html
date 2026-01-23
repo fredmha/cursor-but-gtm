@@ -1,69 +1,79 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>GTM OS</title>
-    <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
-    <script>
-      tailwind.config = {
-        theme: {
-          extend: {
-            colors: {
-              background: '#ffffff', // White
-              surface: '#fafafa', // Zinc-50
-              surfaceHighlight: '#f4f4f5', // Zinc-100
-              border: '#f4f4f5', // Zinc-100 (Softer than previous #e4e4e7)
-              primary: '#27272a', // Zinc-800 (Softer than #18181b)
-              secondary: '#71717a', // Zinc-500
-              accent: '#4f46e5', // Indigo-600
-              success: '#10b981', // Emerald-500
-              warning: '#f59e0b', // Amber-500
-              danger: '#ef4444', // Red-500
-            },
-            fontFamily: {
-              sans: ['Inter', 'sans-serif'],
-              mono: ['JetBrains Mono', 'monospace'],
-            },
-            boxShadow: {
-                'sm': '0 1px 2px 0 rgb(0 0 0 / 0.02)', // Softer shadow
-                'md': '0 4px 6px -1px rgb(0 0 0 / 0.03), 0 2px 4px -2px rgb(0 0 0 / 0.02)',
-                'lg': '0 10px 15px -3px rgb(0 0 0 / 0.03), 0 4px 6px -4px rgb(0 0 0 / 0.02)',
-                'xl': '0 20px 25px -5px rgb(0 0 0 / 0.03), 0 8px 10px -6px rgb(0 0 0 / 0.01)',
-            }
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GTM OS</title>
+  <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            background: '#ffffff', // White
+            surface: '#fafafa', // Zinc-50
+            surfaceHighlight: '#f4f4f5', // Zinc-100
+            border: '#f4f4f5', // Zinc-100 (Softer than previous #e4e4e7)
+            primary: '#27272a', // Zinc-800 (Softer than #18181b)
+            secondary: '#71717a', // Zinc-500
+            accent: '#4f46e5', // Indigo-600
+            success: '#10b981', // Emerald-500
+            warning: '#f59e0b', // Amber-500
+            danger: '#ef4444', // Red-500
           },
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            serif: ['Lora', 'serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          boxShadow: {
+            'sm': '0 1px 2px 0 rgb(0 0 0 / 0.02)', // Softer shadow
+            'md': '0 4px 6px -1px rgb(0 0 0 / 0.03), 0 2px 4px -2px rgb(0 0 0 / 0.02)',
+            'lg': '0 10px 15px -3px rgb(0 0 0 / 0.03), 0 4px 6px -4px rgb(0 0 0 / 0.02)',
+            'xl': '0 20px 25px -5px rgb(0 0 0 / 0.03), 0 8px 10px -6px rgb(0 0 0 / 0.01)',
+          }
         },
-      };
-    </script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <style>
-      body {
-        background-color: #ffffff;
-        color: #27272a;
-        font-family: 'Inter', sans-serif;
-        -webkit-font-smoothing: antialiased;
-      }
-      /* Custom scrollbar for a cleaner feel - Light Mode */
-      ::-webkit-scrollbar {
-        width: 6px;
-        height: 6px;
-      }
-      ::-webkit-scrollbar-track {
-        background: transparent;
-      }
-      ::-webkit-scrollbar-thumb {
-        background: #e4e4e7; /* Zinc-200 */
-        border-radius: 3px;
-      }
-      ::-webkit-scrollbar-thumb:hover {
-        background: #d4d4d8; /* Zinc-300 */
-      }
-      
-      .custom-scrollbar::-webkit-scrollbar {
-        width: 4px;
-        height: 4px;
-      }
-    </style>
+      },
+    };
+  </script>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Lora:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+    rel="stylesheet">
+  <style>
+    body {
+      background-color: #ffffff;
+      color: #27272a;
+      font-family: 'Inter', sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Custom scrollbar for a cleaner feel - Light Mode */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #e4e4e7;
+      /* Zinc-200 */
+      border-radius: 3px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #d4d4d8;
+      /* Zinc-300 */
+    }
+
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 4px;
+      height: 4px;
+    }
+  </style>
   <script type="importmap">
 {
   "imports": {
@@ -76,8 +86,10 @@
 }
 </script>
 </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/index.tsx"></script>
-  </body>
+
+<body>
+  <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+
 </html>

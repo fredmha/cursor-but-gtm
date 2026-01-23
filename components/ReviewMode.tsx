@@ -59,6 +59,69 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
     const scrollRef = useRef<HTMLDivElement>(null);
     const isDev = import.meta.env.DEV;
 
+    const renderInline = (text: string) => {
+        const tokens = text.split(/(\*\*[^*]+\*\*)/g);
+        return tokens.map((token, idx) => {
+            if (token.startsWith('**') && token.endsWith('**')) {
+                return <strong key={idx}>{token.slice(2, -2)}</strong>;
+            }
+            return <React.Fragment key={idx}>{token}</React.Fragment>;
+        });
+    };
+
+    const renderFormattedMessage = (text: string) => {
+        const blocks = text.split(/\n{2,}/);
+        return blocks.map((block, idx) => {
+            const trimmed = block.trim();
+            if (!trimmed) return null;
+
+            if (trimmed.startsWith('### ')) {
+                return (
+                    <h4 key={idx} className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+                        {renderInline(trimmed.replace(/^###\s+/, ''))}
+                    </h4>
+                );
+            }
+            if (trimmed.startsWith('## ')) {
+                return (
+                    <h3 key={idx} className="text-sm font-semibold text-zinc-900">
+                        {renderInline(trimmed.replace(/^##\s+/, ''))}
+                    </h3>
+                );
+            }
+            if (trimmed.startsWith('# ')) {
+                return (
+                    <h2 key={idx} className="text-base font-bold text-zinc-900">
+                        {renderInline(trimmed.replace(/^#\s+/, ''))}
+                    </h2>
+                );
+            }
+
+            const lines = trimmed.split('\n');
+            const isList = lines.every(line => line.trim().startsWith('- '));
+            if (isList) {
+                return (
+                    <ul key={idx} className="list-disc pl-5 space-y-1 text-sm text-zinc-700">
+                        {lines.map((line, lineIdx) => (
+                            <li key={lineIdx}>{renderInline(line.replace(/^\s*-\s+/, ''))}</li>
+                        ))}
+                    </ul>
+                );
+            }
+
+            return (
+                <p key={idx} className="text-sm leading-relaxed text-zinc-700">
+                    {lines.map((line, lineIdx) => (
+                        <React.Fragment key={lineIdx}>
+                            {renderInline(line)}
+                            {lineIdx < lines.length - 1 ? <br /> : null}
+                        </React.Fragment>
+                    ))}
+                </p>
+            );
+        });
+    };
+
     useEffect(() => {
         if (!apiKey) {
             setClientError(null);
@@ -88,52 +151,51 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
             setMessages([]);
             initChat([]); 
         }
-    }, [mode, campaign?.id]); // Re-run when mode changes
+    }, [mode, campaign?.id, client]); // Re-run when mode changes or client becomes ready
 
-    const initChat = async (existingMessages: ChatMessage[]) => {
-        if (!campaign) return;
+    const initChat = async (existingMessages: ChatMessage[], suppressAutoStart: boolean = false) => {
+        if (!campaign || !client) return;
+        try {
+            const systemInstruction = mode === 'DAILY' ? DAILY_SYSTEM_INSTRUCTION : WEEKLY_SYSTEM_INSTRUCTION;
+            const tools = mode === 'DAILY' ? DAILY_TOOLS : WEEKLY_TOOLS;
+            const context = mode === 'DAILY' ? buildDailyContext(campaign, currentUser) : buildWeeklyContext(campaign);
 
-        const systemInstruction = mode === 'DAILY' ? DAILY_SYSTEM_INSTRUCTION : WEEKLY_SYSTEM_INSTRUCTION;
-        const tools = mode === 'DAILY' ? DAILY_TOOLS : WEEKLY_TOOLS;
-        const context = mode === 'DAILY' ? buildDailyContext(campaign, currentUser) : buildWeeklyContext(campaign);
+            // Convert stored ChatMessage to SDK Content
+            const historyContent: Content[] = [
+                { role: 'user', parts: [{ text: context }] },
+                { role: 'model', parts: [{ text: "Context received." }] },
+                ...existingMessages.map(m => ({
+                    role: m.role,
+                    parts: m.parts
+                }))
+            ];
 
-        // Convert stored ChatMessage to SDK Content
-        const historyContent: Content[] = [
-            { role: 'user', parts: [{ text: context }] },
-            { role: 'model', parts: [{ text: "Context received." }] },
-            ...existingMessages.map(m => ({
-                role: m.role,
-                parts: m.parts
-            }))
-        ];
-
-        const chat = client.chats.create({
-            model: "gemini-3-flash-preview",
-            config: { 
-                systemInstruction, 
-                tools,
-                temperature: 0.7 
-            },
-            history: historyContent
-        });
-        chatRef.current = chat;
-
-        // If fresh session, trigger opening message
-        if (existingMessages.length === 0) {
-            setIsTyping(true);
-            try {
-                const triggerMsg = mode === 'DAILY' 
-                    ? "Start the standup. Be brief." 
-                    : "Start the weekly review. Check overdue items.";
-                
-                const response = await chat.sendMessage({ message: triggerMsg });
-                processResponse(response);
-            } catch (e) {
-                console.error("Agent Start Error:", e);
-            } finally {
-                setIsTyping(false);
+            const chat = await client.chats.create({
+                model: "gemini-3-flash-preview",
+                config: { 
+                    systemInstruction, 
+                    tools,
+                    temperature: 0.7 
+                },
+                history: historyContent
+            });
+            chatRef.current = chat;
+            if (!chatRef.current || typeof chatRef.current.sendMessage !== 'function') {
+                setClientError("Chat client failed to initialize. Check the model name and API key.");
+                return;
             }
+
+            // No auto-start; user initiates the conversation.
+        } catch (e) {
+            console.error("Chat Init Error:", e);
+            setClientError("Chat failed to initialize. Check console for details.");
+            setIsTyping(false);
         }
+    };
+
+    const ensureChat = async () => {
+        if (chatRef.current || !client || !campaign) return;
+        await initChat(messages, true);
     };
 
     const handleResetChat = () => {
@@ -220,7 +282,14 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
 
     // --- Interaction ---
     const handleSend = async () => {
-        if (!input.trim() || isTyping || !chatRef.current) return;
+        if (!input.trim() || isTyping) return;
+        if (!chatRef.current) {
+            await ensureChat();
+        }
+        if (!chatRef.current || typeof chatRef.current.sendMessage !== 'function') {
+            setClientError("Chat is not ready. Please try again.");
+            return;
+        }
         const text = input;
         setInput('');
 
@@ -243,6 +312,7 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
             processResponse(response);
         } catch (e) {
             console.error("Chat Error:", e);
+            setClientError("Chat send failed. Check console for details.");
         } finally {
             setIsTyping(false);
         }
