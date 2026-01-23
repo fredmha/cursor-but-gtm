@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { Campaign, Channel, Ticket, TicketStatus, Status, User, Priority, RoadmapItem, Project, ProjectUpdate, ChannelLink, ChannelNote, TimelineTag, ChannelPlan, ContextDoc, DocFolder, ViewMode, Role } from './types';
+import { Campaign, Channel, Ticket, TicketStatus, Status, User, Priority, RoadmapItem, Project, ProjectUpdate, ChannelLink, ChannelNote, TimelineTag, ChannelPlan, ContextDoc, DocFolder, ViewMode, Role, ChatMessage } from './types';
 
 // Safe ID Generator
 export const generateId = () => {
@@ -88,6 +88,10 @@ interface StoreState {
   importAIPlan: (channelsData: any[]) => void;
   switchUser: (userId: string) => void;
   reset: () => void;
+
+  // Agent / Review Actions
+  updateChatHistory: (mode: 'DAILY' | 'WEEKLY', messages: ChatMessage[]) => void;
+  completeReviewSession: (mode: 'DAILY' | 'WEEKLY') => void;
 
   // Flow State
   pendingTicketLink: string | null;
@@ -822,6 +826,33 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setCampaignState(null);
   };
 
+  // --- Agent & Review Actions ---
+
+  const updateChatHistory = (mode: 'DAILY' | 'WEEKLY', messages: ChatMessage[]) => {
+      if (!campaign) return;
+      setCampaignState(prev => {
+          if (!prev) return null;
+          return {
+              ...prev,
+              dailyChatHistory: mode === 'DAILY' ? messages : prev.dailyChatHistory,
+              weeklyChatHistory: mode === 'WEEKLY' ? messages : prev.weeklyChatHistory
+          };
+      });
+  };
+
+  const completeReviewSession = (mode: 'DAILY' | 'WEEKLY') => {
+      if (!campaign) return;
+      const now = new Date().toISOString();
+      setCampaignState(prev => {
+          if (!prev) return null;
+          return {
+              ...prev,
+              lastDailyStandup: mode === 'DAILY' ? now : prev.lastDailyStandup,
+              lastWeeklyReview: mode === 'WEEKLY' ? now : prev.lastWeeklyReview
+          };
+      });
+  };
+
   const initiateDocCreationForTicket = (ticketId: string) => {
       setPendingTicketLink(ticketId);
       setCurrentView('DOCS');
@@ -886,7 +917,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       addCampaignTag,
       importAIPlan,
       switchUser,
-      reset
+      reset,
+      updateChatHistory,
+      completeReviewSession
     }}>
       {children}
     </StoreContext.Provider>

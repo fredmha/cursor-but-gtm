@@ -1,137 +1,400 @@
 
-import React, { useState } from 'react';
-import { useStore } from '../store';
-import { Status, TicketStatus } from '../types';
-import { Icons } from '../constants';
-import { WeeklyReviewAgent } from './WeeklyReviewAgent';
+import React, { useState, useEffect, useRef } from 'react';
+import { useStore, generateId } from '../store';
+import { Icons, PRIORITIES } from '../constants';
+import { GoogleGenAI, Content, Part } from "@google/genai";
+import { 
+    WEEKLY_TOOLS, DAILY_TOOLS, 
+    WEEKLY_SYSTEM_INSTRUCTION, DAILY_SYSTEM_INSTRUCTION, 
+    buildWeeklyContext, buildDailyContext 
+} from '../services/reviewAgent';
+import { TicketStatus, ChatMessage, ChatPart } from '../types';
+import { AgentTicketCard } from './AgentTicketCard';
 
-const MetricCard: React.FC<{
-    label: string;
-    value: string | number;
-    subtext: string;
-    color: string;
-    icon: React.ReactNode;
-}> = ({ label, value, subtext, color, icon }) => (
-    <div className="bg-white p-6 rounded-2xl relative overflow-hidden group transition-all">
-        <div className={`absolute top-4 right-4 opacity-10 group-hover:opacity-20 transition-opacity ${color}`}>
-            {icon}
-        </div>
-        <div className="relative z-10">
-            <h3 className="text-xs font-semibold uppercase text-zinc-400 tracking-wider mb-2">{label}</h3>
-            <div className={`text-3xl font-bold mb-2 text-zinc-800`}>{value}</div>
-            <p className="text-[10px] text-zinc-500 font-medium">{subtext}</p>
-        </div>
-    </div>
-);
+interface PendingAction {
+    id: string; 
+    callId?: string;
+    name: string;
+    args: any;
+    status: 'PENDING' | 'APPROVED' | 'REJECTED';
+}
 
 export const ReviewMode: React.FC = () => {
-  const { campaign } = useStore();
-  const [showAgent, setShowAgent] = useState(false);
+    const { 
+        campaign, currentUser, 
+        updateTicket, updateProjectTicket, deleteTicket, deleteProjectTicket, addTicket, addProjectTicket,
+        updateChatHistory, completeReviewSession, users
+    } = useStore();
 
-  const allTickets = (campaign.channels || []).flatMap(c => c.tickets).concat((campaign.projects || []).flatMap(p => p.tickets));
-  const activeProjects = campaign.projects || [];
+    const [mode, setMode] = useState<'DAILY' | 'WEEKLY'>('DAILY');
+    const [messages, setMessages] = useState<ChatMessage[]>([]);
+    const [input, setInput] = useState('');
+    const [isTyping, setIsTyping] = useState(false);
+    const [pendingActions, setPendingActions] = useState<PendingAction[]>([]);
+    
+    const client = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const chatRef = useRef<any>(null);
+    const scrollRef = useRef<HTMLDivElement>(null);
 
-  const totalTickets = allTickets.length;
-  const doneTickets = allTickets.filter(t => t.status === TicketStatus.Done).length;
-  const overdueTickets = allTickets.filter(t => t.dueDate && new Date(t.dueDate) < new Date() && t.status !== TicketStatus.Done).length;
-  
-  return (
-    <div className="h-full p-8 overflow-y-auto max-w-7xl mx-auto custom-scrollbar bg-background">
-      
-      <div className="mb-8 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-zinc-900 mb-1">Strategic Review</h1>
-            <p className="text-zinc-500 text-sm">Analyze health, velocity, and focus.</p>
-          </div>
-          <button 
-            onClick={() => setShowAgent(true)}
-            className="px-6 py-2 bg-zinc-900 text-white rounded-lg font-bold text-sm hover:bg-zinc-800 transition-all shadow-lg shadow-zinc-200 flex items-center gap-2"
-          >
-            <Icons.Sparkles className="w-4 h-4 text-purple-400" /> Agent Mode
-          </button>
-      </div>
+    // --- Load History / Init Session ---
+    useEffect(() => {
+        if (!campaign) return;
+        
+        // Load existing history or start fresh
+        const history = mode === 'DAILY' ? campaign.dailyChatHistory : campaign.weeklyChatHistory;
+        
+        if (history && history.length > 0) {
+            setMessages(history);
+            // Re-initialize the chat session with this history
+            initChat(history);
+        } else {
+            setMessages([]);
+            initChat([]); 
+        }
+    }, [mode, campaign?.id]); // Re-run when mode changes
 
-      <div className="grid grid-cols-4 gap-4 mb-10">
-          <MetricCard 
-             label="Velocity" 
-             value={doneTickets} 
-             subtext={`${totalTickets} tickets in scope`} 
-             color="text-emerald-600" 
-             icon={<Icons.Zap className="w-10 h-10" />}
-          />
-          <MetricCard 
-             label="Slippage" 
-             value={overdueTickets} 
-             subtext="Tickets past due date" 
-             color="text-red-500" 
-             icon={<Icons.Clock className="w-10 h-10" />}
-          />
-          <MetricCard 
-             label="Projects" 
-             value={activeProjects.length} 
-             subtext="Active Initiatives" 
-             color="text-indigo-600" 
-             icon={<Icons.Target className="w-10 h-10" />}
-          />
-           <MetricCard 
-             label="Completion" 
-             value={totalTickets > 0 ? Math.round((doneTickets / totalTickets) * 100) + '%' : '0%'} 
-             subtext="Global progress" 
-             color="text-zinc-900" 
-             icon={<Icons.CheckCircle className="w-10 h-10" />}
-          />
-      </div>
+    const initChat = async (existingMessages: ChatMessage[]) => {
+        if (!campaign) return;
 
-      {/* Project Health Table */}
-      <div className="mb-12">
-          <h3 className="text-sm font-semibold text-zinc-900 mb-4 flex items-center gap-2">
-              <Icons.Layers className="w-4 h-4 text-zinc-400"/> Project Health Matrix
-          </h3>
-          <div className="overflow-hidden rounded-xl border border-zinc-100 bg-white">
-            <div className="w-full">
-                <div className="bg-zinc-50/50 text-[10px] uppercase font-semibold text-zinc-400 border-b border-zinc-100 flex">
-                    <div className="px-6 py-3 flex-1">Project</div>
-                    <div className="px-6 py-3 w-32">Status</div>
-                    <div className="px-6 py-3 w-48">Progress</div>
+        const systemInstruction = mode === 'DAILY' ? DAILY_SYSTEM_INSTRUCTION : WEEKLY_SYSTEM_INSTRUCTION;
+        const tools = mode === 'DAILY' ? DAILY_TOOLS : WEEKLY_TOOLS;
+        const context = mode === 'DAILY' ? buildDailyContext(campaign, currentUser) : buildWeeklyContext(campaign);
+
+        // Convert stored ChatMessage to SDK Content
+        const historyContent: Content[] = [
+            { role: 'user', parts: [{ text: context }] },
+            { role: 'model', parts: [{ text: "Context received." }] },
+            ...existingMessages.map(m => ({
+                role: m.role,
+                parts: m.parts
+            }))
+        ];
+
+        const chat = client.chats.create({
+            model: "gemini-3-flash-preview",
+            config: { 
+                systemInstruction, 
+                tools,
+                temperature: 0.7 
+            },
+            history: historyContent
+        });
+        chatRef.current = chat;
+
+        // If fresh session, trigger opening message
+        if (existingMessages.length === 0) {
+            setIsTyping(true);
+            try {
+                const triggerMsg = mode === 'DAILY' 
+                    ? "Start the standup. Be brief." 
+                    : "Start the weekly review. Check overdue items.";
+                
+                const response = await chat.sendMessage({ message: triggerMsg });
+                processResponse(response);
+            } catch (e) {
+                console.error("Agent Start Error:", e);
+            } finally {
+                setIsTyping(false);
+            }
+        }
+    };
+
+    // --- Processing ---
+    const processResponse = (response: any) => {
+        if (response.candidates && response.candidates[0]) {
+            const content = response.candidates[0].content;
+            const parts = content.parts;
+            
+            const newMsg: ChatMessage = {
+                id: generateId(),
+                role: 'model',
+                parts: parts,
+                timestamp: Date.now()
+            };
+
+            setMessages(prev => {
+                const next = [...prev, newMsg];
+                updateChatHistory(mode, next); // Persist
+                return next;
+            });
+
+            // Handle Tools
+            const toolCalls = parts.filter((p: any) => p.functionCall);
+            if (toolCalls.length > 0) {
+                const newActions = toolCalls.map((tc: any) => ({
+                    id: generateId(),
+                    callId: tc.functionCall!.id,
+                    name: tc.functionCall!.name,
+                    args: tc.functionCall!.args,
+                    status: 'PENDING' as const
+                }));
+                setPendingActions(prev => [...prev, ...newActions]);
+            }
+        }
+    };
+
+    // --- Interaction ---
+    const handleSend = async () => {
+        if (!input.trim() || isTyping) return;
+        const text = input;
+        setInput('');
+
+        const userMsg: ChatMessage = { 
+            id: generateId(), 
+            role: 'user', 
+            parts: [{ text }], 
+            timestamp: Date.now() 
+        };
+        
+        setMessages(prev => {
+            const next = [...prev, userMsg];
+            updateChatHistory(mode, next);
+            return next;
+        });
+        
+        setIsTyping(true);
+        try {
+            const response = await chatRef.current.sendMessage({ message: text });
+            processResponse(response);
+        } catch (e) {
+            console.error("Chat Error:", e);
+        } finally {
+            setIsTyping(false);
+        }
+    };
+
+    const handleAction = async (action: PendingAction, approved: boolean) => {
+        setPendingActions(prev => prev.map(a => a.id === action.id ? { ...a, status: approved ? 'APPROVED' : 'REJECTED' } : a));
+
+        if (approved) {
+            // Execute Logic
+            const { name, args } = action;
+            
+            // --- WEEKLY ACTIONS ---
+            if (name === 'propose_reschedule' || name === 'propose_status_change') {
+                const { ticketId, newDate, status } = args;
+                // Helper to find ticket across channels/projects
+                const findTicket = (tid: string) => {
+                    const cT = (campaign?.channels || []).flatMap(c => c.tickets).find(t => t.id === tid);
+                    if (cT) return { ticket: cT, parentId: cT.channelId, type: 'CHANNEL' };
+                    const pT = (campaign?.projects || []).flatMap(p => p.tickets).find(t => t.id === tid);
+                    if (pT) return { ticket: pT, parentId: pT.projectId, type: 'PROJECT' };
+                    return null;
+                };
+
+                const target = findTicket(ticketId);
+                if (target) {
+                    if (name === 'propose_reschedule') {
+                        if (target.type === 'CHANNEL') updateTicket(target.parentId!, ticketId, { dueDate: newDate });
+                        else updateProjectTicket(target.parentId!, ticketId, { dueDate: newDate });
+                    } else {
+                        // Status Change
+                        const newStatus = status === 'Done' ? TicketStatus.Done : status === 'Canceled' ? TicketStatus.Canceled : TicketStatus.Backlog;
+                        if (status === 'Canceled') {
+                            if (target.type === 'CHANNEL') deleteTicket(target.parentId!, ticketId);
+                            else deleteProjectTicket(target.parentId!, ticketId);
+                        } else {
+                            if (target.type === 'CHANNEL') updateTicket(target.parentId!, ticketId, { status: newStatus });
+                            else updateProjectTicket(target.parentId!, ticketId, { status: newStatus });
+                        }
+                    }
+                }
+            } 
+            else if (name === 'propose_ticket' || name === 'create_task') {
+                const { title, description, channelId, projectId, priority } = args;
+                const newTicket = {
+                    id: generateId(),
+                    shortId: `T-${Math.floor(Math.random() * 1000)}`,
+                    title,
+                    description: description || '',
+                    priority: priority || 'Medium',
+                    status: TicketStatus.Todo,
+                    assigneeId: currentUser.id,
+                    createdAt: new Date().toISOString()
+                };
+
+                // For 'create_task' (Daily), default to first available channel if not specified
+                let targetChannel = channelId;
+                if (!channelId && !projectId && campaign?.channels[0]) {
+                    targetChannel = campaign.channels[0].id;
+                }
+
+                if (targetChannel) addTicket(targetChannel, { ...newTicket, channelId: targetChannel });
+                else if (projectId) addProjectTicket(projectId, { ...newTicket, projectId });
+            }
+            
+            // --- DAILY ACTIONS ---
+            else if (name === 'update_status') {
+                const { ticketId, status } = args;
+                // Simplified lookup for brevity, ideally share logic
+                const cT = (campaign?.channels || []).flatMap(c => c.tickets).find(t => t.id === ticketId);
+                if (cT && cT.channelId) {
+                    updateTicket(cT.channelId, ticketId, { status: status === 'Done' ? TicketStatus.Done : TicketStatus.InProgress });
+                }
+            }
+        }
+
+        // Send Tool Response
+        setIsTyping(true);
+        try {
+            const toolResponse = {
+                functionResponse: {
+                    name: action.name,
+                    id: action.callId,
+                    response: { result: approved ? "Action executed." : "User rejected." }
+                }
+            };
+            const response = await chatRef.current.sendMessage({ message: [toolResponse] });
+            processResponse(response);
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setIsTyping(false);
+        }
+    };
+
+    // --- Render ---
+    useEffect(() => {
+        scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [messages, pendingActions, isTyping]);
+
+    return (
+        <div className="h-full flex flex-col bg-white">
+            
+            {/* Top Bar: Mode Switcher */}
+            <div className="shrink-0 h-16 border-b border-zinc-100 flex items-center justify-between px-8 bg-white/80 backdrop-blur-md sticky top-0 z-20">
+                <div className="flex items-center gap-4">
+                    <div className="w-8 h-8 bg-zinc-900 rounded-lg flex items-center justify-center text-white shadow-lg shadow-zinc-200">
+                        <Icons.Sparkles className="w-4 h-4" />
+                    </div>
+                    <div className="h-6 w-px bg-zinc-200"></div>
+                    <div className="flex gap-1 bg-zinc-100 p-1 rounded-lg">
+                        <button 
+                            onClick={() => setMode('DAILY')}
+                            className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all ${mode === 'DAILY' ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-500 hover:text-zinc-900'}`}
+                        >
+                            Daily Standup
+                        </button>
+                        <button 
+                            onClick={() => setMode('WEEKLY')}
+                            className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all ${mode === 'WEEKLY' ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-500 hover:text-zinc-900'}`}
+                        >
+                            Weekly Review
+                        </button>
+                    </div>
                 </div>
-                <div className="divide-y divide-zinc-50">
-                    {activeProjects.map(project => {
-                         const pTickets = (project.tickets || []).concat((campaign.channels || []).flatMap(c => c.tickets).filter(t => t.projectId === project.id));
-                         const pCompletion = pTickets.length > 0 ? (pTickets.filter(t => t.status === TicketStatus.Done).length / pTickets.length) * 100 : 0;
-                        
-                        return (
-                            <div key={project.id} className="hover:bg-zinc-50 transition-colors group flex items-center">
-                                <div className="px-6 py-4 flex-1">
-                                    <div className="text-sm font-medium text-zinc-900 mb-0.5">{project.name}</div>
-                                    <div className="text-[10px] text-zinc-400 truncate max-w-md">{project.description}</div>
-                                </div>
-                                <div className="px-6 py-4 w-32">
-                                    <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded tracking-wide ${
-                                            project.status === 'On Track' ? 'bg-emerald-50 text-emerald-600' :
-                                            project.status === 'At Risk' ? 'bg-amber-50 text-amber-600' :
-                                            project.status === 'Off Track' ? 'bg-red-50 text-red-600' :
-                                            'bg-zinc-100 text-zinc-500'
-                                        }`}>
-                                            {project.status}
-                                        </span>
-                                </div>
-                                <div className="px-6 py-4 w-48">
-                                    <div className="flex items-center gap-3">
-                                        <div className="flex-1 h-1.5 bg-zinc-100 rounded-full overflow-hidden">
-                                            <div className={`h-full bg-emerald-500`} style={{ width: `${pCompletion}%` }}></div>
-                                        </div>
-                                        <span className="text-[10px] font-mono text-zinc-400 w-8 text-right">{Math.round(pCompletion)}%</span>
-                                    </div>
-                                </div>
-                            </div>
-                        );
-                    })}
+                
+                <div className="flex items-center gap-3">
+                    <span className="text-[10px] font-mono text-zinc-400">
+                        LAST SESSION: {mode === 'DAILY' ? (campaign?.lastDailyStandup ? new Date(campaign.lastDailyStandup).toLocaleDateString() : 'NEVER') : (campaign?.lastWeeklyReview ? new Date(campaign.lastWeeklyReview).toLocaleDateString() : 'NEVER')}
+                    </span>
+                    <button 
+                        onClick={() => completeReviewSession(mode)}
+                        className="p-2 text-zinc-400 hover:text-emerald-500 transition-colors"
+                        title="Mark session complete"
+                    >
+                        <Icons.CheckCircle className="w-5 h-5" />
+                    </button>
                 </div>
             </div>
-          </div>
-      </div>
-      
-      {showAgent && <WeeklyReviewAgent onClose={() => setShowAgent(false)} />}
-    </div>
-  );
+
+            {/* Chat Area */}
+            <div className="flex-1 overflow-y-auto bg-[#fafafa]">
+                <div className="max-w-2xl mx-auto px-6 py-8">
+                    {messages.map((msg) => (
+                        <div key={msg.id} className={`mb-6 flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                            {msg.parts.map((part, pIdx) => {
+                                if (part.text) {
+                                    return (
+                                        <div key={pIdx} className={`px-5 py-3.5 rounded-2xl text-sm leading-relaxed shadow-sm max-w-[85%] ${
+                                            msg.role === 'user' 
+                                            ? 'bg-zinc-900 text-white rounded-br-sm' 
+                                            : 'bg-white border border-zinc-100 text-zinc-700 rounded-bl-sm'
+                                        }`}>
+                                            {part.text}
+                                        </div>
+                                    );
+                                }
+                                return null;
+                            })}
+                        </div>
+                    ))}
+
+                    {/* Pending Actions (Widgets) */}
+                    {pendingActions.map(action => (
+                        <div key={action.id}>
+                            {(action.name === 'propose_ticket' || action.name === 'create_task') ? (
+                                <AgentTicketCard 
+                                    actionId={action.id}
+                                    args={action.args}
+                                    status={action.status}
+                                    users={users}
+                                    channels={campaign?.channels || []}
+                                    projects={campaign?.projects || []}
+                                    onUpdate={(updates) => {
+                                        setPendingActions(prev => prev.map(a => a.id === action.id ? {...a, args: {...a.args, ...updates}} : a))
+                                    }}
+                                    onApprove={() => handleAction(action, true)}
+                                    onReject={() => handleAction(action, false)}
+                                />
+                            ) : (
+                                // Simplified Card for non-ticket actions
+                                <div className={`w-full my-6 bg-white border border-zinc-100 shadow-lg rounded-xl p-4 flex items-center justify-between ${action.status !== 'PENDING' ? 'opacity-50' : ''}`}>
+                                    <div>
+                                        <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1">{action.name.replace('propose_', '').replace('_', ' ')}</div>
+                                        <div className="text-sm font-semibold text-zinc-900">
+                                            {action.name.includes('reschedule') && `Move to ${action.args.newDate}`}
+                                            {action.name.includes('status') && `Mark as ${action.args.status}`}
+                                            {action.name.includes('update') && `Mark as ${action.args.status}`}
+                                        </div>
+                                    </div>
+                                    {action.status === 'PENDING' ? (
+                                        <div className="flex gap-2">
+                                            <button onClick={() => handleAction(action, false)} className="px-3 py-1.5 text-xs font-bold text-zinc-500 hover:bg-zinc-50 rounded">Dismiss</button>
+                                            <button onClick={() => handleAction(action, true)} className="px-3 py-1.5 text-xs font-bold bg-zinc-900 text-white rounded shadow-sm hover:bg-zinc-800">Confirm</button>
+                                        </div>
+                                    ) : (
+                                        <div className="text-xs font-bold text-zinc-400">{action.status}</div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    ))}
+
+                    {isTyping && (
+                        <div className="flex justify-start mb-6">
+                            <div className="bg-white border border-zinc-100 px-4 py-3 rounded-2xl rounded-bl-sm shadow-sm flex gap-1.5 items-center">
+                                <div className="w-1.5 h-1.5 bg-zinc-300 rounded-full animate-bounce"></div>
+                                <div className="w-1.5 h-1.5 bg-zinc-300 rounded-full animate-bounce delay-75"></div>
+                                <div className="w-1.5 h-1.5 bg-zinc-300 rounded-full animate-bounce delay-150"></div>
+                            </div>
+                        </div>
+                    )}
+                    <div ref={scrollRef} />
+                </div>
+            </div>
+
+            {/* Input */}
+            <div className="p-6 bg-white border-t border-zinc-100 shrink-0">
+                <div className="max-w-2xl mx-auto relative">
+                    <input 
+                        className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-4 py-3.5 pr-12 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all shadow-sm placeholder-zinc-400"
+                        placeholder={`Talk to your ${mode === 'DAILY' ? 'Standup' : 'Review'} agent...`}
+                        value={input}
+                        onChange={e => setInput(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && handleSend()}
+                        autoFocus
+                        disabled={isTyping}
+                    />
+                    <button 
+                        onClick={handleSend}
+                        disabled={!input.trim() || isTyping}
+                        className="absolute right-2 top-2 p-1.5 bg-zinc-900 text-white rounded-lg hover:bg-zinc-700 disabled:opacity-0 transition-all"
+                    >
+                        <Icons.ChevronRight className="w-4 h-4" />
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
 };

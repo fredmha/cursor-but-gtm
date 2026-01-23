@@ -1,3 +1,4 @@
+
 import React, { useMemo } from 'react';
 import { Ticket, TicketStatus, User, Channel } from '../types';
 import { Icons } from '../constants';
@@ -9,6 +10,7 @@ interface TicketBoardProps {
   onTicketClick: (ticket: Ticket) => void;
   onStatusChange?: (ticketId: string, newStatus: TicketStatus) => void;
   groupByChannel?: boolean;
+  groupByUser?: boolean;
 }
 
 const STATUS_COLUMNS = [
@@ -23,7 +25,8 @@ export const TicketBoard: React.FC<TicketBoardProps> = ({
   users, 
   onTicketClick,
   onStatusChange,
-  groupByChannel = false 
+  groupByChannel = false,
+  groupByUser = false
 }) => {
 
   const handleDragStart = (e: React.DragEvent, ticketId: string) => {
@@ -113,7 +116,7 @@ export const TicketBoard: React.FC<TicketBoardProps> = ({
                               {colTickets.map(renderCard)}
                           </div>
                           {colTickets.length === 0 && (
-                              <div className="h-full border-2 border-dashed border-zinc-200 rounded flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
+                              <div className="h-full border-2 border-dashed border-zinc-200 rounded flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity min-h-[50px]">
                                   <span className="text-[9px] text-zinc-400">Drop here</span>
                               </div>
                           )}
@@ -124,21 +127,48 @@ export const TicketBoard: React.FC<TicketBoardProps> = ({
       </div>
   );
 
+  if (groupByUser) {
+      const unassignedTickets = tickets.filter(t => !t.assigneeId);
+      
+      return (
+        <div className="flex flex-col h-full overflow-y-auto custom-scrollbar space-y-6 pb-10">
+            {users.map(user => {
+                const userTickets = tickets.filter(t => t.assigneeId === user.id);
+                // In Team Pulse, we want to see empty lanes if a user has no active tickets to know they are free
+                // But generally better to hide to save space, let's show if user exists
+                
+                return renderSwimlane(
+                    user.name,
+                    <div className={`w-4 h-4 rounded-full ${user.color} flex items-center justify-center text-[8px] text-white font-bold`}>{user.initials}</div>,
+                    userTickets,
+                    user.id,
+                    userTickets.length
+                );
+            })}
+            
+            {unassignedTickets.length > 0 && renderSwimlane(
+                "Unassigned",
+                <Icons.Target className="w-3 h-3" />,
+                unassignedTickets,
+                "unassigned",
+                unassignedTickets.length
+            )}
+        </div>
+      );
+  }
+
   if (groupByChannel) {
-    // Separate tickets into those with a channel and those without (General/Project-Direct)
     const generalTickets = tickets.filter(t => !t.channelId);
     const channelsWithTickets = channels.filter(c => tickets.some(t => t.channelId === c.id));
     
     if (generalTickets.length === 0 && channelsWithTickets.length === 0) {
         return (
-             <div className="text-center py-10 text-zinc-400 italic text-xs">No tickets found for this project.</div>
+             <div className="text-center py-10 text-zinc-400 italic text-xs">No tickets found.</div>
         );
     }
 
     return (
       <div className="flex flex-col h-full overflow-y-auto custom-scrollbar space-y-6 pb-10">
-         
-         {/* General Project Tasks Swimlane */}
          {generalTickets.length > 0 && renderSwimlane(
              "General Project Tasks", 
              <Icons.Target className="w-3 h-3" />, 
@@ -146,8 +176,6 @@ export const TicketBoard: React.FC<TicketBoardProps> = ({
              "general_lane", 
              generalTickets.length
          )}
-
-         {/* Channel Swimlanes */}
          {channelsWithTickets.map(channel => {
              const channelTickets = tickets.filter(t => t.channelId === channel.id);
              return renderSwimlane(

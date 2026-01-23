@@ -198,6 +198,26 @@ export interface ContextDoc {
   icon?: string; // Emoji customization for file
 }
 
+// Chat Types
+export interface ChatPart {
+  text?: string;
+  functionCall?: {
+    name: string;
+    args: any;
+  };
+  functionResponse?: {
+    name: string;
+    response: any;
+  };
+}
+
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'model';
+  parts: ChatPart[];
+  timestamp: number;
+}
+
 export interface Campaign {
   id: string;
   name: string;
@@ -213,6 +233,12 @@ export interface Campaign {
   docFolders: DocFolder[]; // New Folders
   docs: ContextDoc[];
   availableTags?: string[]; // Global tags list
+  
+  // Agent / Review State
+  lastDailyStandup?: string; // ISO Date
+  lastWeeklyReview?: string; // ISO Date
+  dailyChatHistory?: ChatMessage[]; 
+  weeklyChatHistory?: ChatMessage[];
 }
 
 export type ViewMode = 'ONBOARDING' | 'ROADMAP' | 'EXECUTION' | 'REVIEW' | 'DOCS' | 'SETTINGS';

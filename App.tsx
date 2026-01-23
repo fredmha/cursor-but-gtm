@@ -1,74 +1,68 @@
 
 import React, { useState, useEffect } from 'react';
-import { StoreProvider, useStore } from './store';
+import { StoreProvider, useStore, generateId } from './store';
 import { ExecutionBoard } from './components/ExecutionBoard';
 import { ReviewMode } from './components/ReviewMode';
-import { OnboardingWizard } from './components/OnboardingWizard';
 import { RoadmapSandbox } from './components/RoadmapSandbox';
-import { LabOnboarding } from './components/lab/LabOnboarding';
 import { DocsView } from './components/DocsView';
 import { SettingsView } from './components/SettingsView';
-import { ViewMode } from './types';
+import { ViewMode, Campaign } from './types';
 import { Icons } from './constants';
 
-const LandingPage: React.FC<{ onGetStarted: () => void }> = ({ onGetStarted }) => {
-    return (
-        <div className="h-screen w-full flex flex-col items-center justify-center bg-white text-zinc-900 relative overflow-hidden">
+const MainLayout: React.FC = () => {
+  const { campaign, setCampaign, users, currentUser, switchUser, reset, currentView, setCurrentView } = useStore();
+
+  const handleInitialize = () => {
+      const newCampaign: Campaign = {
+          id: generateId(),
+          name: 'New Strategy',
+          objective: '',
+          startDate: new Date().toISOString(),
+          endDate: new Date(new Date().setMonth(new Date().getMonth() + 3)).toISOString(),
+          status: 'Active',
+          channels: [],
+          projects: [],
+          principles: [],
+          roadmapItems: [],
+          timelineTags: [],
+          docFolders: [
+            { id: 'f_strategy', name: 'Strategy', icon: '♟️', createdAt: new Date().toISOString() },
+            { id: 'f_personas', name: 'Personas', icon: '👥', createdAt: new Date().toISOString() },
+            { id: 'f_brand', name: 'Brand', icon: '🎨', createdAt: new Date().toISOString() },
+            { id: 'f_process', name: 'Process', icon: '⚙️', createdAt: new Date().toISOString() },
+          ],
+          docs: [],
+          availableTags: ['Q1', 'Q2', 'Urgent', 'Draft']
+      };
+      setCampaign(newCampaign);
+  };
+
+  // Blank Slate / Initialization View
+  if (!campaign) {
+      return (
+        <div className="h-screen w-full flex flex-col items-center justify-center bg-white text-zinc-900 relative overflow-hidden font-sans">
             {/* Subtle Background Pattern */}
             <div className="absolute inset-0 opacity-[0.03]" 
                 style={{ backgroundImage: 'radial-gradient(#000 1px, transparent 1px)', backgroundSize: '24px 24px' }}>
             </div>
             
-            <div className="z-10 text-center max-w-2xl px-6 animate-in fade-in zoom-in-95 duration-700">
+            <div className="z-10 text-center max-w-lg px-6 animate-in fade-in zoom-in-95 duration-700">
                 <div className="w-16 h-16 bg-zinc-900 rounded-2xl flex items-center justify-center mx-auto mb-8 shadow-2xl shadow-zinc-200">
                     <Icons.Target className="w-8 h-8 text-white" />
                 </div>
-                <h1 className="text-5xl font-bold tracking-tight mb-6 text-zinc-900">GTM Operating System</h1>
-                <p className="text-lg text-zinc-500 mb-10 leading-relaxed max-w-lg mx-auto">
-                    The modern stack for go-to-market strategy and execution. 
-                    Plan campaigns, track bets, and execute with precision.
+                <h1 className="text-3xl font-bold tracking-tight mb-4 text-zinc-900">GTM Operating System</h1>
+                <p className="text-sm text-zinc-500 mb-8 leading-relaxed">
+                    Initialize a blank workspace to begin planning your campaign.
                 </p>
                 <button 
-                    onClick={onGetStarted}
-                    className="px-8 py-4 bg-zinc-900 text-white rounded-xl font-bold text-sm hover:bg-zinc-800 hover:scale-105 transition-all shadow-xl shadow-zinc-200 ring-1 ring-black/5"
+                    onClick={handleInitialize}
+                    className="px-8 py-3 bg-zinc-900 text-white rounded-lg font-bold text-sm hover:bg-zinc-800 hover:scale-105 transition-all shadow-xl shadow-zinc-200"
                 >
-                    Get Started
+                    Initialize Workspace
                 </button>
             </div>
-            
-            <div className="absolute bottom-8 text-zinc-400 text-xs font-mono">
-                v2.0.0 / Harvey Aesthetic
-            </div>
         </div>
-    )
-}
-
-const MainLayout: React.FC = () => {
-  const { campaign, users, currentUser, switchUser, reset, currentView, setCurrentView } = useStore();
-  
-  // Feature Flag: Lab Mode
-  const [isLabMode, setIsLabMode] = useState(false);
-  const [isOnboarding, setIsOnboarding] = useState(false);
-
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-        const params = new URLSearchParams(window.location.search);
-        if (params.get('lab') === 'true') {
-            setIsLabMode(true);
-        }
-    }
-  }, []);
-
-  // Landing Page State
-  if (!campaign && !isOnboarding) {
-      if (isLabMode) return <LabOnboarding />;
-      return <LandingPage onGetStarted={() => setIsOnboarding(true)} />;
-  }
-
-  // Onboarding State
-  if ((!campaign || campaign.status === 'Onboarding') && isOnboarding) {
-      if (isLabMode) return <LabOnboarding />;
-      return <OnboardingWizard onEnableLabMode={() => setIsLabMode(true)} />;
+      );
   }
 
   return (

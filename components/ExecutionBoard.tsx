@@ -1,19 +1,14 @@
 
 import React, { useState, useMemo } from 'react';
 import { useStore, generateId } from '../store';
-import { TicketStatus, Ticket, Priority, Status, Channel, Project } from '../types';
+import { TicketStatus, Ticket, Priority } from '../types';
 import { Icons, PRIORITIES } from '../constants';
 import { ProjectDashboard } from './ProjectDashboard';
 import { ChannelDashboard } from './ChannelDashboard';
 import { TicketModal } from './TicketModal';
-
-const STATUS_CONFIG = {
-    [TicketStatus.Backlog]: { icon: Icons.Circle, color: 'text-zinc-300', bg: 'bg-zinc-50' },
-    [TicketStatus.Todo]: { icon: Icons.Circle, color: 'text-zinc-400', bg: 'bg-zinc-50' },
-    [TicketStatus.InProgress]: { icon: Icons.Clock, color: 'text-amber-500', bg: 'bg-amber-50' },
-    [TicketStatus.Done]: { icon: Icons.CheckCircle, color: 'text-emerald-500', bg: 'bg-emerald-50' },
-    [TicketStatus.Canceled]: { icon: Icons.XCircle, color: 'text-red-400', bg: 'bg-red-50' },
-};
+import { TeamHealthHeader } from './TeamHealthHeader';
+import { TicketList } from './TicketList';
+import { TicketBoard } from './TicketBoard';
 
 type ViewState = 
     | { type: 'MY_ISSUES' }
@@ -29,17 +24,17 @@ const ProjectCreationModal: React.FC<{
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/20 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="absolute inset-0" onClick={onClose}></div>
-      <div className="w-[500px] bg-white border border-border rounded-xl shadow-2xl relative z-10 overflow-hidden">
-        <div className="p-6 border-b border-border bg-surface">
-           <h3 className="text-base font-semibold text-zinc-900">Initialize New Project</h3>
+      <div className="w-[500px] bg-white border border-zinc-100 rounded-xl shadow-2xl relative z-10 overflow-hidden">
+        <div className="p-6 border-b border-zinc-100 bg-white">
+           <h3 className="text-base font-bold text-zinc-900">Initialize New Project</h3>
            <p className="text-xs text-zinc-500">Define a finite, high-stakes initiative.</p>
         </div>
         <div className="p-6 space-y-4">
             <div>
-                <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5 block">Project Name</label>
+                <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5 block">Project Name</label>
                 <input 
                     autoFocus
-                    className="w-full bg-surface border border-zinc-200 rounded-lg p-3 text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-100 placeholder-zinc-400 transition-all"
+                    className="w-full bg-zinc-50 border border-zinc-200 rounded-lg p-3 text-zinc-900 focus:outline-none focus:border-indigo-500 transition-all placeholder-zinc-400"
                     placeholder="e.g. Q4 Rebrand"
                     value={data.name}
                     onChange={e => setData({...data, name: e.target.value})}
@@ -47,9 +42,9 @@ const ProjectCreationModal: React.FC<{
                 />
             </div>
              <div>
-                <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5 block">Description</label>
+                <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5 block">Description</label>
                 <textarea 
-                    className="w-full bg-surface border border-zinc-200 rounded-lg p-3 text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-100 h-24 resize-none placeholder-zinc-400"
+                    className="w-full bg-zinc-50 border border-zinc-200 rounded-lg p-3 text-zinc-900 focus:outline-none focus:border-indigo-500 h-24 resize-none placeholder-zinc-400"
                     placeholder="What is the goal?"
                     value={data.description}
                     onChange={e => setData({...data, description: e.target.value})}
@@ -57,18 +52,18 @@ const ProjectCreationModal: React.FC<{
             </div>
              <div className="grid grid-cols-2 gap-4">
                  <div>
-                    <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5 block">Target Date</label>
+                    <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5 block">Target Date</label>
                     <input 
                         type="date"
-                        className="w-full bg-surface border border-zinc-200 rounded-lg p-3 text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-100"
+                        className="w-full bg-zinc-50 border border-zinc-200 rounded-lg p-3 text-zinc-900 focus:outline-none focus:border-indigo-500"
                         value={data.targetDate}
                         onChange={e => setData({...data, targetDate: e.target.value})}
                     />
                  </div>
                  <div>
-                    <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5 block">Priority</label>
+                    <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5 block">Priority</label>
                     <select
-                        className="w-full bg-surface border border-zinc-200 rounded-lg p-3 text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-100"
+                        className="w-full bg-zinc-50 border border-zinc-200 rounded-lg p-3 text-zinc-900 focus:outline-none focus:border-indigo-500"
                         value={data.priority}
                         onChange={e => setData({...data, priority: e.target.value as Priority})}
                     >
@@ -77,12 +72,12 @@ const ProjectCreationModal: React.FC<{
                  </div>
              </div>
         </div>
-        <div className="p-4 border-t border-border bg-surface flex justify-end gap-2">
-            <button onClick={onClose} className="px-4 py-2 text-xs font-medium text-zinc-500 hover:text-zinc-900">Cancel</button>
+        <div className="p-4 border-t border-zinc-100 bg-zinc-50 flex justify-end gap-2">
+            <button onClick={onClose} className="px-4 py-2 text-xs font-bold text-zinc-500 hover:text-zinc-900">Cancel</button>
             <button 
                 disabled={!data.name}
                 onClick={() => onSave(data)}
-                className="px-6 py-2 bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-semibold rounded-lg disabled:opacity-50 transition-colors shadow-sm"
+                className="px-6 py-2 bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-bold rounded-lg disabled:opacity-50 transition-colors shadow-sm"
             >
                 Create Project
             </button>
@@ -96,6 +91,8 @@ export const ExecutionBoard: React.FC = () => {
   const { campaign, users, currentUser, addChannel, addProject, deleteChannel, deleteProject, addTicket, updateTicket, updateProjectTicket, deleteTicket, deleteProjectTicket, addProjectTicket } = useStore();
   
   const [view, setView] = useState<ViewState>({ type: 'MY_ISSUES' });
+  const [scope, setScope] = useState<'MINE' | 'TEAM'>('MINE');
+  const [viewType, setViewType] = useState<'LIST' | 'BOARD'>('LIST');
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [editingTicket, setEditingTicket] = useState<Ticket | null>(null);
   const [showTicketModal, setShowTicketModal] = useState(false);
@@ -103,15 +100,24 @@ export const ExecutionBoard: React.FC = () => {
   const channels = campaign?.channels || [];
   const projects = campaign?.projects || [];
 
+  const allTickets = useMemo(() => {
+      return [
+          ...channels.flatMap(c => c.tickets),
+          ...projects.flatMap(p => p.tickets)
+      ];
+  }, [channels, projects]);
+
   const displayTickets = useMemo(() => {
       if (view.type === 'MY_ISSUES') {
-          return [
-              ...channels.flatMap(c => c.tickets),
-              ...projects.flatMap(p => p.tickets)
-          ].filter(t => t.assigneeId === currentUser.id);
+          if (scope === 'MINE') {
+              return allTickets.filter(t => t.assigneeId === currentUser.id);
+          } else {
+              // For Team Pulse, filter out cancelled/backlog to focus on active work
+              return allTickets.filter(t => t.status !== TicketStatus.Backlog && t.status !== TicketStatus.Canceled);
+          }
       }
       return [];
-  }, [view, channels, projects, currentUser.id]);
+  }, [view, scope, allTickets, currentUser.id]);
 
   const handleSaveProject = (data: { name: string; description: string; targetDate: string; priority: Priority }) => {
       const newId = generateId();
@@ -160,14 +166,23 @@ export const ExecutionBoard: React.FC = () => {
       setShowTicketModal(true);
   };
 
+  const handleStatusChange = (ticketId: string, newStatus: TicketStatus) => {
+      const channelTicket = channels.flatMap(c => c.tickets).find(t => t.id === ticketId);
+      if (channelTicket && channelTicket.channelId) {
+          updateTicket(channelTicket.channelId, ticketId, { status: newStatus });
+          return;
+      }
+      const projectTicket = projects.flatMap(p => p.tickets).find(t => t.id === ticketId);
+      if (projectTicket && projectTicket.projectId) {
+          updateProjectTicket(projectTicket.projectId, ticketId, { status: newStatus });
+          return;
+      }
+  };
+
   const handleToggleStatus = (e: React.MouseEvent, ticket: Ticket) => {
       e.stopPropagation();
       const newStatus = ticket.status === TicketStatus.Done ? TicketStatus.Todo : TicketStatus.Done;
-      if (ticket.channelId) {
-          updateTicket(ticket.channelId, ticket.id, { status: newStatus });
-      } else if (ticket.projectId) {
-          updateProjectTicket(ticket.projectId, ticket.id, { status: newStatus });
-      }
+      handleStatusChange(ticket.id, newStatus);
   };
 
   const handleSaveTicket = (data: any) => {
@@ -189,20 +204,16 @@ export const ExecutionBoard: React.FC = () => {
           const isLocationChanged = (editingTicket.channelId !== ticketData.channelId) || (editingTicket.projectId !== ticketData.projectId);
           
           if (isLocationChanged) {
-              // Remove from old
               if (editingTicket.channelId) deleteTicket(editingTicket.channelId, editingTicket.id);
               else if (editingTicket.projectId) deleteProjectTicket(editingTicket.projectId, editingTicket.id);
               
-              // Add to new
               if (ticketData.channelId) addTicket(ticketData.channelId, ticketData);
               else if (ticketData.projectId) addProjectTicket(ticketData.projectId, ticketData);
           } else {
-              // Update in place
               if (ticketData.channelId) updateTicket(ticketData.channelId, ticketData.id, ticketData);
               else if (ticketData.projectId) updateProjectTicket(ticketData.projectId, ticketData.id, ticketData);
           }
       } else {
-          // New ticket (though usually disabled in My Issues)
           if (ticketData.channelId) addTicket(ticketData.channelId, ticketData);
           else if (ticketData.projectId) addProjectTicket(ticketData.projectId, ticketData);
       }
@@ -219,18 +230,27 @@ export const ExecutionBoard: React.FC = () => {
   };
 
   return (
-    <div className="h-full flex bg-background">
+    <div className="h-full flex bg-white font-sans text-zinc-900">
       
       {/* Sidebar */}
-      <div className="w-64 border-r border-border flex flex-col bg-surface">
+      <div className="w-64 border-r border-zinc-100 flex flex-col bg-zinc-50/50">
         <div className="p-4 pt-6">
           <h2 className="text-xs uppercase font-bold text-zinc-400 tracking-wider mb-4 px-2">Workspace</h2>
-          <div 
-               onClick={() => setView({type: 'MY_ISSUES'})}
-               className={`flex items-center gap-2 px-3 py-1.5 rounded-lg cursor-pointer transition-all mb-6 ${view.type === 'MY_ISSUES' ? 'bg-white shadow-sm text-zinc-900 border border-zinc-100' : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900'}`}
-           >
-               <Icons.Target className="w-4 h-4"/>
-               <span className="text-sm font-medium">My Issues</span>
+          <div className="space-y-1 mb-6">
+              <button 
+                   onClick={() => { setView({type: 'MY_ISSUES'}); setScope('MINE'); }}
+                   className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-lg cursor-pointer transition-all ${view.type === 'MY_ISSUES' && scope === 'MINE' ? 'bg-white shadow-sm text-zinc-900 ring-1 ring-zinc-200' : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900'}`}
+               >
+                   <Icons.Target className="w-4 h-4"/>
+                   <span className="text-sm font-medium">My Issues</span>
+               </button>
+               <button 
+                   onClick={() => { setView({type: 'MY_ISSUES'}); setScope('TEAM'); }}
+                   className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-lg cursor-pointer transition-all ${view.type === 'MY_ISSUES' && scope === 'TEAM' ? 'bg-white shadow-sm text-zinc-900 ring-1 ring-zinc-200' : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900'}`}
+               >
+                   <Icons.Layout className="w-4 h-4"/>
+                   <span className="text-sm font-medium">Team Pulse</span>
+               </button>
            </div>
 
            {/* Projects */}
@@ -251,7 +271,7 @@ export const ExecutionBoard: React.FC = () => {
                         <div 
                            key={p.id}
                            onClick={() => setView({ type: 'PROJECT', id: p.id })}
-                           className={`flex items-center group cursor-pointer px-3 py-1.5 rounded-lg transition-all ${isSelected ? 'bg-white shadow-sm text-zinc-900 border border-zinc-100' : 'text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100'}`}
+                           className={`flex items-center group cursor-pointer px-3 py-1.5 rounded-lg transition-all ${isSelected ? 'bg-white shadow-sm text-zinc-900 ring-1 ring-zinc-200' : 'text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100'}`}
                         >
                             <span className="text-sm font-medium truncate">{p.name}</span>
                         </div>
@@ -271,7 +291,7 @@ export const ExecutionBoard: React.FC = () => {
                        <div 
                            key={channel.id}
                            onClick={() => setView({ type: 'CHANNEL', id: channel.id })}
-                           className={`flex items-center group cursor-pointer px-3 py-1.5 rounded-lg transition-all ${isSelected ? 'bg-white shadow-sm text-zinc-900 border border-zinc-100' : 'text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100'}`}
+                           className={`flex items-center group cursor-pointer px-3 py-1.5 rounded-lg transition-all ${isSelected ? 'bg-white shadow-sm text-zinc-900 ring-1 ring-zinc-200' : 'text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100'}`}
                         >
                             <div className="flex-1 flex items-center justify-between min-w-0">
                                 <span className="text-sm font-medium truncate">{channel.name}</span>
@@ -284,7 +304,7 @@ export const ExecutionBoard: React.FC = () => {
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col bg-background overflow-hidden relative">
+      <div className="flex-1 flex flex-col bg-white overflow-hidden relative">
           
           {view.type === 'PROJECT' && (
               <ProjectDashboard 
@@ -302,77 +322,70 @@ export const ExecutionBoard: React.FC = () => {
 
           {view.type === 'MY_ISSUES' && (
             <>
-                <div className="h-14 flex items-center justify-between px-8 bg-background shrink-0 border-b border-zinc-100">
-                    <span className="text-sm font-semibold text-zinc-900">My Issues</span>
+                {/* Header */}
+                <div className="h-14 flex items-center justify-between px-8 bg-white shrink-0 border-b border-zinc-100">
+                    <div className="flex items-center gap-2">
+                        {scope === 'TEAM' ? <Icons.Layout className="w-4 h-4 text-zinc-500"/> : <Icons.Target className="w-4 h-4 text-zinc-500"/>}
+                        <span className="text-sm font-bold text-zinc-900">{scope === 'TEAM' ? 'Team Pulse' : 'My Issues'}</span>
+                        <span className="text-sm text-zinc-400 font-normal ml-2">/ {viewType === 'LIST' ? 'Table' : 'Board'}</span>
+                    </div>
+                    
+                    <div className="flex bg-zinc-100 p-0.5 rounded-lg">
+                        <button 
+                            onClick={() => setViewType('LIST')}
+                            className={`p-1.5 rounded-md transition-all ${viewType === 'LIST' ? 'bg-white shadow-sm text-zinc-900' : 'text-zinc-400 hover:text-zinc-600'}`}
+                            title="List View"
+                        >
+                            <Icons.List className="w-4 h-4" />
+                        </button>
+                        <button 
+                            onClick={() => setViewType('BOARD')}
+                            className={`p-1.5 rounded-md transition-all ${viewType === 'BOARD' ? 'bg-white shadow-sm text-zinc-900' : 'text-zinc-400 hover:text-zinc-600'}`}
+                            title="Board View"
+                        >
+                            <Icons.Kanban className="w-4 h-4" />
+                        </button>
+                    </div>
                 </div>
 
-                <div className="flex-1 overflow-hidden bg-background px-4">
-                    {displayTickets.length === 0 ? (
-                        <div className="h-full flex flex-col items-center justify-center text-zinc-400">
-                            <Icons.CheckCircle className="w-10 h-10 mb-4 opacity-10"/>
-                            <p className="text-sm">No tickets found.</p>
-                        </div>
-                    ) : (
-                        <div className="h-full overflow-y-auto custom-scrollbar pb-10">
-                            <table className="w-full text-left border-separate border-spacing-y-1">
-                                <thead className="text-[10px] uppercase font-semibold text-zinc-400">
-                                    <tr>
-                                        <th className="px-4 py-2 w-20">ID</th>
-                                        <th className="px-4 py-2">Title</th>
-                                        <th className="px-4 py-2 w-32">Status</th>
-                                        <th className="px-4 py-2 w-24">Priority</th>
-                                        <th className="px-4 py-2 w-16"></th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {displayTickets.map(ticket => {
-                                        const StatusIcon = STATUS_CONFIG[ticket.status].icon;
-                                        const PriorityConfig = PRIORITIES.find(p => p.value === ticket.priority) || PRIORITIES[4];
-                                        const assignee = users.find(u => u.id === ticket.assigneeId);
-                                        
-                                        return (
-                                            <tr 
-                                                key={ticket.id} 
-                                                onClick={() => handleTicketClick(ticket)}
-                                                className="group cursor-pointer hover:bg-surface transition-colors rounded-lg"
-                                            >
-                                                <td className="px-4 py-3 text-xs font-mono text-zinc-400 rounded-l-lg">{ticket.shortId}</td>
-                                                <td className="px-4 py-3 text-sm text-zinc-800 font-medium">
-                                                    {ticket.title}
-                                                    {ticket.channelId && <span className="ml-2 text-xs text-zinc-400 font-normal">in {channels.find(c => c.id === ticket.channelId)?.name}</span>}
-                                                    {ticket.projectId && <span className="ml-2 text-xs text-zinc-400 font-normal">in {projects.find(p => p.id === ticket.projectId)?.name}</span>}
-                                                </td>
-                                                <td className="px-4 py-3">
-                                                    <div className="flex items-center gap-2">
-                                                        <button 
-                                                            onClick={(e) => handleToggleStatus(e, ticket)}
-                                                            className="p-1 -ml-1 rounded hover:bg-zinc-200 transition-colors"
-                                                        >
-                                                            <StatusIcon className={`w-3.5 h-3.5 ${STATUS_CONFIG[ticket.status].color}`} />
-                                                        </button>
-                                                        <span className="text-xs text-zinc-500">{ticket.status}</span>
-                                                    </div>
-                                                </td>
-                                                <td className="px-4 py-3">
-                                                    <div className="flex items-center gap-1.5">
-                                                        <Icons.Flag className={`w-3 h-3 ${PriorityConfig.color}`} />
-                                                        <span className={`text-xs ${PriorityConfig.color}`}>{ticket.priority !== 'None' ? ticket.priority : ''}</span>
-                                                    </div>
-                                                </td>
-                                                <td className="px-4 py-3 rounded-r-lg text-right">
-                                                    {assignee && (
-                                                        <div className={`w-5 h-5 rounded-full ${assignee.color} text-[8px] text-white flex items-center justify-center font-bold inline-block`}>
-                                                            {assignee.initials}
-                                                        </div>
-                                                    )}
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
-                        </div>
+                <div className="flex-1 overflow-hidden bg-white flex flex-col">
+                    {scope === 'TEAM' && (
+                         <div className="px-8 pt-6 pb-2 shrink-0">
+                             <TeamHealthHeader users={users} tickets={displayTickets} />
+                         </div>
                     )}
+
+                    <div className="flex-1 overflow-hidden px-8 pb-8">
+                        {viewType === 'LIST' ? (
+                            <TicketList 
+                                tickets={displayTickets}
+                                users={users}
+                                channels={channels}
+                                projects={projects}
+                                onTicketClick={handleTicketClick}
+                                onToggleStatus={handleToggleStatus}
+                            />
+                        ) : (
+                            <div className="h-full overflow-hidden">
+                                {displayTickets.length === 0 ? (
+                                    <div className="h-full flex flex-col items-center justify-center text-zinc-400">
+                                        <Icons.CheckCircle className="w-10 h-10 mb-4 opacity-10"/>
+                                        <p className="text-sm">No tickets found.</p>
+                                    </div>
+                                ) : (
+                                    <TicketBoard 
+                                        tickets={displayTickets}
+                                        channels={channels}
+                                        users={users}
+                                        onTicketClick={handleTicketClick}
+                                        onStatusChange={handleStatusChange}
+                                        groupByChannel={false} 
+                                        groupByUser={scope === 'TEAM'} // Enable User Swimlanes for Team Pulse
+                                    />
+                                )}
+                            </div>
+                        )}
+                    </div>
                 </div>
             </>
           )}
