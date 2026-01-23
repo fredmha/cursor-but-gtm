@@ -160,7 +160,7 @@ const isDueBetween = (t: Ticket, start: Date, end: Date) => {
   return due >= start && due <= end;
 };
 
-const formatTicketLine = (t: Ticket) => `- [ID: ${t.id}] "${t.title}" (${t.status}${t.dueDate ? `, Due: ${t.dueDate}` : ""})`;
+const formatTicketLine = (t: Ticket) => `- [ID: ${t.id} | ${t.shortId}] "${t.title}" (${t.status}${t.dueDate ? `, Due: ${t.dueDate}` : ""})`;
 
 const formatTicketList = (label: string, items: Ticket[]) => {
   const lines = items.map(formatTicketLine).join("\n");
@@ -198,7 +198,7 @@ export const buildWeeklyContext = (campaign: Campaign) => {
     p => p.status === "On Track" || p.status === "At Risk"
   );
 
-  const overdueList = overdue.map(t => `- [ID: ${t.id}] "${t.title}" (Due: ${t.dueDate})`).join("\n");
+  const overdueList = overdue.map(t => `- [ID: ${t.id} | ${t.shortId}] "${t.title}" (Due: ${t.dueDate})`).join("\n");
   const projectList = activeProjects.map(
     p => `- [ID: ${p.id}] "${p.name}" (${p.description || "No description"})`
   ).join("\n");
@@ -242,7 +242,7 @@ export const buildDailyContext = (campaign: Campaign, user: User) => {
     isActiveTicket(t) && t.dueDate && t.dueDate <= todayStr
   );
 
-  const todoList = todaysWork.map(t => `- [ID: ${t.id}] "${t.title}" (${t.status})`).join("\n");
+  const todoList = todaysWork.map(t => `- [ID: ${t.id} | ${t.shortId}] "${t.title}" (${t.status})`).join("\n");
 
   return `
     Today is: ${now.toLocaleDateString()}

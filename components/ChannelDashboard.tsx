@@ -149,7 +149,7 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
                         <Icons.Zap className="w-6 h-6 text-zinc-900" />
                     </div>
                     <div className="space-y-1.5">
-                        <h2 className="text-2xl font-serif font-medium text-zinc-900 tracking-tight leading-none">{channel.name}</h2>
+                        <h2 className="text-xl font-bold text-zinc-900 tracking-[0.1em] uppercase leading-none">{channel.name}</h2>
                         <div className="flex gap-2">
                             {channel.tags?.map(tag => (
                                 <span

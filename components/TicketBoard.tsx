@@ -57,7 +57,7 @@ export const TicketBoard: React.FC<TicketBoardProps> = ({
         className="bg-white border border-zinc-200/60 p-5 rounded-none hover:border-zinc-300 hover:shadow-sm cursor-pointer transition-all duration-200 group active:cursor-grabbing"
       >
         <div className="flex justify-between items-start mb-4">
-          <span className="text-[9px] font-mono text-zinc-400 tabular-nums uppercase tracking-widest">{ticket.shortId}</span>
+          <span className="text-[9px] font-bold text-zinc-400 tabular-nums uppercase tracking-[0.2em]">{ticket.shortId}</span>
           {ticket.priority !== 'None' && (
             <div className={`text-[8px] font-bold uppercase tracking-[0.2em] ${ticket.priority === 'Urgent' ? 'text-red-500' :
               ticket.priority === 'High' ? 'text-amber-600' : 'text-zinc-400'
@@ -94,7 +94,7 @@ export const TicketBoard: React.FC<TicketBoardProps> = ({
       <div className="px-8 py-6 flex items-center justify-between bg-white">
         <div className="flex items-center gap-4">
           <div className="text-zinc-900">{icon}</div>
-          <h3 className="text-sm font-serif font-medium text-zinc-900 tracking-tight">{title}</h3>
+          <h3 className="text-sm font-bold text-zinc-900 tracking-tight uppercase tracking-widest">{title}</h3>
         </div>
         <div className="flex items-center gap-3">
           <span className="text-[10px] font-bold text-zinc-300 tabular-nums uppercase tracking-[0.2em]">{count} items</span>
@@ -140,7 +140,7 @@ export const TicketBoard: React.FC<TicketBoardProps> = ({
     const unassignedTickets = tickets.filter(t => !t.assigneeId);
 
     return (
-      <div className="flex flex-col h-full overflow-y-auto custom-scrollbar bg-white">
+      <div className="flex flex-col h-auto bg-white">
         {users.map(user => {
           const userTickets = tickets.filter(t => t.assigneeId === user.id);
           return renderSwimlane(
@@ -175,7 +175,7 @@ export const TicketBoard: React.FC<TicketBoardProps> = ({
     }
 
     return (
-      <div className="flex flex-col h-full overflow-y-auto custom-scrollbar bg-white">
+      <div className="flex flex-col h-auto bg-white">
         {channelsWithTickets.map(channel => {
           const channelTickets = tickets.filter(t => t.channelId === channel.id);
           return renderSwimlane(
@@ -192,10 +192,10 @@ export const TicketBoard: React.FC<TicketBoardProps> = ({
 
   // Standard Column View (Fallback)
   return (
-    <div className="grid grid-cols-3 h-full overflow-y-auto custom-scrollbar bg-zinc-50/50">
+    <div className="grid grid-cols-3 h-auto bg-zinc-50/50">
       {STATUS_COLUMNS.map((col, idx) => (
         <div key={col.id} className={`flex flex-col ${idx !== 2 ? 'border-r border-zinc-200/60' : ''}`}>
-          <div className="px-8 py-6 border-b border-zinc-200/60 flex items-center justify-between sticky top-0 bg-white z-20">
+          <div className="px-8 py-6 border-b border-zinc-200/60 flex items-center justify-between bg-white z-20">
             <span className="text-[10px] uppercase font-bold tracking-[0.3em] text-zinc-900">{col.label}</span>
             <span className="text-[10px] font-bold text-zinc-300 tabular-nums">
               {tickets.filter(t => {
@@ -206,7 +206,7 @@ export const TicketBoard: React.FC<TicketBoardProps> = ({
             </span>
           </div>
           <div
-            className="flex-1 p-4 space-y-4 overflow-y-auto custom-scrollbar"
+            className="flex-1 p-4 space-y-4"
             onDragOver={handleDragOver}
             onDrop={(e) => handleDrop(e, col.id)}
           >

@@ -1,16 +1,18 @@
 
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { useStore, generateId } from '../store';
-import { Icons, PRIORITIES } from '../constants';
-import { GoogleGenAI, Content, Part } from "@google/genai";
+import { Icons } from '../constants';
+import { GoogleGenAI, Content } from "@google/genai";
 import { 
     WEEKLY_TOOLS, DAILY_TOOLS, 
     WEEKLY_SYSTEM_INSTRUCTION, DAILY_SYSTEM_INSTRUCTION, 
     buildWeeklyContext, buildDailyContext 
 } from '../services/reviewAgent';
-import { TicketStatus, ChatMessage, ChatPart } from '../types';
+import { TicketStatus, ChatMessage, Ticket } from '../types';
 import { AgentTicketCard } from './AgentTicketCard';
 import { buildReviewAgentTestCampaign } from '../fixtures/reviewAgentFixture';
+import { ChatKanbanCallout } from './ChatKanbanCallout';
+import { TicketModal } from './TicketModal';
 
 interface PendingAction {
     id: string; 
@@ -20,11 +22,6 @@ interface PendingAction {
     status: 'PENDING' | 'APPROVED' | 'REJECTED';
 }
 
-interface TaskCallout {
-    id: string;
-    title?: string;
-    ticketIds: string[];
-}
 
 interface ReviewModeProps {
     initialMode?: 'DAILY' | 'WEEKLY';
@@ -43,7 +40,13 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
     const [isTyping, setIsTyping] = useState(false);
     const [pendingActions, setPendingActions] = useState<PendingAction[]>([]);
     const [clientError, setClientError] = useState<string | null>(null);
-    const [taskCallouts, setTaskCallouts] = useState<TaskCallout[]>([]);
+    const [editingTicket, setEditingTicket] = useState<Ticket | null>(null);
+    const [showTicketModal, setShowTicketModal] = useState(false);
+    const inputRef = useRef<HTMLInputElement>(null);
+    const [mentionQuery, setMentionQuery] = useState('');
+    const [mentionOpen, setMentionOpen] = useState(false);
+    const [mentionIndex, setMentionIndex] = useState(0);
+    const [mentionStart, setMentionStart] = useState<number | null>(null);
     
     const apiKey = "AIzaSyAvHokD5AdbLMPbKyFEgpTfq0HI7NTJ4cQ";
     const client = useMemo(() => {
@@ -122,6 +125,48 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
         });
     };
 
+    const ticketIndex = useMemo(() => {
+        const map = new Map<string, { ticket: Ticket; parentId: string; type: 'CHANNEL' | 'PROJECT' }>();
+        (campaign?.channels || []).forEach(c => {
+            c.tickets.forEach(t => map.set(t.id, { ticket: t, parentId: c.id, type: 'CHANNEL' }));
+        });
+        (campaign?.projects || []).forEach(p => {
+            p.tickets.forEach(t => map.set(t.id, { ticket: t, parentId: p.id, type: 'PROJECT' }));
+        });
+        return map;
+    }, [campaign]);
+
+    const calloutTickets = useMemo(() => {
+        const ids = new Set<string>();
+        messages.forEach(msg => {
+            msg.parts.forEach(part => {
+                const call = part.functionCall;
+                if (call?.name === 'show_tasks') {
+                    const ticketIds = Array.isArray(call.args?.ticketIds) ? call.args.ticketIds : [];
+                    ticketIds.forEach((id: string) => ids.add(id));
+                }
+            });
+        });
+        return Array.from(ids).map(id => ticketIndex.get(id)?.ticket).filter(Boolean) as Ticket[];
+    }, [messages, ticketIndex]);
+
+    const mentionCandidates = useMemo(() => {
+        if (!mentionOpen) return [];
+        const query = mentionQuery.trim().toLowerCase();
+        if (!query) return calloutTickets;
+        return calloutTickets.filter(t => {
+            const title = t.title?.toLowerCase() || '';
+            const shortId = t.shortId?.toLowerCase() || '';
+            return title.includes(query) || shortId.includes(query);
+        });
+    }, [mentionOpen, mentionQuery, calloutTickets]);
+
+    useEffect(() => {
+        if (mentionIndex >= mentionCandidates.length) {
+            setMentionIndex(0);
+        }
+    }, [mentionCandidates, mentionIndex]);
+
     useEffect(() => {
         if (!apiKey) {
             setClientError(null);
@@ -133,7 +178,135 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
     const clearChatState = () => {
         setMessages([]);
         setPendingActions([]);
-        setTaskCallouts([]);
+    };
+
+    const getMentionContext = (value: string, cursor: number) => {
+        const text = value.slice(0, cursor);
+        const match = text.match(/(^|\s)@([A-Za-z0-9-_]*)$/);
+        if (!match) return null;
+        const query = match[2] || '';
+        const start = cursor - query.length - 1;
+        return { start, query };
+    };
+
+    const updateMentionState = (value: string, cursor: number) => {
+        const ctx = getMentionContext(value, cursor);
+        if (!ctx) {
+            setMentionOpen(false);
+            setMentionQuery('');
+            setMentionStart(null);
+            return;
+        }
+        setMentionOpen(true);
+        setMentionQuery(ctx.query);
+        setMentionStart(ctx.start);
+        setMentionIndex(0);
+    };
+
+    const insertMention = (ticket: Ticket) => {
+        if (mentionStart === null) return;
+        const cursor = inputRef.current?.selectionStart ?? input.length;
+        const before = input.slice(0, mentionStart);
+        const after = input.slice(cursor);
+        const mentionText = `@${ticket.shortId || ticket.id}`;
+        const spacer = after.startsWith(' ') || after.length === 0 ? '' : ' ';
+        const nextValue = `${before}${mentionText}${spacer}${after}`;
+        setInput(nextValue);
+        setMentionOpen(false);
+        setMentionQuery('');
+        setMentionStart(null);
+        requestAnimationFrame(() => {
+            const pos = (before + mentionText + spacer).length;
+            inputRef.current?.focus();
+            inputRef.current?.setSelectionRange(pos, pos);
+        });
+    };
+
+    const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const nextValue = e.target.value;
+        setInput(nextValue);
+        const cursor = e.target.selectionStart ?? nextValue.length;
+        updateMentionState(nextValue, cursor);
+    };
+
+    const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (mentionOpen && mentionCandidates.length > 0) {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                setMentionIndex(prev => Math.min(prev + 1, mentionCandidates.length - 1));
+                return;
+            }
+            if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                setMentionIndex(prev => Math.max(prev - 1, 0));
+                return;
+            }
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const selected = mentionCandidates[mentionIndex];
+                if (selected) insertMention(selected);
+                return;
+            }
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                setMentionOpen(false);
+                return;
+            }
+        }
+
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            handleSend();
+        }
+    };
+
+    const handleTicketClick = (ticket: Ticket) => {
+        setEditingTicket(ticket);
+        setShowTicketModal(true);
+    };
+
+    const handleStatusChange = (ticketId: string, newStatus: TicketStatus) => {
+        const target = ticketIndex.get(ticketId);
+        if (!target) return;
+        if (target.type === 'CHANNEL') {
+            updateTicket(target.parentId, ticketId, { status: newStatus });
+        } else {
+            updateProjectTicket(target.parentId, ticketId, { status: newStatus });
+        }
+    };
+
+    const handleSaveEditedTicket = (data: any) => {
+        if (!editingTicket) return;
+        const target = ticketIndex.get(editingTicket.id);
+        if (!target) return;
+        const updates: Partial<Ticket> = {
+            title: data.title,
+            description: data.description,
+            priority: data.priority,
+            assigneeId: data.assigneeId,
+            linkedDocIds: data.linkedDocIds,
+            startDate: data.startDate || undefined,
+            dueDate: data.endDate || undefined
+        };
+        if (target.type === 'CHANNEL') {
+            updateTicket(target.parentId, editingTicket.id, updates);
+        } else {
+            updateProjectTicket(target.parentId, editingTicket.id, updates);
+        }
+        setShowTicketModal(false);
+        setEditingTicket(null);
+    };
+
+    const handleDeleteEditedTicket = (ticketId: string) => {
+        const target = ticketIndex.get(ticketId);
+        if (!target) return;
+        if (target.type === 'CHANNEL') {
+            deleteTicket(target.parentId, ticketId);
+        } else {
+            deleteProjectTicket(target.parentId, ticketId);
+        }
+        setShowTicketModal(false);
+        setEditingTicket(null);
     };
 
     // --- Load History / Init Session ---
@@ -266,14 +439,6 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
 
                 const showTaskCalls = newActions.filter(a => a.name === 'show_tasks');
                 if (showTaskCalls.length > 0) {
-                    setTaskCallouts(prev => [
-                        ...prev,
-                        ...showTaskCalls.map(call => ({
-                            id: call.id,
-                            title: call.args?.title,
-                            ticketIds: Array.isArray(call.args?.ticketIds) ? call.args.ticketIds : []
-                        }))
-                    ]);
                     void handleShowTasksCalls(showTaskCalls);
                 }
             }
@@ -292,6 +457,9 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
         }
         const text = input;
         setInput('');
+        setMentionOpen(false);
+        setMentionQuery('');
+        setMentionStart(null);
 
         const userMsg: ChatMessage = { 
             id: generateId(), 
@@ -416,7 +584,7 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
     // --- Render ---
     useEffect(() => {
         scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages, pendingActions, taskCallouts, isTyping]);
+    }, [messages, pendingActions, isTyping]);
 
     return (
         <div className="h-full flex flex-col bg-white">
@@ -490,14 +658,35 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
                     {messages.map((msg) => (
                         <div key={msg.id} className={`mb-6 flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                             {msg.parts.map((part, pIdx) => {
-                                if (part.text) {
+                                if (part.functionCall?.name === 'show_tasks') {
+                                    const ticketIds = Array.isArray(part.functionCall?.args?.ticketIds) ? part.functionCall.args.ticketIds : [];
+                                    const tickets = ticketIds.map((id: string) => ticketIndex.get(id)?.ticket).filter(Boolean) as Ticket[];
                                     return (
-                                        <div key={pIdx} className={`px-5 py-3.5 rounded-2xl text-sm leading-relaxed shadow-sm max-w-[85%] ${
-                                            msg.role === 'user' 
-                                            ? 'bg-zinc-900 text-white rounded-br-sm' 
-                                            : 'bg-white border border-zinc-100 text-zinc-700 rounded-bl-sm'
+                                        <div key={pIdx} className="w-full">
+                                            <ChatKanbanCallout
+                                                title={part.functionCall?.args?.title}
+                                                tickets={tickets}
+                                                channels={campaign?.channels || []}
+                                                users={users}
+                                                onTicketClick={handleTicketClick}
+                                                onStatusChange={handleStatusChange}
+                                            />
+                                        </div>
+                                    );
+                                }
+                                if (part.text) {
+                                    const isUser = msg.role === 'user';
+                                    return (
+                                        <div key={pIdx} className={`px-5 py-3.5 rounded-2xl shadow-sm max-w-[85%] ${
+                                            isUser 
+                                            ? 'bg-zinc-900 text-white rounded-br-sm text-sm leading-relaxed' 
+                                            : 'bg-white border border-zinc-100 rounded-bl-sm'
                                         }`}>
-                                            {part.text}
+                                            {isUser ? part.text : (
+                                                <div className="space-y-2">
+                                                    {renderFormattedMessage(part.text)}
+                                                </div>
+                                            )}
                                         </div>
                                     );
                                 }
@@ -547,79 +736,6 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
                         </div>
                     ))}
 
-                    {/* Task Callouts */}
-                    {taskCallouts.map(callout => {
-                        const tickets = [
-                            ...(campaign?.channels || []).flatMap(c => c.tickets),
-                            ...(campaign?.projects || []).flatMap(p => p.tickets)
-                        ].filter(t => callout.ticketIds.includes(t.id));
-
-                        const statusOrder = [
-                            TicketStatus.Todo,
-                            TicketStatus.InProgress,
-                            TicketStatus.Backlog,
-                            TicketStatus.Blocked,
-                            TicketStatus.Done
-                        ];
-
-                        const columns = statusOrder.map(status => ({
-                            status,
-                            tickets: tickets.filter(t => t.status === status)
-                        }));
-
-                        return (
-                            <div key={callout.id} className="my-6">
-                                {callout.title && (
-                                    <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2">
-                                        {callout.title}
-                                    </div>
-                                )}
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    {columns.map(col => (
-                                        <div key={col.status} className="bg-white border border-zinc-200 rounded-xl p-3 shadow-sm">
-                                            <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">
-                                                {col.status}
-                                            </div>
-                                            <div className="space-y-3">
-                                                {col.tickets.length === 0 ? (
-                                                    <div className="text-xs text-zinc-400">No tasks</div>
-                                                ) : (
-                                                    col.tickets.map(t => (
-                                                        <AgentTicketCard
-                                                            key={t.id}
-                                                            actionId={t.id}
-                                                            args={{
-                                                                title: t.title,
-                                                                description: t.description,
-                                                                priority: t.priority,
-                                                                channelId: t.channelId,
-                                                                projectId: t.projectId,
-                                                                assigneeId: t.assigneeId
-                                                            }}
-                                                            status="PENDING"
-                                                            users={users}
-                                                            channels={campaign?.channels || []}
-                                                            projects={campaign?.projects || []}
-                                                            onUpdate={(updates) => {
-                                                                if (t.channelId) {
-                                                                    updateTicket(t.channelId, t.id, updates);
-                                                                } else if (t.projectId) {
-                                                                    updateProjectTicket(t.projectId, t.id, updates);
-                                                                }
-                                                            }}
-                                                            onApprove={() => {}}
-                                                            onReject={() => {}}
-                                                        />
-                                                    ))
-                                                )}
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        );
-                    })}
-
                     {isTyping && (
                         <div className="flex justify-start mb-6">
                             <div className="bg-white border border-zinc-100 px-4 py-3 rounded-2xl rounded-bl-sm shadow-sm flex gap-1.5 items-center">
@@ -636,14 +752,38 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
             {/* Input */}
             <div className="p-6 bg-white border-t border-zinc-100 shrink-0">
                 <div className="max-w-2xl mx-auto relative">
+                    {mentionOpen && mentionCandidates.length > 0 && (
+                        <div className="absolute bottom-full left-0 mb-2 w-full bg-white border border-zinc-200 shadow-2xl rounded-none overflow-hidden z-30">
+                            {mentionCandidates.slice(0, 6).map((ticket, idx) => (
+                                <button
+                                    key={ticket.id}
+                                    type="button"
+                                    onMouseDown={(e) => {
+                                        e.preventDefault();
+                                        insertMention(ticket);
+                                    }}
+                                    className={`w-full flex items-center gap-3 px-4 py-2 text-left transition-colors ${idx === mentionIndex ? 'bg-zinc-900 text-white' : 'text-zinc-700 hover:bg-zinc-50'}`}
+                                >
+                                    <span className={`text-[10px] font-bold uppercase tracking-[0.2em] ${idx === mentionIndex ? 'text-white/70' : 'text-zinc-400'}`}>
+                                        @{ticket.shortId}
+                                    </span>
+                                    <span className={`text-xs font-medium truncate ${idx === mentionIndex ? 'text-white' : 'text-zinc-700'}`}>
+                                        {ticket.title}
+                                    </span>
+                                </button>
+                            ))}
+                        </div>
+                    )}
                     <input 
                         className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-4 py-3.5 pr-12 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all shadow-sm placeholder-zinc-400"
                         placeholder={`Talk to your ${mode === 'DAILY' ? 'Standup' : 'Review'} agent...`}
                         value={input}
-                        onChange={e => setInput(e.target.value)}
-                        onKeyDown={e => e.key === 'Enter' && handleSend()}
+                        onChange={handleInputChange}
+                        onKeyDown={handleInputKeyDown}
+                        onClick={(e) => updateMentionState(e.currentTarget.value, e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
                         autoFocus
                         disabled={isTyping}
+                        ref={inputRef}
                     />
                     <button 
                         onClick={handleSend}
@@ -654,6 +794,32 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
                     </button>
                 </div>
             </div>
+
+            {showTicketModal && editingTicket && (
+                <TicketModal
+                    initialData={{
+                        id: editingTicket.id,
+                        title: editingTicket.title,
+                        description: editingTicket.description,
+                        priority: editingTicket.priority,
+                        assigneeId: editingTicket.assigneeId,
+                        channelId: editingTicket.channelId,
+                        projectId: editingTicket.projectId,
+                        linkedDocIds: editingTicket.linkedDocIds,
+                        startDate: editingTicket.startDate,
+                        endDate: editingTicket.dueDate
+                    }}
+                    context={{
+                        channels: campaign?.channels || [],
+                        projects: campaign?.projects || [],
+                        users,
+                        docs: campaign?.docs || []
+                    }}
+                    onClose={() => { setShowTicketModal(false); setEditingTicket(null); }}
+                    onSave={handleSaveEditedTicket}
+                    onDelete={(id) => handleDeleteEditedTicket(id)}
+                />
+            )}
         </div>
     );
 };

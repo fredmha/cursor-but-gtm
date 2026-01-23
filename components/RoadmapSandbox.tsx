@@ -141,7 +141,7 @@ const StrategyHorizon: React.FC<{
                     return (
                         <div key={project.id} className="flex border-b border-zinc-100 group/row hover:bg-zinc-50 transition-colors h-14">
                             {/* Project Header (Left) */}
-                            <div className="shrink-0 border-r border-zinc-100 bg-zinc-50/50 p-3 flex flex-col justify-center" style={{ width: LEFT_PANEL_WIDTH }}>
+                            <div className="shrink-0 border-r border-zinc-100 bg-zinc-50 p-3 flex flex-col justify-center sticky left-0 z-40 shadow-[1px_0_0_0_rgba(0,0,0,0.05)]" style={{ width: LEFT_PANEL_WIDTH }}>
                                 <div
                                     onClick={() => onProjectClick(project.id)}
                                     className="flex items-center gap-2 cursor-pointer group"
@@ -163,12 +163,12 @@ const StrategyHorizon: React.FC<{
                                 {/* The Main Project Bar */}
                                 <div
                                     onClick={() => onProjectClick(project.id)}
-                                    className="absolute top-3 h-8 rounded-lg bg-white border border-zinc-200 hover:border-zinc-300 shadow-sm cursor-pointer group transition-all flex items-center px-3 gap-2 z-10 hover:z-20"
+                                    className="absolute top-3 h-8 rounded-none bg-white border border-zinc-900/10 hover:border-zinc-900/30 hover:shadow-sm cursor-pointer group transition-all flex items-center px-3 gap-2 z-10 hover:z-20"
                                     style={{ left: startOffsetPixels, width: widthPixels }}
                                 >
-                                    <div className={`w-1.5 h-1.5 rounded-full ${colorClass}`}></div>
+                                    <div className={`w-1 h-3 ${colorClass} opacity-80 group-hover:opacity-100 transition-opacity`}></div>
                                     <div className="pl-1 overflow-hidden">
-                                        <div className="text-[10px] font-bold text-zinc-600 truncate">{project.name}</div>
+                                        <div className="text-[9px] font-bold text-zinc-900 truncate uppercase tracking-widest">{project.name}</div>
                                     </div>
                                 </div>
                             </div>
@@ -227,12 +227,12 @@ const RoadmapCard: React.FC<{
             draggable
             onDragStart={(e) => onDragStart(e, item.id)}
             onClick={(e) => { e.stopPropagation(); onClick(); }}
-            className={`rounded-md bg-white border border-zinc-200 hover:border-zinc-300 hover:shadow-sm transition-all cursor-move flex items-center px-2 shadow-sm z-20 group overflow-hidden ${isDragging ? 'opacity-50 ring-2 ring-indigo-500 scale-95' : ''} ${isBacklog ? 'h-8 mb-0 shrink-0' : ''}`}
+            className={`rounded-none bg-white border border-zinc-200 hover:border-zinc-400 hover:shadow-sm transition-all cursor-move flex items-center px-3 z-20 group overflow-hidden ${isDragging ? 'opacity-50 grayscale' : ''} ${isBacklog ? 'h-8 mb-0 shrink-0' : ''}`}
             style={style}
         >
-            <div className={`absolute left-0 top-0 bottom-0 w-1 rounded-l-md ${item.type === 'NOTE' ? 'bg-pink-400' : 'bg-indigo-500'}`}></div>
+            <div className={`absolute left-0 top-0 bottom-0 w-0.5 ${item.type === 'NOTE' ? 'bg-zinc-300' : 'bg-zinc-900'} opacity-60 group-hover:opacity-100 transition-opacity`}></div>
             <div className="flex items-center gap-2 w-full overflow-hidden pl-2">
-                <span className="text-xs font-medium text-zinc-700 truncate flex-1">{item.title}</span>
+                <span className="text-[10px] font-bold text-zinc-900 truncate flex-1 tracking-tight uppercase tracking-wider">{item.title}</span>
 
                 <div className="flex items-center gap-2 shrink-0">
                     {(item.ownerIds && item.ownerIds.length > 0) && (
@@ -241,7 +241,7 @@ const RoadmapCard: React.FC<{
                                 const u = users.find(user => user.id === uid);
                                 if (!u) return null;
                                 return (
-                                    <div key={uid} className={`w-4 h-4 rounded-full ${u.color} border border-white flex items-center justify-center text-[6px] text-white ring-1 ring-white`}>
+                                    <div key={uid} className={`w-4 h-4 rounded-none ${u.color} border border-white flex items-center justify-center text-[7px] text-white font-bold grayscale shadow-sm`}>
                                         {u.initials}
                                     </div>
                                 )
@@ -491,7 +491,7 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
 
                     {/* TIMELINE HEADER */}
                     <div className="flex sticky top-0 z-40 bg-white min-w-max border-b border-zinc-100">
-                        <div className="shrink-0 border-r border-zinc-100 bg-zinc-50 p-3 flex items-end pb-3" style={{ width: LEFT_PANEL_WIDTH }}>
+                        <div className="shrink-0 border-r border-zinc-100 bg-zinc-50 p-3 flex items-end pb-3 sticky left-0 z-50 shadow-[1px_0_0_0_rgba(0,0,0,0.05)]" style={{ width: LEFT_PANEL_WIDTH }}>
                             <span className="text-[10px] font-mono font-bold text-zinc-400 uppercase">Channels</span>
                         </div>
                         <div className="flex">
@@ -554,7 +554,7 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
                                     {/* Scheduled Row */}
                                     <div className="flex" style={{ minHeight: rowHeight }}>
                                         {/* LEFT SIDEBAR (Controls & Unassigned) */}
-                                        <div className="shrink-0 border-r border-zinc-100 bg-zinc-50/30 p-4 flex flex-col" style={{ width: LEFT_PANEL_WIDTH }}>
+                                        <div className="shrink-0 border-r border-zinc-100 bg-zinc-50 p-4 flex flex-col sticky left-0 z-40 shadow-[1px_0_0_0_rgba(0,0,0,0.05)]" style={{ width: LEFT_PANEL_WIDTH }}>
 
                                             <div
                                                 className="flex flex-col mb-3 group/header cursor-pointer hover:bg-zinc-100 p-2 -m-2 rounded transition-colors"
@@ -643,7 +643,7 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
                         })}
 
                         {/* ADD CHANNEL BUTTON */}
-                        <div className="p-4 bg-white sticky left-0 w-full border-t border-zinc-100">
+                        <div className="p-4 bg-white sticky left-0 w-full border-t border-zinc-100 z-30">
                             <button
                                 onClick={() => setShowChannelModal(true)}
                                 className="flex items-center gap-2 px-4 py-2 rounded-lg border border-dashed border-zinc-300 text-zinc-500 hover:text-zinc-900 hover:border-zinc-400 hover:bg-zinc-50 transition-all text-xs font-bold uppercase tracking-wider"
