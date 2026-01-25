@@ -163,7 +163,10 @@ export interface DocFolder {
   name: string;
   icon?: string; // Emoji
   parentId?: string; // The parent folder ID for nesting
+  order?: number; // Manual ordering within the same parent
   isRagIndexed?: boolean;
+  isArchived?: boolean;
+  isFavorite?: boolean;
   createdAt: string;
 }
 
@@ -192,17 +195,21 @@ export interface CanvasEdge {
 
 export interface ContextDoc {
   id: string;
+  shortId?: string;
   title: string;
   content: string; // HTML Content OR JSON string for Canvas
   format?: DocFormat; // Defaults to TEXT
   type?: DocType; // Kept for legacy/compatibility
   folderId?: string; // The folder this doc belongs to
+  order?: number; // Manual ordering within the same folder/root
   lastUpdated: string;
   isAiGenerated: boolean;
   tags?: string[];
   channelId?: string;
   icon?: string; // Emoji customization for file
   isRagIndexed?: boolean;
+  isArchived?: boolean;
+  isFavorite?: boolean;
   // Collaboration metadata
   lastEditedBy?: string; // User ID
   createdBy?: string; // User ID
@@ -244,6 +251,7 @@ export interface Campaign {
   docFolders: DocFolder[]; // New Folders
   docs: ContextDoc[];
   availableTags?: string[]; // Global tags list
+  recentDocIds?: string[]; // Simple recency tracking for mentions/search
 
   // Agent / Review State
   lastDailyStandup?: string; // ISO Date

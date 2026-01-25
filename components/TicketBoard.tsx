@@ -164,9 +164,12 @@ export const TicketBoard: React.FC<TicketBoardProps> = ({
   }
 
   if (groupByChannel) {
-    const channelsWithTickets = channels.filter(c => tickets.some(t => t.channelId === c.id));
+    const channelTicketsArr = tickets.filter(t => !!t.channelId);
+    const nonChannelTickets = tickets.filter(t => !t.channelId);
 
-    if (channelsWithTickets.length === 0) {
+    const channelsWithTickets = channels.filter(c => channelTicketsArr.some(t => t.channelId === c.id));
+
+    if (channelsWithTickets.length === 0 && nonChannelTickets.length === 0) {
       return (
         <div className="flex flex-col items-center justify-center py-40 text-zinc-400 bg-white">
           <p className="text-[10px] font-bold uppercase tracking-[0.4em] opacity-30">No Active Flows</p>
@@ -177,7 +180,7 @@ export const TicketBoard: React.FC<TicketBoardProps> = ({
     return (
       <div className="flex flex-col h-auto bg-white">
         {channelsWithTickets.map(channel => {
-          const channelTickets = tickets.filter(t => t.channelId === channel.id);
+          const channelTickets = channelTicketsArr.filter(t => t.channelId === channel.id);
           return renderSwimlane(
             channel.name,
             <Icons.Zap className="w-4 h-4" />,
@@ -186,6 +189,13 @@ export const TicketBoard: React.FC<TicketBoardProps> = ({
             channelTickets.length
           );
         })}
+        {nonChannelTickets.length > 0 && renderSwimlane(
+          "Project General",
+          <Icons.Target className="w-4 h-4" />,
+          nonChannelTickets,
+          "non-channel",
+          nonChannelTickets.length
+        )}
       </div>
     );
   }

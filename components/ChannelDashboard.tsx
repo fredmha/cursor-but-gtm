@@ -5,7 +5,6 @@ import { Icons } from '../constants';
 import { TicketStatus, Ticket } from '../types';
 import { TicketBoard } from './TicketBoard';
 import { TicketModal } from './TicketModal';
-import { ChannelPlanModal } from './lab/ChannelPlanModal';
 
 interface ChannelDashboardProps {
     channelId: string;
@@ -30,7 +29,7 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
         addChannelMember, removeChannelMember
     } = useStore();
 
-    const [activeTab, setActiveTab] = useState<'QUEUE' | 'KANBAN' | 'STRATEGY'>('QUEUE');
+    const [activeTab, setActiveTab] = useState<'QUEUE' | 'KANBAN'>('QUEUE');
     const [showTicketModal, setShowTicketModal] = useState(false);
     const [editingTicket, setEditingTicket] = useState<Ticket | null>(null);
 
@@ -123,21 +122,6 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
     };
 
 
-    if (activeTab === 'STRATEGY') {
-        return (
-            <div className="h-full bg-white relative flex flex-col">
-                <div className="absolute top-4 right-4 z-50">
-                    <button
-                        onClick={() => setActiveTab('QUEUE')}
-                        className="bg-white border border-zinc-200 text-zinc-500 hover:text-zinc-900 px-3 py-1.5 rounded-none text-[9px] font-bold uppercase tracking-widest shadow-sm"
-                    >
-                        Close Lab
-                    </button>
-                </div>
-                <ChannelPlanModal channelId={channelId} onClose={() => { }} />
-            </div>
-        );
-    }
 
     return (
         <div className={`flex flex-col bg-white h-full ${isModal ? 'rounded-sm shadow-2xl overflow-hidden' : ''}`}>
@@ -286,12 +270,6 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
                         </div>
 
                         <div className="flex items-center gap-3">
-                            <button
-                                onClick={() => setActiveTab('STRATEGY')}
-                                className="text-[10px] font-bold uppercase tracking-wider px-3 py-2 rounded-xl text-zinc-500 hover:text-zinc-900 transition-colors flex items-center gap-2"
-                            >
-                                <Icons.Sparkles className="w-3.5 h-3.5 text-zinc-400" /> Strategic Plan
-                            </button>
                             <div className="w-px h-6 bg-zinc-200 mx-1" />
                             <button
                                 onClick={() => { setEditingTicket(null); setShowTicketModal(true); }}
@@ -349,7 +327,7 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
                         )}
 
                         {activeTab === 'KANBAN' && (
-                            <div className="h-full overflow-hidden bg-white">
+                            <div className="h-full overflow-y-auto custom-scrollbar bg-white">
                                 <TicketBoard
                                     tickets={allTickets}
                                     channels={campaign?.channels || []}

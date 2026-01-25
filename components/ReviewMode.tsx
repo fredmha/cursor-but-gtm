@@ -8,7 +8,7 @@ import {
     WEEKLY_SYSTEM_INSTRUCTION, DAILY_SYSTEM_INSTRUCTION, 
     buildWeeklyContext, buildDailyContext 
 } from '../services/reviewAgent';
-import { TicketStatus, ChatMessage, Ticket } from '../types';
+import { TicketStatus, ChatMessage, Ticket, Priority, ContextDoc } from '../types';
 import { AgentTicketCard } from './AgentTicketCard';
 import { buildReviewAgentTestCampaign } from '../fixtures/reviewAgentFixture';
 import { ChatKanbanCallout } from './ChatKanbanCallout';
@@ -21,6 +21,60 @@ interface PendingAction {
     args: any;
     status: 'PENDING' | 'APPROVED' | 'REJECTED';
 }
+
+type MentionCandidate =
+    | { kind: 'ticket'; id: string; token: string; label: string }
+    | { kind: 'doc'; id: string; token: string; label: string };
+
+type TicketModalInitialData = {
+    id?: string;
+    title?: string;
+    description?: string;
+    status?: string;
+    priority?: Priority;
+    assigneeId?: string;
+    channelId?: string;
+    projectId?: string;
+    durationWeeks?: number;
+    startDate?: string;
+    endDate?: string;
+    linkedDocIds?: string[];
+};
+
+type TicketTarget = {
+    ticket: Ticket;
+    parentId: string;
+    type: 'CHANNEL' | 'PROJECT';
+};
+
+type InlineEditDraft = {
+    target: TicketTarget;
+    form: TicketModalInitialData;
+};
+
+const normalizeMentionToken = (token: string) => token.replace(/^@/, '').trim().toLowerCase();
+const cleanExtract = (value: string) => value.trim().replace(/[.!,]+$/g, '').trim();
+const normalizeDateInput = (value?: string) => (value && value.trim() ? value : undefined);
+
+const arraysEqual = (a?: string[], b?: string[]) => {
+    const left = a || [];
+    const right = b || [];
+    if (left.length !== right.length) return false;
+    for (let i = 0; i < left.length; i += 1) {
+        if (left[i] !== right[i]) return false;
+    }
+    return true;
+};
+
+const parsePriorityValue = (value: string): Priority | null => {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'urgent') return 'Urgent';
+    if (normalized === 'high') return 'High';
+    if (normalized === 'medium') return 'Medium';
+    if (normalized === 'low') return 'Low';
+    if (normalized === 'none') return 'None';
+    return null;
+};
 
 
 interface ReviewModeProps {
@@ -42,6 +96,7 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
     const [clientError, setClientError] = useState<string | null>(null);
     const [editingTicket, setEditingTicket] = useState<Ticket | null>(null);
     const [showTicketModal, setShowTicketModal] = useState(false);
+    const [inlineEditDraft, setInlineEditDraft] = useState<InlineEditDraft | null>(null);
     const inputRef = useRef<HTMLInputElement>(null);
     const [mentionQuery, setMentionQuery] = useState('');
     const [mentionOpen, setMentionOpen] = useState(false);
@@ -61,6 +116,24 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
     const chatRef = useRef<any>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
     const isDev = import.meta.env.DEV;
+
+    const appendTextMessage = (role: 'user' | 'model', text: string) => {
+        const message: ChatMessage = {
+            id: generateId(),
+            role,
+            parts: [{ text }],
+            timestamp: Date.now()
+        };
+        setMessages(prev => {
+            const next = [...prev, message];
+            updateChatHistory(mode, next);
+            return next;
+        });
+        return message;
+    };
+
+    const appendUserMessage = (text: string) => appendTextMessage('user', text);
+    const appendModelMessage = (text: string) => appendTextMessage('model', text);
 
     const renderInline = (text: string) => {
         const tokens = text.split(/(\*\*[^*]+\*\*)/g);
@@ -126,7 +199,7 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
     };
 
     const ticketIndex = useMemo(() => {
-        const map = new Map<string, { ticket: Ticket; parentId: string; type: 'CHANNEL' | 'PROJECT' }>();
+        const map = new Map<string, TicketTarget>();
         (campaign?.channels || []).forEach(c => {
             c.tickets.forEach(t => map.set(t.id, { ticket: t, parentId: c.id, type: 'CHANNEL' }));
         });
@@ -135,6 +208,77 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
         });
         return map;
     }, [campaign]);
+
+    const allTicketTargets = useMemo(() => {
+        const targets: TicketTarget[] = [];
+        (campaign?.channels || []).forEach(c => {
+            c.tickets.forEach(t => targets.push({ ticket: t, parentId: c.id, type: 'CHANNEL' }));
+        });
+        (campaign?.projects || []).forEach(p => {
+            p.tickets.forEach(t => targets.push({ ticket: t, parentId: p.id, type: 'PROJECT' }));
+        });
+        return targets;
+    }, [campaign]);
+
+    const allTickets = useMemo(() => allTicketTargets.map(t => t.ticket), [allTicketTargets]);
+
+    const activeDocs = useMemo(() => (campaign?.docs || []).filter(d => !d.isArchived), [campaign]);
+
+    const docById = useMemo(() => {
+        return new Map(activeDocs.map(d => [d.id, d]));
+    }, [activeDocs]);
+
+    const recentDocsForMention = useMemo(() => {
+        const recentIds = campaign?.recentDocIds || [];
+        const recent = recentIds
+            .map(id => docById.get(id))
+            .filter((d): d is ContextDoc => !!d);
+
+        const favorites = activeDocs
+            .filter(d => d.isFavorite && !recentIds.includes(d.id))
+            .sort((a, b) => new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime());
+
+        const remaining = activeDocs
+            .filter(d => !recentIds.includes(d.id) && !d.isFavorite)
+            .sort((a, b) => new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime());
+
+        return [...recent, ...favorites, ...remaining].slice(0, 20);
+    }, [campaign?.recentDocIds, activeDocs, docById]);
+
+    const docLookup = useMemo(() => {
+        const byIdLower = new Map<string, ContextDoc>();
+        const byShortIdLower = new Map<string, ContextDoc>();
+        activeDocs.forEach(doc => {
+            byIdLower.set(doc.id.toLowerCase(), doc);
+            if (doc.shortId) {
+                byShortIdLower.set(doc.shortId.toLowerCase(), doc);
+            }
+        });
+        return { byIdLower, byShortIdLower };
+    }, [activeDocs]);
+
+    const ticketLookup = useMemo(() => {
+        const byId = new Map<string, TicketTarget>();
+        const byIdLower = new Map<string, TicketTarget>();
+        const byShortIdLower = new Map<string, TicketTarget>();
+        allTicketTargets.forEach(target => {
+            byId.set(target.ticket.id, target);
+            byIdLower.set(target.ticket.id.toLowerCase(), target);
+            const shortId = target.ticket.shortId || target.ticket.id;
+            byShortIdLower.set(shortId.toLowerCase(), target);
+        });
+        return { byId, byIdLower, byShortIdLower };
+    }, [allTicketTargets]);
+
+    const userNameById = useMemo(() => {
+        const map = new Map<string, string>();
+        users.forEach(u => map.set(u.id, u.name));
+        return map;
+    }, [users]);
+
+    const findTicketTargetById = (ticketId: string) => {
+        return ticketLookup.byId.get(ticketId) || ticketLookup.byIdLower.get(ticketId.toLowerCase()) || null;
+    };
 
     const calloutTickets = useMemo(() => {
         const ids = new Set<string>();
@@ -150,16 +294,52 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
         return Array.from(ids).map(id => ticketIndex.get(id)?.ticket).filter(Boolean) as Ticket[];
     }, [messages, ticketIndex]);
 
-    const mentionCandidates = useMemo(() => {
+    const mentionCandidates = useMemo<MentionCandidate[]>(() => {
         if (!mentionOpen) return [];
         const query = mentionQuery.trim().toLowerCase();
-        if (!query) return calloutTickets;
-        return calloutTickets.filter(t => {
+
+        const ticketSource = !query ? calloutTickets : allTickets.filter(t => {
             const title = t.title?.toLowerCase() || '';
             const shortId = t.shortId?.toLowerCase() || '';
-            return title.includes(query) || shortId.includes(query);
+            const id = t.id?.toLowerCase() || '';
+            return title.includes(query) || shortId.includes(query) || id.includes(query);
         });
-    }, [mentionOpen, mentionQuery, calloutTickets]);
+
+        const ticketCandidates: MentionCandidate[] = ticketSource.map(t => ({
+            kind: 'ticket',
+            id: t.id,
+            token: t.shortId || t.id,
+            label: t.title
+        }));
+
+        const recentIds = campaign?.recentDocIds || [];
+        const recentRank = new Map(recentIds.map((id, idx) => [id, idx]));
+
+        const docSource = !query ? recentDocsForMention : activeDocs
+            .filter(d => {
+                const title = d.title?.toLowerCase() || '';
+                const shortId = d.shortId?.toLowerCase() || '';
+                const id = d.id?.toLowerCase() || '';
+                return title.includes(query) || shortId.includes(query) || id.includes(query);
+            })
+            .sort((a, b) => {
+                const favDiff = (b.isFavorite ? 1 : 0) - (a.isFavorite ? 1 : 0);
+                if (favDiff !== 0) return favDiff;
+                const aRank = recentRank.get(a.id) ?? Number.POSITIVE_INFINITY;
+                const bRank = recentRank.get(b.id) ?? Number.POSITIVE_INFINITY;
+                if (aRank !== bRank) return aRank - bRank;
+                return new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime();
+            });
+
+        const docCandidates: MentionCandidate[] = docSource.map(d => ({
+            kind: 'doc',
+            id: d.id,
+            token: d.shortId || d.id,
+            label: d.title
+        }));
+
+        return [...ticketCandidates, ...docCandidates].slice(0, 30);
+    }, [mentionOpen, mentionQuery, calloutTickets, allTickets, campaign?.recentDocIds, recentDocsForMention, activeDocs]);
 
     useEffect(() => {
         if (mentionIndex >= mentionCandidates.length) {
@@ -178,6 +358,14 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
     const clearChatState = () => {
         setMessages([]);
         setPendingActions([]);
+        setInlineEditDraft(null);
+        setShowTicketModal(false);
+        setEditingTicket(null);
+    };
+
+    const closeTicketModal = () => {
+        setShowTicketModal(false);
+        setEditingTicket(null);
     };
 
     const getMentionContext = (value: string, cursor: number) => {
@@ -203,12 +391,12 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
         setMentionIndex(0);
     };
 
-    const insertMention = (ticket: Ticket) => {
+    const insertMention = (candidate: MentionCandidate) => {
         if (mentionStart === null) return;
         const cursor = inputRef.current?.selectionStart ?? input.length;
         const before = input.slice(0, mentionStart);
         const after = input.slice(cursor);
-        const mentionText = `@${ticket.shortId || ticket.id}`;
+        const mentionText = `@${candidate.token}`;
         const spacer = after.startsWith(' ') || after.length === 0 ? '' : ' ';
         const nextValue = `${before}${mentionText}${spacer}${after}`;
         setInput(nextValue);
@@ -260,6 +448,132 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
         }
     };
 
+    const resolveMentionToTarget = (token: string) => {
+        const key = normalizeMentionToken(token);
+        return ticketLookup.byShortIdLower.get(key) || ticketLookup.byIdLower.get(key) || null;
+    };
+
+    const resolveDocMention = (token: string) => {
+        const key = normalizeMentionToken(token);
+        return docLookup.byShortIdLower.get(key) || docLookup.byIdLower.get(key) || null;
+    };
+
+    const resolveMentionsForAI = (text: string) => {
+        return text.replace(/@([A-Za-z0-9-_]+)/g, (match, token) => {
+            const doc = resolveDocMention(token);
+            if (!doc) return match;
+            const stableToken = doc.shortId || doc.id;
+            return `@${stableToken} (${doc.title})`;
+        });
+    };
+
+    const parseInlineUpdates = (text: string) => {
+        const updates: Partial<Ticket> = {};
+        const lower = text.toLowerCase();
+
+        const titleMatch = text.match(/(?:change|update)\s+(?:the\s+)?(?:name|title)\s+to\s+["“']?([^"”'\n]+)["”']?/i)
+            || text.match(/rename\s+(?:it\s+)?to\s+["“']?([^"”'\n]+)["”']?/i);
+        if (titleMatch) {
+            const extracted = cleanExtract(titleMatch[titleMatch.length - 1].split(/\s+and\s+/i)[0]);
+            if (extracted) updates.title = extracted;
+        }
+
+        const descriptionMatch = text.match(/(?:change|update|set)\s+(?:the\s+)?description\s+to\s+["“']?([^"”']+)["”']?/i);
+        if (descriptionMatch) {
+            const extracted = cleanExtract(descriptionMatch[1].split(/\s+and\s+/i)[0]);
+            if (extracted) updates.description = extracted;
+        }
+
+        const priorityMatch = lower.match(/priority\s+(?:to\s+)?(urgent|high|medium|low|none)/i);
+        if (priorityMatch) {
+            const parsed = parsePriorityValue(priorityMatch[1]);
+            if (parsed) updates.priority = parsed;
+        }
+
+        return Object.keys(updates).length > 0 ? updates : null;
+    };
+
+    const parseInlineTicketEditRequest = (text: string) => {
+        const mentionTokens = Array.from(text.matchAll(/@([A-Za-z0-9-_]+)/g)).map(m => m[1]);
+        if (mentionTokens.length === 0) return null;
+
+        const hasEditKeyword = /\b(change|update|edit|rename|set|please)\b/i.test(text);
+        const hasEditField = /\b(name|title|description|priority)\b/i.test(text);
+        const hasRenamePattern = /\brename\b/i.test(text);
+        if (!hasEditKeyword) return null;
+        if (!hasEditField && !hasRenamePattern) return null;
+
+        const updates = parseInlineUpdates(text);
+        if (!updates) return null;
+
+        for (const token of mentionTokens) {
+            const target = resolveMentionToTarget(token);
+            if (target) {
+                return { target, updates };
+            }
+        }
+
+        return null;
+    };
+
+    const buildTicketModalInitialData = (ticket: Ticket, overrides?: Partial<Ticket>): TicketModalInitialData => ({
+        id: ticket.id,
+        title: overrides?.title ?? ticket.title,
+        description: overrides?.description ?? ticket.description,
+        priority: overrides?.priority ?? ticket.priority,
+        assigneeId: overrides?.assigneeId ?? ticket.assigneeId,
+        channelId: ticket.channelId,
+        projectId: ticket.projectId,
+        linkedDocIds: overrides?.linkedDocIds ?? ticket.linkedDocIds,
+        startDate: overrides?.startDate ?? ticket.startDate,
+        endDate: overrides?.dueDate ?? ticket.dueDate
+    });
+
+    const buildUpdatesFromModalData = (ticket: Ticket, data: any) => {
+        const updates: Partial<Ticket> = {};
+        const nextStartDate = normalizeDateInput(data.startDate);
+        const nextDueDate = normalizeDateInput(data.endDate);
+
+        if (data.title !== ticket.title) updates.title = data.title;
+        if ((data.description ?? '') !== (ticket.description ?? '')) updates.description = data.description;
+        if (data.priority !== ticket.priority) updates.priority = data.priority;
+        if ((data.assigneeId ?? '') !== (ticket.assigneeId ?? '')) updates.assigneeId = data.assigneeId;
+        if (!arraysEqual(data.linkedDocIds, ticket.linkedDocIds)) updates.linkedDocIds = data.linkedDocIds;
+        if ((nextStartDate ?? '') !== (ticket.startDate ?? '')) updates.startDate = nextStartDate;
+        if ((nextDueDate ?? '') !== (ticket.dueDate ?? '')) updates.dueDate = nextDueDate;
+
+        return updates;
+    };
+
+    const summarizeTicketUpdates = (ticket: Ticket, updates: Partial<Ticket>) => {
+        const lines: string[] = [];
+        if (updates.title && updates.title !== ticket.title) {
+            lines.push(`Title -> ${updates.title}`);
+        }
+        if (typeof updates.description === 'string' && updates.description !== (ticket.description || '')) {
+            lines.push('Description updated');
+        }
+        if (updates.priority && updates.priority !== ticket.priority) {
+            lines.push(`Priority -> ${updates.priority}`);
+        }
+        if (typeof updates.assigneeId !== 'undefined' && updates.assigneeId !== ticket.assigneeId) {
+            const label = updates.assigneeId ? (userNameById.get(updates.assigneeId) || updates.assigneeId) : 'Unassigned';
+            lines.push(`Assignee -> ${label}`);
+        }
+        if (typeof updates.startDate !== 'undefined' && updates.startDate !== ticket.startDate) {
+            lines.push(`Start Date -> ${updates.startDate || 'None'}`);
+        }
+        if (typeof updates.dueDate !== 'undefined' && updates.dueDate !== ticket.dueDate) {
+            lines.push(`Due Date -> ${updates.dueDate || 'None'}`);
+        }
+        if (typeof updates.linkedDocIds !== 'undefined' && !arraysEqual(updates.linkedDocIds, ticket.linkedDocIds)) {
+            lines.push('Linked documents updated');
+        }
+        return lines.length > 0 ? lines : ['Changes captured'];
+    };
+
+    const formatSummaryBlock = (lines: string[]) => lines.map(line => `- ${line}`).join('\n');
+
     const handleTicketClick = (ticket: Ticket) => {
         setEditingTicket(ticket);
         setShowTicketModal(true);
@@ -277,36 +591,69 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
 
     const handleSaveEditedTicket = (data: any) => {
         if (!editingTicket) return;
-        const target = ticketIndex.get(editingTicket.id);
+        const target = findTicketTargetById(editingTicket.id);
         if (!target) return;
-        const updates: Partial<Ticket> = {
-            title: data.title,
-            description: data.description,
-            priority: data.priority,
-            assigneeId: data.assigneeId,
-            linkedDocIds: data.linkedDocIds,
-            startDate: data.startDate || undefined,
-            dueDate: data.endDate || undefined
-        };
+        const updates = buildUpdatesFromModalData(editingTicket, data);
+        const hasUpdates = Object.keys(updates).length > 0;
+
+        closeTicketModal();
+
+        if (!hasUpdates) return;
+
         if (target.type === 'CHANNEL') {
             updateTicket(target.parentId, editingTicket.id, updates);
         } else {
             updateProjectTicket(target.parentId, editingTicket.id, updates);
         }
-        setShowTicketModal(false);
-        setEditingTicket(null);
     };
 
     const handleDeleteEditedTicket = (ticketId: string) => {
-        const target = ticketIndex.get(ticketId);
+        const target = findTicketTargetById(ticketId);
         if (!target) return;
         if (target.type === 'CHANNEL') {
             deleteTicket(target.parentId, ticketId);
         } else {
             deleteProjectTicket(target.parentId, ticketId);
         }
-        setShowTicketModal(false);
-        setEditingTicket(null);
+        closeTicketModal();
+    };
+
+    const handleInlineDraftChange = (updates: Partial<TicketModalInitialData>) => {
+        setInlineEditDraft(prev => {
+            if (!prev) return prev;
+            return { ...prev, form: { ...prev.form, ...updates } };
+        });
+    };
+
+    const handleInlineDraftCancel = () => {
+        if (!inlineEditDraft) return;
+        appendModelMessage(`Canceled inline edit for @${inlineEditDraft.target.ticket.shortId}.`);
+        setInlineEditDraft(null);
+    };
+
+    const handleInlineDraftApprove = () => {
+        if (!inlineEditDraft) return;
+        const { target, form } = inlineEditDraft;
+        const updates = buildUpdatesFromModalData(target.ticket, form);
+        const hasUpdates = Object.keys(updates).length > 0;
+
+        if (!hasUpdates) {
+            appendModelMessage(`No changes detected for @${target.ticket.shortId}.`);
+            setInlineEditDraft(null);
+            return;
+        }
+
+        if (target.type === 'CHANNEL') {
+            updateTicket(target.parentId, target.ticket.id, updates);
+        } else {
+            updateProjectTicket(target.parentId, target.ticket.id, updates);
+        }
+
+        const summaryLines = summarizeTicketUpdates(target.ticket, updates);
+        appendModelMessage(
+            `Approved changes for @${target.ticket.shortId}.\n${formatSummaryBlock(summaryLines)}`
+        );
+        setInlineEditDraft(null);
     };
 
     // --- Load History / Init Session ---
@@ -448,6 +795,27 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
     // --- Interaction ---
     const handleSend = async () => {
         if (!input.trim() || isTyping) return;
+        if (!campaign) return;
+
+        const rawText = input;
+        const trimmedText = rawText.trim();
+
+        setInput('');
+        setMentionOpen(false);
+        setMentionQuery('');
+        setMentionStart(null);
+
+        const inlineRequest = parseInlineTicketEditRequest(trimmedText);
+        if (inlineRequest) {
+            appendUserMessage(rawText);
+            setInlineEditDraft({
+                target: inlineRequest.target,
+                form: buildTicketModalInitialData(inlineRequest.target.ticket, inlineRequest.updates)
+            });
+            appendModelMessage(`Review the proposed edits for @${inlineRequest.target.ticket.shortId} below, then approve.`);
+            return;
+        }
+
         if (!chatRef.current) {
             await ensureChat();
         }
@@ -455,16 +823,11 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
             setClientError("Chat is not ready. Please try again.");
             return;
         }
-        const text = input;
-        setInput('');
-        setMentionOpen(false);
-        setMentionQuery('');
-        setMentionStart(null);
 
         const userMsg: ChatMessage = { 
             id: generateId(), 
             role: 'user', 
-            parts: [{ text }], 
+            parts: [{ text: rawText }], 
             timestamp: Date.now() 
         };
         
@@ -473,10 +836,12 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
             updateChatHistory(mode, next);
             return next;
         });
-        
+
+        const resolvedText = resolveMentionsForAI(rawText);
+
         setIsTyping(true);
         try {
-            const response = await chatRef.current.sendMessage({ message: text });
+            const response = await chatRef.current.sendMessage({ message: resolvedText });
             processResponse(response);
         } catch (e) {
             console.error("Chat Error:", e);
@@ -736,6 +1101,109 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
                         </div>
                     ))}
 
+                    {inlineEditDraft && (
+                        <div className="w-full my-6 bg-white border border-zinc-100 shadow-lg rounded-xl p-5 space-y-4">
+                            <div className="flex items-start justify-between gap-4">
+                                <div>
+                                    <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Inline Task Edit</div>
+                                    <div className="text-sm font-semibold text-zinc-900">
+                                        @{inlineEditDraft.target.ticket.shortId} · {inlineEditDraft.target.ticket.title}
+                                    </div>
+                                </div>
+                                <div className="text-[10px] font-mono text-zinc-400">
+                                    {inlineEditDraft.target.type}
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-4">
+                                <div>
+                                    <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5 block">Title</label>
+                                    <input
+                                        className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2.5 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                                        value={inlineEditDraft.form.title || ''}
+                                        onChange={(e) => handleInlineDraftChange({ title: e.target.value })}
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5 block">Description</label>
+                                    <textarea
+                                        className="w-full h-24 bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2.5 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all resize-none"
+                                        value={inlineEditDraft.form.description || ''}
+                                        onChange={(e) => handleInlineDraftChange({ description: e.target.value })}
+                                    />
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                    <div>
+                                        <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5 block">Priority</label>
+                                        <select
+                                            className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2.5 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                                            value={inlineEditDraft.form.priority || inlineEditDraft.target.ticket.priority}
+                                            onChange={(e) => handleInlineDraftChange({ priority: e.target.value as Priority })}
+                                        >
+                                            <option value="Urgent">Urgent</option>
+                                            <option value="High">High</option>
+                                            <option value="Medium">Medium</option>
+                                            <option value="Low">Low</option>
+                                            <option value="None">None</option>
+                                        </select>
+                                    </div>
+
+                                    <div>
+                                        <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5 block">Assignee</label>
+                                        <select
+                                            className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2.5 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                                            value={inlineEditDraft.form.assigneeId || ''}
+                                            onChange={(e) => handleInlineDraftChange({ assigneeId: e.target.value || undefined })}
+                                        >
+                                            <option value="">Unassigned</option>
+                                            {users.map(u => (
+                                                <option key={u.id} value={u.id}>{u.name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-3 md:col-span-1">
+                                        <div>
+                                            <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5 block">Start</label>
+                                            <input
+                                                type="date"
+                                                className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2.5 text-xs text-zinc-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                                                value={inlineEditDraft.form.startDate || ''}
+                                                onChange={(e) => handleInlineDraftChange({ startDate: e.target.value })}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5 block">Due</label>
+                                            <input
+                                                type="date"
+                                                className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2.5 text-xs text-zinc-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                                                value={inlineEditDraft.form.endDate || ''}
+                                                onChange={(e) => handleInlineDraftChange({ endDate: e.target.value })}
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center justify-end gap-2 pt-1">
+                                <button
+                                    onClick={handleInlineDraftCancel}
+                                    className="px-3 py-1.5 text-xs font-bold text-zinc-500 hover:bg-zinc-50 rounded"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleInlineDraftApprove}
+                                    className="px-3 py-1.5 text-xs font-bold bg-zinc-900 text-white rounded shadow-sm hover:bg-zinc-800"
+                                >
+                                    Approve Changes
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
                     {isTyping && (
                         <div className="flex justify-start mb-6">
                             <div className="bg-white border border-zinc-100 px-4 py-3 rounded-2xl rounded-bl-sm shadow-sm flex gap-1.5 items-center">
@@ -754,21 +1222,24 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
                 <div className="max-w-2xl mx-auto relative">
                     {mentionOpen && mentionCandidates.length > 0 && (
                         <div className="absolute bottom-full left-0 mb-2 w-full bg-white border border-zinc-200 shadow-2xl rounded-none overflow-hidden z-30">
-                            {mentionCandidates.slice(0, 6).map((ticket, idx) => (
+                            {mentionCandidates.slice(0, 6).map((candidate, idx) => (
                                 <button
-                                    key={ticket.id}
+                                    key={`${candidate.kind}-${candidate.id}`}
                                     type="button"
                                     onMouseDown={(e) => {
                                         e.preventDefault();
-                                        insertMention(ticket);
+                                        insertMention(candidate);
                                     }}
                                     className={`w-full flex items-center gap-3 px-4 py-2 text-left transition-colors ${idx === mentionIndex ? 'bg-zinc-900 text-white' : 'text-zinc-700 hover:bg-zinc-50'}`}
                                 >
                                     <span className={`text-[10px] font-bold uppercase tracking-[0.2em] ${idx === mentionIndex ? 'text-white/70' : 'text-zinc-400'}`}>
-                                        @{ticket.shortId}
+                                        @{candidate.token}
                                     </span>
                                     <span className={`text-xs font-medium truncate ${idx === mentionIndex ? 'text-white' : 'text-zinc-700'}`}>
-                                        {ticket.title}
+                                        {candidate.label}
+                                    </span>
+                                    <span className={`ml-auto text-[9px] font-semibold uppercase tracking-wider ${idx === mentionIndex ? 'text-white/70' : 'text-zinc-400'}`}>
+                                        {candidate.kind === 'ticket' ? 'Ticket' : 'Doc'}
                                     </span>
                                 </button>
                             ))}
@@ -815,7 +1286,7 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
                         users,
                         docs: campaign?.docs || []
                     }}
-                    onClose={() => { setShowTicketModal(false); setEditingTicket(null); }}
+                    onClose={closeTicketModal}
                     onSave={handleSaveEditedTicket}
                     onDelete={(id) => handleDeleteEditedTicket(id)}
                 />

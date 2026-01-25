@@ -21,6 +21,17 @@ export const MOCK_USERS: User[] = [
   { id: 'u4', name: 'Designer', initials: 'DS', color: 'bg-pink-500', role: 'Member' },
 ];
 
+const DOC_SHORT_ID_PREFIX = 'D-';
+
+const generateDocShortId = (existing: Set<string>): string => {
+  let next = '';
+  do {
+    next = `${DOC_SHORT_ID_PREFIX}${Math.floor(1000 + Math.random() * 9000)}`;
+  } while (existing.has(next));
+  existing.add(next);
+  return next;
+};
+
 interface StoreState {
   currentView: ViewMode;
   setCurrentView: (view: ViewMode) => void;
@@ -73,17 +84,20 @@ interface StoreState {
   addTimelineTag: (tag: TimelineTag) => void;
   deleteTimelineTag: (tagId: string) => void;
 
-  addDocFolder: (name: string, icon?: string) => void;
+  addDocFolder: (name: string, icon?: string, parentId?: string, order?: number) => void;
   updateDocFolder: (folderId: string, updates: Partial<DocFolder>) => void;
   renameDocFolder: (folderId: string, name: string) => void;
-  moveDocFolder: (folderId: string, parentId: string | undefined) => void;
+  moveDocFolder: (folderId: string, parentId: string | undefined, order?: number) => void;
   deleteDocFolder: (folderId: string) => void;
   toggleRagIndexing: (type: 'DOC' | 'FOLDER', id: string, isIndexed: boolean) => void;
+  toggleDocFavorite: (docId: string, value?: boolean) => void;
+  toggleFolderFavorite: (folderId: string, value?: boolean) => void;
+  recordRecentDoc: (docId: string) => void;
 
   addDoc: (doc: ContextDoc) => void;
   updateDoc: (docId: string, updates: Partial<ContextDoc>) => void;
   deleteDoc: (docId: string) => void;
-  moveDoc: (docId: string, folderId: string | undefined) => void;
+  moveDoc: (docId: string, folderId: string | undefined, order?: number) => void;
 
   addCampaignTag: (tag: string) => void;
 
@@ -145,13 +159,53 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (!data.timelineTags) data.timelineTags = [];
     if (!data.docs) data.docs = [];
 
+    const ORDER_STEP = 1000;
+    const ROOT_KEY = '__root__';
+
+    const normalizeOrdering = <T extends { id: string; order?: number }>(
+      items: T[],
+      getParentId: (item: T) => string | undefined,
+      getTimestamp: (item: T) => string | undefined
+    ): T[] => {
+      const cloned = items.map(item => ({ ...item }));
+      const grouped = new Map<string, T[]>();
+
+      cloned.forEach(item => {
+        const key = getParentId(item) || ROOT_KEY;
+        const group = grouped.get(key) || [];
+        group.push(item);
+        grouped.set(key, group);
+      });
+
+      grouped.forEach(group => {
+        group.sort((a, b) => {
+          const ao = a.order ?? Number.POSITIVE_INFINITY;
+          const bo = b.order ?? Number.POSITIVE_INFINITY;
+          if (ao !== bo) return ao - bo;
+          const at = new Date(getTimestamp(a) || 0).getTime();
+          const bt = new Date(getTimestamp(b) || 0).getTime();
+          return at - bt;
+        });
+
+        let nextOrder = ORDER_STEP;
+        group.forEach(item => {
+          if (item.order === undefined || Number.isNaN(item.order)) {
+            item.order = nextOrder;
+          }
+          nextOrder = (item.order || nextOrder) + ORDER_STEP;
+        });
+      });
+
+      return cloned;
+    };
+
     // Folder Migration
     if (!data.docFolders) {
       data.docFolders = [
-        { id: 'f_strategy', name: 'Strategy', icon: '♟️', createdAt: new Date().toISOString() },
-        { id: 'f_personas', name: 'Personas', icon: '👥', createdAt: new Date().toISOString() },
-        { id: 'f_brand', name: 'Brand', icon: '🎨', createdAt: new Date().toISOString() },
-        { id: 'f_process', name: 'Process', icon: '⚙️', createdAt: new Date().toISOString() },
+        { id: 'f_strategy', name: 'Strategy', icon: '♟️', order: 1000, createdAt: new Date().toISOString() },
+        { id: 'f_personas', name: 'Personas', icon: '👥', order: 2000, createdAt: new Date().toISOString() },
+        { id: 'f_brand', name: 'Brand', icon: '🎨', order: 3000, createdAt: new Date().toISOString() },
+        { id: 'f_process', name: 'Process', icon: '⚙️', order: 4000, createdAt: new Date().toISOString() },
       ];
       // Migrate existing docs to folders based on type
       if (data.docs) {
@@ -172,6 +226,37 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }));
     }
 
+    data.docFolders = (data.docFolders || []).map((f: any) => ({
+      ...f,
+      icon: f.icon || '\u{1F4C1}',
+      isArchived: !!f.isArchived,
+      isFavorite: !!f.isFavorite
+    }));
+
+    const docShortIds = new Set<string>();
+    data.docs = (data.docs || []).map((d: any) => {
+      const candidate = typeof d.shortId === 'string' ? d.shortId : '';
+      let shortId = candidate;
+      if (!shortId || docShortIds.has(shortId)) {
+        shortId = generateDocShortId(docShortIds);
+      } else {
+        docShortIds.add(shortId);
+      }
+
+      return {
+        ...d,
+        shortId,
+        isArchived: !!d.isArchived,
+        isFavorite: !!d.isFavorite
+      };
+    });
+
+    data.docFolders = normalizeOrdering(data.docFolders, f => f.parentId, f => f.createdAt);
+    data.docs = normalizeOrdering(data.docs, d => d.folderId, d => d.createdAt || d.lastUpdated);
+
+    if (!data.recentDocIds) {
+      data.recentDocIds = [];
+    }
     if (!data.availableTags) {
       data.availableTags = ['Draft', 'Q4', 'Urgent', 'Review'];
     }
@@ -863,40 +948,92 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // --- Folder Actions ---
 
-  const addDocFolder = (name: string, icon: string = '📁', parentId?: string) => {
-    if (!campaign) return;
-    const folder: DocFolder = {
-      id: generateId(),
-      name,
-      icon,
-      parentId,
-      createdAt: new Date().toISOString()
-    };
-    setCampaignState(prev => prev ? ({
-      ...prev,
-      docFolders: [...prev.docFolders, folder]
-    }) : null);
+  const ORDER_STEP_VALUE = 1000;
+
+  const sortByOrder = <T extends { order?: number; createdAt?: string; lastUpdated?: string }>(items: T[]): T[] => {
+    return [...items].sort((a, b) => {
+      const ao = a.order ?? Number.POSITIVE_INFINITY;
+      const bo = b.order ?? Number.POSITIVE_INFINITY;
+      if (ao !== bo) return ao - bo;
+      const at = new Date(a.createdAt || a.lastUpdated || 0).getTime();
+      const bt = new Date(b.createdAt || b.lastUpdated || 0).getTime();
+      return at - bt;
+    });
   };
 
-  const moveDocFolder = (folderId: string, parentId: string | undefined) => {
-    if (!campaign) return;
+  const getNextOrder = <T extends { order?: number }>(items: T[]): number => {
+    const maxOrder = items.reduce((max, item) => Math.max(max, item.order ?? 0), 0);
+    return maxOrder + ORDER_STEP_VALUE;
+  };
 
-    // Prevent cycles: Check if parentId is a descendant of folderId
-    if (parentId) {
-      const isDescendant = (id: string, searchId: string): boolean => {
-        const folder = campaign.docFolders.find(f => f.id === id);
-        if (!folder || !folder.parentId) return false;
-        if (folder.parentId === searchId) return true;
-        return isDescendant(folder.parentId, searchId);
+  const getSiblingFolders = (allFolders: DocFolder[], parentId: string | undefined, excludeId?: string) => {
+    const siblings = allFolders.filter(f => f.parentId === parentId && !f.isArchived && f.id !== excludeId);
+    return sortByOrder(siblings);
+  };
+
+  const getSiblingDocs = (allDocs: ContextDoc[], folderId: string | undefined, excludeId?: string) => {
+    const siblings = allDocs.filter(d => d.folderId === folderId && !d.isArchived && d.id !== excludeId);
+    return sortByOrder(siblings);
+  };
+
+  const isFolderDescendant = (folders: DocFolder[], startId: string | undefined, searchId: string): boolean => {
+    if (!startId) return false;
+    let current = folders.find(f => f.id === startId);
+    while (current?.parentId) {
+      if (current.parentId === searchId) return true;
+      current = folders.find(f => f.id === current?.parentId);
+    }
+    return false;
+  };
+
+  const addDocFolder = (name: string, icon: string = '\u{1F4C1}', parentId?: string, order?: number) => {
+    if (!campaign) return;
+    const now = new Date().toISOString();
+
+    setCampaignState(prev => {
+      if (!prev) return null;
+      const siblings = getSiblingFolders(prev.docFolders, parentId);
+      const resolvedOrder = order ?? getNextOrder(siblings);
+
+      const folder: DocFolder = {
+        id: generateId(),
+        name,
+        icon,
+        parentId,
+        order: resolvedOrder,
+        isArchived: false,
+        isFavorite: false,
+        createdAt: now
       };
 
-      if (parentId === folderId || isDescendant(parentId, folderId)) {
-        console.error("Cannot move a folder into itself or its descendants.");
-        return;
-      }
-    }
+      return {
+        ...prev,
+        docFolders: [...prev.docFolders, folder]
+      };
+    });
+  };
 
-    updateDocFolder(folderId, { parentId });
+  const moveDocFolder = (folderId: string, parentId: string | undefined, order?: number) => {
+    if (!campaign) return;
+
+    setCampaignState(prev => {
+      if (!prev) return null;
+
+      if (parentId === folderId || isFolderDescendant(prev.docFolders, parentId, folderId)) {
+        console.error('Cannot move a folder into itself or its descendants.');
+        return prev;
+      }
+
+      const siblings = getSiblingFolders(prev.docFolders, parentId, folderId);
+      const resolvedOrder = order ?? getNextOrder(siblings);
+
+      return {
+        ...prev,
+        docFolders: prev.docFolders.map(f =>
+          f.id === folderId ? { ...f, parentId, order: resolvedOrder } : f
+        )
+      };
+    });
   };
 
   const updateDocFolder = (folderId: string, updates: Partial<DocFolder>) => {
@@ -916,11 +1053,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       return {
         ...prev,
-        // Remove folder
         docFolders: prev.docFolders.filter(f => f.id !== folderId).map(f =>
-          f.parentId === folderId ? { ...f, parentId } : f // Move children folders to parent
+          f.parentId === folderId ? { ...f, parentId } : f
         ),
-        // Move docs to parent
         docs: prev.docs.map(d => d.folderId === folderId ? { ...d, folderId: parentId } : d)
       };
     });
@@ -935,45 +1070,144 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   };
 
+  const toggleDocFavorite = (docId: string, value?: boolean) => {
+    if (!campaign) return;
+    setCampaignState(prev => prev ? ({
+      ...prev,
+      docs: prev.docs.map(d => d.id === docId ? { ...d, isFavorite: value ?? !d.isFavorite } : d)
+    }) : null);
+  };
+
+  const toggleFolderFavorite = (folderId: string, value?: boolean) => {
+    if (!campaign) return;
+    setCampaignState(prev => prev ? ({
+      ...prev,
+      docFolders: prev.docFolders.map(f => f.id === folderId ? { ...f, isFavorite: value ?? !f.isFavorite } : f)
+    }) : null);
+  };
+
+  const recordRecentDoc = (docId: string) => {
+    if (!campaign) return;
+    setCampaignState(prev => {
+      if (!prev) return null;
+      const existing = (prev.recentDocIds || []).filter(id => id !== docId);
+      const nextRecent = [docId, ...existing].slice(0, 25);
+      return {
+        ...prev,
+        recentDocIds: nextRecent
+      };
+    });
+  };
+
   // --- Doc Actions ---
 
   const addDoc = (doc: ContextDoc) => {
     if (!campaign) return;
-    const docWithMeta = {
-      ...doc,
-      createdBy: doc.createdBy || currentUser.id,
-      createdAt: doc.createdAt || new Date().toISOString(),
-      lastEditedBy: currentUser.id
-    };
-    setCampaignState(prev => prev ? ({
-      ...prev,
-      docs: [...(prev.docs || []), docWithMeta]
-    }) : null);
+
+    setCampaignState(prev => {
+      if (!prev) return null;
+
+      const now = new Date().toISOString();
+      const folderId = doc.folderId;
+      const siblings = getSiblingDocs(prev.docs, folderId);
+      const resolvedOrder = doc.order ?? getNextOrder(siblings);
+      const existingShortIds = new Set(prev.docs.map(d => d.shortId).filter((id): id is string => !!id));
+      let shortId = doc.shortId;
+      if (!shortId || existingShortIds.has(shortId)) {
+        shortId = generateDocShortId(existingShortIds);
+      }
+
+      const docWithMeta: ContextDoc = {
+        ...doc,
+        shortId,
+        order: resolvedOrder,
+        isArchived: doc.isArchived ?? false,
+        isFavorite: doc.isFavorite ?? false,
+        createdBy: doc.createdBy || currentUser.id,
+        createdAt: doc.createdAt || now,
+        lastEditedBy: currentUser.id,
+        lastUpdated: doc.lastUpdated || now
+      };
+
+      const existing = (prev.recentDocIds || []).filter(id => id !== docWithMeta.id);
+      const nextRecent = [docWithMeta.id, ...existing].slice(0, 25);
+
+      return {
+        ...prev,
+        docs: [...prev.docs, docWithMeta],
+        recentDocIds: nextRecent
+      };
+    });
   };
 
   const updateDoc = (docId: string, updates: Partial<ContextDoc>) => {
     if (!campaign) return;
-    const updatesWithMeta = {
-      ...updates,
-      lastEditedBy: currentUser.id,
-      lastUpdated: new Date().toISOString()
-    };
-    setCampaignState(prev => prev ? ({
-      ...prev,
-      docs: (prev.docs || []).map(d => d.id === docId ? { ...d, ...updatesWithMeta } : d)
-    }) : null);
+
+    setCampaignState(prev => {
+      if (!prev) return null;
+      const currentDoc = prev.docs.find(d => d.id === docId);
+      if (!currentDoc) return prev;
+
+      const now = new Date().toISOString();
+      const nextFolderId = updates.folderId !== undefined ? updates.folderId : currentDoc.folderId;
+      const folderChanged = updates.folderId !== undefined && updates.folderId !== currentDoc.folderId;
+
+      let nextOrder = updates.order;
+      if ((folderChanged && nextOrder === undefined) || (nextOrder === undefined && currentDoc.order === undefined)) {
+        const siblings = getSiblingDocs(prev.docs, nextFolderId, docId);
+        nextOrder = getNextOrder(siblings);
+      }
+
+      const updatesWithMeta: Partial<ContextDoc> = {
+        ...updates,
+        lastUpdated: now,
+        lastEditedBy: currentUser.id
+      };
+      if (nextOrder !== undefined) {
+        updatesWithMeta.order = nextOrder;
+      }
+
+      return {
+        ...prev,
+        docs: prev.docs.map(d => d.id === docId ? { ...d, ...updatesWithMeta, folderId: nextFolderId } : d)
+      };
+    });
   };
 
   const deleteDoc = (docId: string) => {
     if (!campaign) return;
     setCampaignState(prev => prev ? ({
       ...prev,
-      docs: (prev.docs || []).filter(d => d.id !== docId)
+      docs: (prev.docs || []).filter(d => d.id !== docId),
+      recentDocIds: (prev.recentDocIds || []).filter(id => id !== docId)
     }) : null);
   };
 
-  const moveDoc = (docId: string, folderId: string | undefined) => {
-    updateDoc(docId, { folderId });
+  const moveDoc = (docId: string, folderId: string | undefined, order?: number) => {
+    if (!campaign) return;
+
+    setCampaignState(prev => {
+      if (!prev) return null;
+      const currentDoc = prev.docs.find(d => d.id === docId);
+      if (!currentDoc) return prev;
+
+      const siblings = getSiblingDocs(prev.docs, folderId, docId);
+      const resolvedOrder = order ?? getNextOrder(siblings);
+      const now = new Date().toISOString();
+
+      const existing = (prev.recentDocIds || []).filter(id => id !== docId);
+      const nextRecent = [docId, ...existing].slice(0, 25);
+
+      return {
+        ...prev,
+        docs: prev.docs.map(d =>
+          d.id === docId
+            ? { ...d, folderId, order: resolvedOrder, lastUpdated: now, lastEditedBy: currentUser.id }
+            : d
+        ),
+        recentDocIds: nextRecent
+      };
+    });
   };
 
   const addCampaignTag = (tag: string) => {
@@ -1112,6 +1346,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       moveDocFolder,
       deleteDocFolder,
       toggleRagIndexing,
+      toggleDocFavorite,
+      toggleFolderFavorite,
+      recordRecentDoc,
       addDoc,
       updateDoc,
       deleteDoc,
@@ -1133,3 +1370,6 @@ export const useStore = () => {
   if (!context) throw new Error("useStore must be used within StoreProvider");
   return context;
 };
+
+
+

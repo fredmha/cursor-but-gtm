@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useStore, generateId } from '../store';
 import { Icons } from '../constants';
 import { ContextDoc, DocFolder, TicketStatus, Ticket, DocFormat } from '../types';
@@ -156,7 +156,7 @@ export const DocsView: React.FC = () => {
         addDocFolder, updateDocFolder, deleteDocFolder, moveDocFolder,
         moveDoc, addTicket, linkDocToTicket, addCampaignTag,
         pendingTicketLink, clearPendingTicketLink, users,
-        toggleRagIndexing
+        toggleRagIndexing, toggleDocFavorite, recordRecentDoc
     } = useStore();
     const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
     const [editingDoc, setEditingDoc] = useState<ContextDoc | null>(null);
@@ -164,12 +164,72 @@ export const DocsView: React.FC = () => {
     // Folder Management State
     const [creatingFolder, setCreatingFolder] = useState(false);
     const [newFolderName, setNewFolderName] = useState('');
-    const [newFolderIcon, setNewFolderIcon] = useState('📁');
+    const [newFolderIcon, setNewFolderIcon] = useState('\u{1F4C1}');
     const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
     const [renamingFolderData, setRenamingFolderData] = useState<{ name: string, icon: string }>({ name: '', icon: '' });
 
     // Sorting
-    const [sortOrder, setSortOrder] = useState<'NAME' | 'DATE'>('NAME');
+    const [sortOrder, setSortOrder] = useState<'MANUAL' | 'NAME' | 'DATE'>('MANUAL');
+
+    const ORDER_STEP = 1000;
+
+    type LastMove = {
+        kind: 'doc' | 'folder';
+        id: string;
+        label: string;
+        fromParentId?: string;
+        fromOrder?: number;
+    };
+
+    const moveToastTimerRef = useRef<number | null>(null);
+    const [lastMove, setLastMove] = useState<LastMove | null>(null);
+
+    const sortManual = <T extends { order?: number; createdAt?: string; lastUpdated?: string }>(items: T[]): T[] => {
+        return [...items].sort((a, b) => {
+            const ao = a.order ?? Number.POSITIVE_INFINITY;
+            const bo = b.order ?? Number.POSITIVE_INFINITY;
+            if (ao !== bo) return ao - bo;
+            const at = new Date(a.createdAt || a.lastUpdated || 0).getTime();
+            const bt = new Date(b.createdAt || b.lastUpdated || 0).getTime();
+            return at - bt;
+        });
+    };
+
+    const sortFoldersList = (items: DocFolder[]): DocFolder[] => {
+        if (sortOrder === 'NAME') return [...items].sort((a, b) => a.name.localeCompare(b.name));
+        if (sortOrder === 'DATE') return [...items].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        return sortManual(items);
+    };
+
+    const sortDocsList = (items: ContextDoc[]): ContextDoc[] => {
+        if (sortOrder === 'NAME') return [...items].sort((a, b) => a.title.localeCompare(b.title));
+        if (sortOrder === 'DATE') return [...items].sort((a, b) => new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime());
+        return sortManual(items);
+    };
+
+    const getNextOrderFromSiblings = <T extends { order?: number }>(siblings: T[]): number => {
+        const maxOrder = siblings.reduce((max, item, index) => {
+            const fallback = (index + 1) * ORDER_STEP;
+            return Math.max(max, item.order ?? fallback);
+        }, 0);
+        return maxOrder + ORDER_STEP;
+    };
+
+    const getOrderBeforeTarget = <T extends { id: string; order?: number }>(siblings: T[], targetId: string): number => {
+        const index = siblings.findIndex(s => s.id === targetId);
+        if (index === -1) return getNextOrderFromSiblings(siblings);
+        if (index === 0) {
+            const targetOrder = siblings[0].order ?? ORDER_STEP;
+            return targetOrder - ORDER_STEP / 2;
+        }
+
+        const resolveOrder = (item: T, idx: number) => item.order ?? (idx + 1) * ORDER_STEP;
+        const targetOrder = resolveOrder(siblings[index], index);
+        const prevOrder = resolveOrder(siblings[index - 1], index - 1);
+        const gap = targetOrder - prevOrder;
+        if (gap > 0.0001) return prevOrder + gap / 2;
+        return targetOrder - 1;
+    };
 
     // Modals
     const [showNewDocModal, setShowNewDocModal] = useState(false);
@@ -199,23 +259,52 @@ export const DocsView: React.FC = () => {
         }
     }, [pendingTicketLink, allTickets, clearPendingTicketLink]);
 
+    useEffect(() => {
+        return () => {
+            if (moveToastTimerRef.current) {
+                window.clearTimeout(moveToastTimerRef.current);
+            }
+        };
+    }, []);
+
     const unsortedDocs = useMemo(() => {
-        const unsorted = docs.filter(d => !d.folderId);
-        return [...unsorted].sort((a, b) => {
-            if (sortOrder === 'NAME') return a.title.localeCompare(b.title);
-            return new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime();
-        });
+        const unsorted = docs.filter(d => !d.folderId && !d.isArchived);
+        return sortDocsList(unsorted);
     }, [docs, sortOrder]);
 
     const rootFolders = useMemo(() => {
-        const root = folders.filter(f => !f.parentId);
-        return [...root].sort((a, b) => {
-            if (sortOrder === 'NAME') return a.name.localeCompare(b.name);
-            return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-        });
+        const root = folders.filter(f => !f.parentId && !f.isArchived);
+        return sortFoldersList(root);
     }, [folders, sortOrder]);
 
+    const favoriteDocs = useMemo(() => {
+        const favorites = docs.filter(d => d.isFavorite && !d.isArchived);
+        return [...favorites].sort((a, b) => new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime());
+    }, [docs]);
+
+    const recentDocs = useMemo(() => {
+        const recentIds = campaign?.recentDocIds || [];
+        const byId = new Map(docs.map(d => [d.id, d]));
+        const orderedRecent = recentIds
+            .map(id => byId.get(id))
+            .filter((d): d is ContextDoc => !!d && !d.isArchived);
+
+        if (orderedRecent.length >= 8) return orderedRecent.slice(0, 8);
+
+        const remaining = docs
+            .filter(d => !d.isArchived && !recentIds.includes(d.id))
+            .sort((a, b) => new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime());
+
+        return [...orderedRecent, ...remaining].slice(0, 8);
+    }, [campaign?.recentDocIds, docs]);
+
     const selectedDoc = docs.find(d => d.id === selectedDocId);
+
+    const selectDoc = (docId: string) => {
+        setSelectedDocId(docId);
+        setEditingDoc(null);
+        recordRecentDoc(docId);
+    };
 
     const handleCreateDoc = (title: string, icon: string, content: string, format: DocFormat) => {
         const newDoc: ContextDoc = {
@@ -230,6 +319,7 @@ export const DocsView: React.FC = () => {
             tags: ['Draft']
         };
         addDoc(newDoc);
+        recordRecentDoc(newDoc.id);
 
         // Handle Pending Link
         if (pendingTicketLink) {
@@ -266,12 +356,13 @@ export const DocsView: React.FC = () => {
             setEditingDoc(null);
         }
     };
-
     const handleAddFolder = () => {
         if (newFolderName.trim()) {
-            addDocFolder(newFolderName.trim(), newFolderIcon);
+            const rootSiblings = sortManual(folders.filter(f => !f.parentId && !f.isArchived));
+            const order = getNextOrderFromSiblings(rootSiblings);
+            addDocFolder(newFolderName.trim(), newFolderIcon, undefined, order);
             setNewFolderName('');
-            setNewFolderIcon('📁');
+            setNewFolderIcon('\u{1F4C1}');
             setCreatingFolder(false);
         }
     };
@@ -333,9 +424,34 @@ export const DocsView: React.FC = () => {
         }
     };
 
+    const showMoveToast = (move: LastMove) => {
+        setLastMove(move);
+        if (moveToastTimerRef.current) {
+            window.clearTimeout(moveToastTimerRef.current);
+        }
+        moveToastTimerRef.current = window.setTimeout(() => {
+            setLastMove(null);
+        }, 6000);
+    };
+
+    const handleUndoMove = () => {
+        if (!lastMove) return;
+        if (lastMove.kind === 'doc') {
+            moveDoc(lastMove.id, lastMove.fromParentId, lastMove.fromOrder);
+        } else {
+            moveDocFolder(lastMove.id, lastMove.fromParentId, lastMove.fromOrder);
+        }
+        if (moveToastTimerRef.current) {
+            window.clearTimeout(moveToastTimerRef.current);
+            moveToastTimerRef.current = null;
+        }
+        setLastMove(null);
+    };
+
     // --- Drag and Drop Handlers ---
     const handleDragStart = (e: React.DragEvent, docId: string) => {
         e.dataTransfer.setData('docId', docId);
+        e.dataTransfer.setData('dragType', 'doc');
         e.dataTransfer.effectAllowed = 'move';
     };
 
@@ -344,22 +460,71 @@ export const DocsView: React.FC = () => {
         e.dataTransfer.dropEffect = 'move';
     };
 
-    const handleDrop = (e: React.DragEvent, folderId?: string) => {
+    const handleDrop = (
+        e: React.DragEvent,
+        options?: { targetFolderId?: string; targetParentId?: string; beforeId?: string; beforeType?: 'doc' | 'folder' }
+    ) => {
         e.preventDefault();
+        e.stopPropagation();
         const docId = e.dataTransfer.getData('docId');
         const draggedFolderId = e.dataTransfer.getData('folderId');
+        const isReorder = !!options?.beforeId && e.shiftKey;
 
         if (docId) {
-            moveDoc(docId, folderId);
-        } else if (draggedFolderId) {
-            if (draggedFolderId !== folderId) {
-                moveDocFolder(draggedFolderId, folderId);
+            const targetFolderId = options?.targetFolderId;
+            const currentDoc = docs.find(d => d.id === docId);
+            if (!currentDoc) return;
+            const moveMeta: LastMove = {
+                kind: 'doc',
+                id: docId,
+                label: currentDoc.title,
+                fromParentId: currentDoc.folderId,
+                fromOrder: currentDoc.order
+            };
+
+            if (isReorder && options?.beforeType === 'doc' && options.beforeId !== docId) {
+                const siblings = sortDocsList(docs.filter(d => d.folderId === targetFolderId && !d.isArchived));
+                const order = getOrderBeforeTarget(siblings, options.beforeId);
+                moveDoc(docId, targetFolderId, order);
+                showMoveToast(moveMeta);
+                return;
             }
+
+            const siblings = sortDocsList(docs.filter(d => d.folderId === targetFolderId && !d.isArchived && d.id !== docId));
+            const order = getNextOrderFromSiblings(siblings);
+            moveDoc(docId, targetFolderId, order);
+            showMoveToast(moveMeta);
+        } else if (draggedFolderId) {
+            const intoFolderId = options?.targetFolderId;
+            const currentFolder = folders.find(f => f.id === draggedFolderId);
+            if (!currentFolder) return;
+            const moveMeta: LastMove = {
+                kind: 'folder',
+                id: draggedFolderId,
+                label: currentFolder.name,
+                fromParentId: currentFolder.parentId,
+                fromOrder: currentFolder.order
+            };
+
+            if (isReorder && options?.beforeType === 'folder' && options.beforeId !== draggedFolderId) {
+                const targetParentId = options?.targetParentId;
+                const siblings = sortFoldersList(folders.filter(f => f.parentId === targetParentId && !f.isArchived));
+                const order = getOrderBeforeTarget(siblings, options.beforeId);
+                moveDocFolder(draggedFolderId, targetParentId, order);
+                showMoveToast(moveMeta);
+                return;
+            }
+
+            const siblings = sortFoldersList(folders.filter(f => f.parentId === intoFolderId && !f.isArchived && f.id !== draggedFolderId));
+            const order = getNextOrderFromSiblings(siblings);
+            moveDocFolder(draggedFolderId, intoFolderId, order);
+            showMoveToast(moveMeta);
         }
     };
 
     const handleDragStartFolder = (e: React.DragEvent, folderId: string) => {
         e.dataTransfer.setData('folderId', folderId);
+        e.dataTransfer.setData('dragType', 'folder');
         e.dataTransfer.effectAllowed = 'move';
     };
 
@@ -367,30 +532,31 @@ export const DocsView: React.FC = () => {
         const [isExpanded, setIsExpanded] = useState(true);
 
         const childFolders = useMemo(() => {
-            const children = folders.filter(f => f.parentId === folder.id);
-            return [...children].sort((a, b) => {
-                if (sortOrder === 'NAME') return a.name.localeCompare(b.name);
-                return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-            });
+            const children = folders.filter(f => f.parentId === folder.id && !f.isArchived);
+            return sortFoldersList(children);
         }, [folder.id, folders, sortOrder]);
 
         const childDocs = useMemo(() => {
-            const children = docs.filter(d => d.folderId === folder.id);
-            return [...children].sort((a, b) => {
-                if (sortOrder === 'NAME') return a.title.localeCompare(b.title);
-                return new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime();
-            });
+            const children = docs.filter(d => d.folderId === folder.id && !d.isArchived);
+            return sortDocsList(children);
         }, [folder.id, docs, sortOrder]);
 
         return (
             <div
                 className="mb-0.5"
                 onDragOver={handleDragOver}
-                onDrop={(e) => { e.stopPropagation(); handleDrop(e, folder.id); }}
+                onDrop={(e) => handleDrop(e, { targetFolderId: folder.id })}
             >
                 <div
                     draggable
                     onDragStart={(e) => handleDragStartFolder(e, folder.id)}
+                    onDragOver={handleDragOver}
+                    onDrop={(e) => handleDrop(e, {
+                        targetFolderId: folder.id,
+                        targetParentId: folder.parentId,
+                        beforeId: folder.id,
+                        beforeType: 'folder'
+                    })}
                     className="group flex items-center justify-between px-2 py-1 rounded hover:bg-zinc-100 cursor-default"
                     style={{ paddingLeft: `${depth * 12 + 8}px` }}
                 >
@@ -426,10 +592,10 @@ export const DocsView: React.FC = () => {
                                 onDoubleClick={(e) => {
                                     e.stopPropagation();
                                     setRenamingFolderId(folder.id);
-                                    setRenamingFolderData({ name: folder.name, icon: folder.icon || '📁' });
+                                    setRenamingFolderData({ name: folder.name, icon: folder.icon || '\u{1F4C1}' });
                                 }}
                             >
-                                <span className="opacity-80 shrink-0">{folder.icon || '📁'}</span>
+                                <span className="opacity-80 shrink-0">{folder.icon || '\u{1F4C1}'}</span>
                                 <span className="uppercase tracking-wider truncate">{folder.name}</span>
                                 {folder.isRagIndexed && <Icons.Database className="w-2.5 h-2.5 text-indigo-400 shrink-0" title="RAG Indexed" />}
                             </div>
@@ -444,7 +610,12 @@ export const DocsView: React.FC = () => {
                             <Icons.Database className="w-3 h-3" />
                         </button>
                         <button
-                            onClick={(e) => { e.stopPropagation(); addDocFolder('New Subfolder', '📁', folder.id); }}
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                const siblings = sortManual(folders.filter(f => f.parentId === folder.id && !f.isArchived));
+                                const order = getNextOrderFromSiblings(siblings);
+                                addDocFolder('New Subfolder', '\u{1F4C1}', folder.id, order);
+                            }}
                             className="p-1 text-zinc-400 hover:text-zinc-900 hover:bg-zinc-200 rounded"
                             title="New Subfolder"
                         >
@@ -464,21 +635,31 @@ export const DocsView: React.FC = () => {
                         {childFolders.map(child => (
                             <FolderItem key={child.id} folder={{ ...child, docs: childDocs.filter(d => d.folderId === child.id) }} depth={depth + 1} />
                         ))}
-                        {childDocs.map(doc => (
+                                                {childDocs.map(doc => (
                             <div
                                 key={doc.id}
                                 draggable
                                 onDragStart={(e) => handleDragStart(e, doc.id)}
-                                onClick={() => { setSelectedDocId(doc.id); setEditingDoc(null); }}
+                                onDragOver={handleDragOver}
+                                onDrop={(e) => handleDrop(e, { targetFolderId: folder.id, beforeId: doc.id, beforeType: 'doc' })}
+                                onClick={() => selectDoc(doc.id)}
                                 className={`py-1.5 pr-3 rounded-md cursor-pointer text-xs flex items-center justify-between group transition-colors ${selectedDoc?.id === doc.id ? 'bg-white shadow-sm ring-1 ring-zinc-100 text-zinc-900 font-medium' : 'text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100'}`}
                                 style={{ marginLeft: `${depth * 12 + 24}px` }}
                             >
                                 <div className="flex items-center gap-2 truncate">
-                                    <span className="shrink-0">{doc.icon || '📄'}</span>
+                                    <span className="shrink-0">{doc.icon || '\u{1F4C4}'}</span>
                                     <span className="truncate">{doc.title}</span>
+                                    {doc.isFavorite && <Icons.Star className="w-2.5 h-2.5 text-amber-500 shrink-0" />}
                                     {doc.isRagIndexed && <Icons.Database className="w-2.5 h-2.5 text-indigo-400 shrink-0" />}
                                 </div>
                                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); toggleDocFavorite(doc.id); }}
+                                        className={`p-0.5 rounded hover:bg-zinc-200 ${doc.isFavorite ? 'text-amber-500' : 'text-zinc-400'}`}
+                                        title={doc.isFavorite ? 'Remove favorite' : 'Add favorite'}
+                                    >
+                                        <Icons.Star className="w-3 h-3" />
+                                    </button>
                                     <button
                                         onClick={(e) => { e.stopPropagation(); toggleRagIndexing('DOC', doc.id, !doc.isRagIndexed); }}
                                         className={`p-0.5 rounded hover:bg-zinc-200 ${doc.isRagIndexed ? 'text-indigo-500' : 'text-zinc-400'}`}
@@ -503,11 +684,11 @@ export const DocsView: React.FC = () => {
                     <div className="flex items-center gap-2">
                         <span className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Knowledge Base</span>
                         <button
-                            onClick={() => setSortOrder(prev => prev === 'NAME' ? 'DATE' : 'NAME')}
+                            onClick={() => setSortOrder(prev => prev === 'MANUAL' ? 'NAME' : prev === 'NAME' ? 'DATE' : 'MANUAL')}
                             className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider hover:text-zinc-600"
-                            title="Toggle Sort"
+                            title="Sort: Manual / A-Z / Newest"
                         >
-                            {sortOrder === 'NAME' ? '(A-Z)' : '(Newest)'}
+                            {sortOrder === 'MANUAL' ? '(Manual)' : sortOrder === 'NAME' ? '(A-Z)' : '(Newest)'}
                         </button>
                     </div>
                     <div className="flex gap-1">
@@ -542,13 +723,79 @@ export const DocsView: React.FC = () => {
                             />
                         </div>
                     )}
+                    {recentDocs.length > 0 && (
+                        <div>
+                            <div className="px-2 py-1 mb-1 text-xs font-semibold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
+                                <Icons.Clock className="w-3 h-3" /> Recent
+                            </div>
+                            <div className="pl-4 space-y-0.5 border-l border-zinc-100 ml-3">
+                                {recentDocs.map(doc => (
+                                    <div
+                                        key={`recent-${doc.id}`}
+                                        draggable
+                                        onDragStart={(e) => handleDragStart(e, doc.id)}
+                                        onClick={() => selectDoc(doc.id)}
+                                        className={`px-3 py-1.5 rounded-md cursor-pointer text-xs flex items-center justify-between group transition-colors ${selectedDoc?.id === doc.id ? 'bg-white shadow-sm ring-1 ring-zinc-100 text-zinc-900 font-medium' : 'text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100'}`}
+                                    >
+                                        <div className="flex items-center gap-2 truncate">
+                                            <span>{doc.icon || '\u{1F4C4}'}</span>
+                                            <span className="truncate">{doc.title}</span>
+                                            {doc.isFavorite && <Icons.Star className="w-2.5 h-2.5 text-amber-500 shrink-0" />}
+                                            {doc.isRagIndexed && <Icons.Database className="w-2.5 h-2.5 text-indigo-400 shrink-0" />}
+                                        </div>
+                                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); toggleDocFavorite(doc.id); }}
+                                                className={`p-0.5 rounded hover:bg-zinc-200 ${doc.isFavorite ? 'text-amber-500' : 'text-zinc-400'}`}
+                                            >
+                                                <Icons.Star className="w-3 h-3" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                    {favoriteDocs.length > 0 && (
+                        <div>
+                            <div className="px-2 py-1 mb-1 text-xs font-semibold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
+                                <Icons.Star className="w-3 h-3" /> Favorites
+                            </div>
+                            <div className="pl-4 space-y-0.5 border-l border-zinc-100 ml-3">
+                                {favoriteDocs.slice(0, 12).map(doc => (
+                                    <div
+                                        key={`favorite-${doc.id}`}
+                                        draggable
+                                        onDragStart={(e) => handleDragStart(e, doc.id)}
+                                        onClick={() => selectDoc(doc.id)}
+                                        className={`px-3 py-1.5 rounded-md cursor-pointer text-xs flex items-center justify-between group transition-colors ${selectedDoc?.id === doc.id ? 'bg-white shadow-sm ring-1 ring-zinc-100 text-zinc-900 font-medium' : 'text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100'}`}
+                                    >
+                                        <div className="flex items-center gap-2 truncate">
+                                            <span>{doc.icon || '\u{1F4C4}'}</span>
+                                            <span className="truncate">{doc.title}</span>
+                                            <Icons.Star className="w-2.5 h-2.5 text-amber-500 shrink-0" />
+                                        </div>
+                                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); toggleDocFavorite(doc.id, false); }}
+                                                className="p-0.5 rounded hover:bg-zinc-200 text-amber-500"
+                                                title="Remove favorite"
+                                            >
+                                                <Icons.Star className="w-3 h-3" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
 
                     {/* Root Folders Tree */}
                     <div>
                         {rootFolders.map(folder => (
                             <FolderItem
                                 key={folder.id}
-                                folder={{ ...folder, docs: docs.filter(d => d.folderId === folder.id) }}
+                                folder={{ ...folder, docs: docs.filter(d => d.folderId === folder.id && !d.isArchived) }}
                                 depth={0}
                             />
                         ))}
@@ -557,7 +804,7 @@ export const DocsView: React.FC = () => {
                     {/* Unsorted */}
                     <div
                         onDragOver={handleDragOver}
-                        onDrop={(e) => handleDrop(e, undefined)}
+                        onDrop={(e) => handleDrop(e, { targetFolderId: undefined, targetParentId: undefined })}
                     >
                         <div className="px-2 py-1 mb-1 text-xs font-semibold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
                             <Icons.FileText className="w-3 h-3" /> Unsorted
@@ -568,15 +815,25 @@ export const DocsView: React.FC = () => {
                                     key={doc.id}
                                     draggable
                                     onDragStart={(e) => handleDragStart(e, doc.id)}
-                                    onClick={() => { setSelectedDocId(doc.id); setEditingDoc(null); }}
+                                    onDragOver={handleDragOver}
+                                    onDrop={(e) => handleDrop(e, { targetFolderId: undefined, beforeId: doc.id, beforeType: 'doc' })}
+                                    onClick={() => selectDoc(doc.id)}
                                     className={`px-3 py-1.5 rounded-md cursor-pointer text-xs flex items-center justify-between group transition-colors ${selectedDoc?.id === doc.id ? 'bg-white shadow-sm ring-1 ring-zinc-100 text-zinc-900 font-medium' : 'text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100'}`}
                                 >
                                     <div className="flex items-center gap-2 truncate">
-                                        <span>{doc.icon || '📄'}</span>
+                                        <span>{doc.icon || '\u{1F4C4}'}</span>
                                         <span className="truncate">{doc.title}</span>
+                                        {doc.isFavorite && <Icons.Star className="w-2.5 h-2.5 text-amber-500 shrink-0" />}
                                         {doc.isRagIndexed && <Icons.Database className="w-2.5 h-2.5 text-indigo-400 shrink-0" />}
                                     </div>
                                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); toggleDocFavorite(doc.id); }}
+                                            className={`p-0.5 rounded hover:bg-zinc-200 ${doc.isFavorite ? 'text-amber-500' : 'text-zinc-400'}`}
+                                            title={doc.isFavorite ? 'Remove favorite' : 'Add favorite'}
+                                        >
+                                            <Icons.Star className="w-3 h-3" />
+                                        </button>
                                         <button
                                             onClick={(e) => { e.stopPropagation(); toggleRagIndexing('DOC', doc.id, !doc.isRagIndexed); }}
                                             className={`p-0.5 rounded hover:bg-zinc-200 ${doc.isRagIndexed ? 'text-indigo-500' : 'text-zinc-400'}`}
@@ -868,6 +1125,35 @@ export const DocsView: React.FC = () => {
                     onSave={handleCreateTicketFromDoc}
                 />
             )}
+
+            {lastMove && (
+                <div className="fixed bottom-4 right-4 z-[200] bg-zinc-900 text-white text-xs px-3 py-2 rounded-lg shadow-lg flex items-center gap-3">
+                    <span className="font-medium truncate max-w-[240px]">Moved {lastMove.label}</span>
+                    <button
+                        onClick={handleUndoMove}
+                        className="px-2 py-1 rounded bg-white/10 hover:bg-white/20 transition-colors font-semibold"
+                    >
+                        Undo
+                    </button>
+                </div>
+            )}
         </div>
     );
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

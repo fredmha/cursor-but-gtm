@@ -106,8 +106,13 @@ const StrategyHorizon: React.FC<{
     roadmapItems: RoadmapItem[];
     campaignStart: Date;
     onProjectClick: (projectId: string) => void;
+    onCardClick: (item: RoadmapItem) => void;
+    onDragStart: (e: React.DragEvent, id: string) => void;
+    handleDrop: (e: React.DragEvent, channelId: string | undefined, weekIndex: number, projectId?: string) => void;
+    draggedItemId: string | null;
     weekCount: number;
-}> = ({ projects, users, roadmapItems, campaignStart, onProjectClick, weekCount }) => {
+    weeks: Date[];
+}> = ({ projects, users, roadmapItems, campaignStart, onProjectClick, onCardClick, onDragStart, handleDrop, draggedItemId, weekCount, weeks }) => {
 
     return (
         <div className="min-w-max bg-white border-b border-zinc-100 relative z-30">
@@ -138,38 +143,93 @@ const StrategyHorizon: React.FC<{
 
                     const colorClass = project.status === 'On Track' ? 'bg-emerald-500' : project.status === 'At Risk' ? 'bg-amber-500' : project.status === 'Off Track' ? 'bg-red-500' : 'bg-zinc-500';
 
+                    // EXECUTION LOGIC: Calculate layout for project-specific tasks
+                    const projectItems = roadmapItems.filter(i => i.projectId === project.id && !i.channelId);
+                    const { layoutItems, rowHeight } = calculateLaneLayout(projectItems, campaignS);
+                    const unscheduledItems = projectItems.filter(i => i.weekIndex < 0);
+
                     return (
-                        <div key={project.id} className="flex border-b border-zinc-100 group/row hover:bg-zinc-50 transition-colors h-14">
+                        <div key={project.id} className="flex border-b border-zinc-100 group/row hover:bg-zinc-50 transition-colors" style={{ minHeight: Math.max(72, rowHeight) }}>
                             {/* Project Header (Left) */}
                             <div className="shrink-0 border-r border-zinc-100 bg-zinc-50 p-3 flex flex-col justify-center sticky left-0 z-40 shadow-[1px_0_0_0_rgba(0,0,0,0.05)]" style={{ width: LEFT_PANEL_WIDTH }}>
                                 <div
                                     onClick={() => onProjectClick(project.id)}
-                                    className="flex items-center gap-2 cursor-pointer group"
+                                    className="flex items-center gap-2 cursor-pointer group mb-1"
                                 >
-                                    <div className={`w-2 h-2 rounded-full ${colorClass}`}></div>
+                                    <div className={`w-2.5 h-2.5 rounded-full ${colorClass} shadow-sm ring-1 ring-white`}></div>
                                     <span className="text-sm font-semibold text-zinc-700 group-hover:text-zinc-900 truncate">{project.name}</span>
                                 </div>
+                                <div className="text-[9px] font-bold uppercase tracking-wider text-zinc-400 ml-4">Project Workspace</div>
+
+                                {unscheduledItems.length > 0 && (
+                                    <div className="mt-4 border-t border-zinc-200/50 pt-3">
+                                        <div className="text-[9px] font-bold uppercase tracking-wider text-zinc-400 mb-2 pl-1">Inbox</div>
+                                        <div className="flex flex-col gap-2">
+                                            {unscheduledItems.map(item => (
+                                                <RoadmapCard
+                                                    key={item.id}
+                                                    item={item}
+                                                    users={users}
+                                                    projects={projects}
+                                                    isDragging={draggedItemId === item.id}
+                                                    onDragStart={onDragStart}
+                                                    onClick={() => onCardClick(item)}
+                                                    isBacklog={true}
+                                                    campaignStart={campaignS}
+                                                />
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
 
-                            {/* Timeline (Right) */}
+                            {/* Timeline & Execution (Right) */}
                             <div className="relative flex-1 bg-white overflow-visible">
-                                {/* Vertical Lines */}
-                                <div className="absolute inset-0 flex pointer-events-none">
+                                {/* Vertical Grid Lines */}
+                                <div className="absolute inset-0 flex pointer-events-none h-full">
                                     {Array.from({ length: weekCount }).map((_, i) => (
                                         <div key={i} className="border-r border-zinc-100 h-full" style={{ width: WEEK_WIDTH }}></div>
                                     ))}
                                 </div>
 
-                                {/* The Main Project Bar */}
+                                {/* Background Target Bar (Strategy) */}
                                 <div
-                                    onClick={() => onProjectClick(project.id)}
-                                    className="absolute top-3 h-8 rounded-none bg-white border border-zinc-900/10 hover:border-zinc-900/30 hover:shadow-sm cursor-pointer group transition-all flex items-center px-3 gap-2 z-10 hover:z-20"
+                                    className={`absolute top-0 h-1.5 opacity-20 ${colorClass}`}
                                     style={{ left: startOffsetPixels, width: widthPixels }}
-                                >
-                                    <div className={`w-1 h-3 ${colorClass} opacity-80 group-hover:opacity-100 transition-opacity`}></div>
-                                    <div className="pl-1 overflow-hidden">
-                                        <div className="text-[9px] font-bold text-zinc-900 truncate uppercase tracking-widest">{project.name}</div>
-                                    </div>
+                                />
+
+                                {/* Execution Grid (Cards & Dropzones) */}
+                                <div className="flex relative h-full">
+                                    {weeks.map((_, i) => (
+                                        <div
+                                            key={i}
+                                            className="h-full relative group/cell hover:bg-zinc-50 transition-colors"
+                                            style={{ width: WEEK_WIDTH }}
+                                            onDragOver={(e) => e.preventDefault()}
+                                            onDrop={(e) => handleDrop(e, undefined, i, project.id)}
+                                            onClick={() => onCardClick({ projectId: project.id, weekIndex: i, title: '' } as RoadmapItem)}
+                                        >
+                                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/cell:opacity-100 pointer-events-none">
+                                                <div className="w-6 h-6 rounded bg-zinc-100 flex items-center justify-center text-zinc-400">
+                                                    <Icons.Plus className="w-3 h-3" />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+
+                                    {/* Task Cards */}
+                                    {layoutItems.map(item => (
+                                        <RoadmapCard
+                                            key={item.id}
+                                            item={item}
+                                            users={users}
+                                            projects={projects}
+                                            isDragging={draggedItemId === item.id}
+                                            onDragStart={onDragStart}
+                                            onClick={() => onCardClick(item)}
+                                            campaignStart={campaignS}
+                                        />
+                                    ))}
                                 </div>
                             </div>
                         </div>
@@ -459,14 +519,23 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
         e.dataTransfer.setData('text/plain', id);
     };
 
-    const handleDrop = (e: React.DragEvent, channelId: string, weekIndex: number) => {
+    const handleDrop = (e: React.DragEvent, channelId: string | undefined, weekIndex: number, projectId?: string) => {
         e.preventDefault();
         if (!draggedItemId) return;
 
         const updates: Partial<RoadmapItem> = {
-            channelId,
             weekIndex
         };
+
+        if (channelId !== undefined) {
+            updates.channelId = channelId;
+        }
+
+        if (projectId !== undefined) {
+            updates.projectId = projectId;
+            updates.channelId = undefined; // Dropping into a project-specific lane clears the channel
+        }
+
         updateRoadmapItem(draggedItemId, updates);
         setDraggedItemId(null);
     };
@@ -535,7 +604,12 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
                         users={users}
                         campaignStart={campaign?.startDate ? new Date(campaign.startDate) : new Date()}
                         onProjectClick={setActiveDashboardProject}
+                        onCardClick={(item) => setActiveTicket({ item })}
+                        onDragStart={handleDragStart}
+                        handleDrop={handleDrop}
+                        draggedItemId={draggedItemId}
                         weekCount={weeks.length}
+                        weeks={weeks}
                     />
 
                     {/* LANES CONTAINER */}
@@ -608,7 +682,7 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
                                                     className="border-r border-zinc-100 h-full relative group/cell hover:bg-zinc-50 transition-colors"
                                                     style={{ width: WEEK_WIDTH }}
                                                     onDragOver={(e) => e.preventDefault()}
-                                                    onDrop={(e) => handleDrop(e, channel.id, i)}
+                                                    onDrop={(e) => handleDrop(e, channel.id, i, undefined)}
                                                     onClick={() => {
                                                         setActiveTicket({
                                                             item: { channelId: channel.id, weekIndex: i, title: '' }
@@ -641,6 +715,7 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
                                 </div>
                             );
                         })}
+
 
                         {/* ADD CHANNEL BUTTON */}
                         <div className="p-4 bg-white sticky left-0 w-full border-t border-zinc-100 z-30">

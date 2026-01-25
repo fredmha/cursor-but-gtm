@@ -26,12 +26,13 @@ const MainLayout: React.FC = () => {
           roadmapItems: [],
           timelineTags: [],
           docFolders: [
-            { id: 'f_strategy', name: 'Strategy', icon: '♟️', createdAt: new Date().toISOString() },
-            { id: 'f_personas', name: 'Personas', icon: '👥', createdAt: new Date().toISOString() },
-            { id: 'f_brand', name: 'Brand', icon: '🎨', createdAt: new Date().toISOString() },
-            { id: 'f_process', name: 'Process', icon: '⚙️', createdAt: new Date().toISOString() },
+            { id: 'f_strategy', name: 'Strategy', icon: '♟️', order: 1000, createdAt: new Date().toISOString() },
+            { id: 'f_personas', name: 'Personas', icon: '👥', order: 2000, createdAt: new Date().toISOString() },
+            { id: 'f_brand', name: 'Brand', icon: '🎨', order: 3000, createdAt: new Date().toISOString() },
+            { id: 'f_process', name: 'Process', icon: '⚙️', order: 4000, createdAt: new Date().toISOString() },
           ],
           docs: [],
+          recentDocIds: [],
           availableTags: ['Q1', 'Q2', 'Urgent', 'Draft']
       };
       setCampaign(newCampaign);
@@ -178,3 +179,4 @@ const App: React.FC = () => {
 };
 
 export default App;
+
