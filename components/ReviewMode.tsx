@@ -24,7 +24,22 @@ interface PendingAction {
 
 type MentionCandidate =
     | { kind: 'ticket'; id: string; token: string; label: string }
-    | { kind: 'doc'; id: string; token: string; label: string };
+    | { kind: 'doc'; id: string; token: string; label: string }
+    | { kind: 'user'; id: string; token: string; label: string }
+    | { kind: 'channel'; id: string; token: string; label: string }
+    | { kind: 'project'; id: string; token: string; label: string };
+
+type ReferenceType = 'ticket' | 'doc' | 'channel' | 'project' | 'user';
+
+type ReferenceEntity = {
+    type: ReferenceType;
+    id: string;
+    label: string;
+    shortId?: string;
+    token: string;
+    aliasTokens: string[];
+    labelNormalized: string;
+};
 
 type TicketModalInitialData = {
     id?: string;
@@ -55,6 +70,19 @@ type InlineEditDraft = {
 const normalizeMentionToken = (token: string) => token.replace(/^@/, '').trim().toLowerCase();
 const cleanExtract = (value: string) => value.trim().replace(/[.!,]+$/g, '').trim();
 const normalizeDateInput = (value?: string) => (value && value.trim() ? value : undefined);
+const normalizeText = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const slugify = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+const compactText = (value: string) => normalizeText(value).replace(/\s+/g, '');
+
+const uniqueStrings = (values: string[]) => {
+    const set = new Set<string>();
+    values.forEach(value => {
+        if (value) set.add(value);
+    });
+    return Array.from(set);
+};
+
+const extractMentionTokens = (text: string) => Array.from(text.matchAll(/@([A-Za-z0-9-_]+)/g)).map(m => m[1]);
 
 const arraysEqual = (a?: string[], b?: string[]) => {
     const left = a || [];
@@ -74,6 +102,14 @@ const parsePriorityValue = (value: string): Priority | null => {
     if (normalized === 'low') return 'Low';
     if (normalized === 'none') return 'None';
     return null;
+};
+
+const isSemanticMatch = (labelNormalized: string, textNormalized: string) => {
+    if (!labelNormalized || labelNormalized.length < 3) return false;
+    if (textNormalized.includes(labelNormalized)) return true;
+    const words = labelNormalized.split(' ').filter(word => word.length > 3);
+    if (words.length >= 2 && words.every(word => textNormalized.includes(word))) return true;
+    return false;
 };
 
 
@@ -276,8 +312,137 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
         return map;
     }, [users]);
 
+    const userById = useMemo(() => {
+        return new Map(users.map(u => [u.id, u]));
+    }, [users]);
+
+    const channelById = useMemo(() => {
+        return new Map((campaign?.channels || []).map(channel => [channel.id, channel]));
+    }, [campaign?.channels]);
+
+    const projectById = useMemo(() => {
+        return new Map((campaign?.projects || []).map(project => [project.id, project]));
+    }, [campaign?.projects]);
+
+    const referenceIndex = useMemo(() => {
+        const ticketRefs: ReferenceEntity[] = allTickets.map(ticket => {
+            const token = ticket.shortId || ticket.id;
+            const aliasTokens = uniqueStrings([ticket.id, ticket.shortId || '', token]);
+            return {
+                type: 'ticket',
+                id: ticket.id,
+                label: ticket.title,
+                shortId: ticket.shortId,
+                token,
+                aliasTokens,
+                labelNormalized: normalizeText(ticket.title || '')
+            };
+        });
+
+        const docRefs: ReferenceEntity[] = activeDocs.map(doc => {
+            const token = doc.shortId || slugify(doc.title) || doc.id;
+            const aliasTokens = uniqueStrings([doc.id, doc.shortId || '', token, compactText(doc.title)]);
+            return {
+                type: 'doc',
+                id: doc.id,
+                label: doc.title,
+                shortId: doc.shortId,
+                token,
+                aliasTokens,
+                labelNormalized: normalizeText(doc.title || '')
+            };
+        });
+
+        const channelRefs: ReferenceEntity[] = (campaign?.channels || []).map(channel => {
+            const token = slugify(channel.name) || channel.id;
+            const aliasTokens = uniqueStrings([channel.id, token, compactText(channel.name)]);
+            return {
+                type: 'channel',
+                id: channel.id,
+                label: channel.name,
+                token,
+                aliasTokens,
+                labelNormalized: normalizeText(channel.name || '')
+            };
+        });
+
+        const projectRefs: ReferenceEntity[] = (campaign?.projects || []).map(project => {
+            const token = slugify(project.name) || project.id;
+            const aliasTokens = uniqueStrings([project.id, token, compactText(project.name)]);
+            return {
+                type: 'project',
+                id: project.id,
+                label: project.name,
+                token,
+                aliasTokens,
+                labelNormalized: normalizeText(project.name || '')
+            };
+        });
+
+        const userRefs: ReferenceEntity[] = users.map(user => {
+            const token = slugify(user.name) || user.id;
+            const aliasTokens = uniqueStrings([user.id, token, user.initials || '', compactText(user.name)]);
+            return {
+                type: 'user',
+                id: user.id,
+                label: user.name,
+                token,
+                aliasTokens,
+                labelNormalized: normalizeText(user.name || '')
+            };
+        });
+
+        return {
+            tickets: ticketRefs,
+            docs: docRefs,
+            channels: channelRefs,
+            projects: projectRefs,
+            users: userRefs
+        };
+    }, [allTickets, activeDocs, campaign?.channels, campaign?.projects, users]);
+
+    const referenceAliasMap = useMemo(() => {
+        const map = new Map<string, ReferenceEntity[]>();
+        const addAliases = (entity: ReferenceEntity) => {
+            entity.aliasTokens.forEach(alias => {
+                const key = alias.toLowerCase();
+                if (!map.has(key)) map.set(key, []);
+                map.get(key)?.push(entity);
+            });
+        };
+        [
+            ...referenceIndex.tickets,
+            ...referenceIndex.docs,
+            ...referenceIndex.channels,
+            ...referenceIndex.projects,
+            ...referenceIndex.users
+        ].forEach(addAliases);
+        return map;
+    }, [referenceIndex]);
+
+    const mentionTokenIndex = useMemo(() => {
+        const map = new Map<string, ReferenceEntity>();
+        const addToken = (entity: ReferenceEntity) => {
+            const key = entity.token.toLowerCase();
+            if (!key || map.has(key)) return;
+            map.set(key, entity);
+        };
+        [
+            ...referenceIndex.tickets,
+            ...referenceIndex.docs,
+            ...referenceIndex.channels,
+            ...referenceIndex.projects,
+            ...referenceIndex.users
+        ].forEach(addToken);
+        return map;
+    }, [referenceIndex]);
+
     const findTicketTargetById = (ticketId: string) => {
-        return ticketLookup.byId.get(ticketId) || ticketLookup.byIdLower.get(ticketId.toLowerCase()) || null;
+        const key = ticketId.toLowerCase();
+        return ticketLookup.byId.get(ticketId)
+            || ticketLookup.byIdLower.get(key)
+            || ticketLookup.byShortIdLower.get(key)
+            || null;
     };
 
     const calloutTickets = useMemo(() => {
@@ -334,12 +499,68 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
         const docCandidates: MentionCandidate[] = docSource.map(d => ({
             kind: 'doc',
             id: d.id,
-            token: d.shortId || d.id,
+            token: d.shortId || slugify(d.title) || d.id,
             label: d.title
         }));
 
-        return [...ticketCandidates, ...docCandidates].slice(0, 30);
-    }, [mentionOpen, mentionQuery, calloutTickets, allTickets, campaign?.recentDocIds, recentDocsForMention, activeDocs]);
+        const userSource = !query ? users : users.filter(u => {
+            const name = u.name?.toLowerCase() || '';
+            const id = u.id?.toLowerCase() || '';
+            return name.includes(query) || id.includes(query);
+        });
+
+        const userCandidates: MentionCandidate[] = userSource.map(u => ({
+            kind: 'user',
+            id: u.id,
+            token: slugify(u.name) || u.id,
+            label: u.name
+        }));
+
+        const channelSource = !query ? (campaign?.channels || []) : (campaign?.channels || []).filter(c => {
+            const name = c.name?.toLowerCase() || '';
+            const id = c.id?.toLowerCase() || '';
+            return name.includes(query) || id.includes(query);
+        });
+
+        const channelCandidates: MentionCandidate[] = channelSource.map(c => ({
+            kind: 'channel',
+            id: c.id,
+            token: slugify(c.name) || c.id,
+            label: c.name
+        }));
+
+        const projectSource = !query ? (campaign?.projects || []) : (campaign?.projects || []).filter(p => {
+            const name = p.name?.toLowerCase() || '';
+            const id = p.id?.toLowerCase() || '';
+            return name.includes(query) || id.includes(query);
+        });
+
+        const projectCandidates: MentionCandidate[] = projectSource.map(p => ({
+            kind: 'project',
+            id: p.id,
+            token: slugify(p.name) || p.id,
+            label: p.name
+        }));
+
+        return [
+            ...ticketCandidates,
+            ...docCandidates,
+            ...userCandidates,
+            ...channelCandidates,
+            ...projectCandidates
+        ].slice(0, 30);
+    }, [
+        mentionOpen,
+        mentionQuery,
+        calloutTickets,
+        allTickets,
+        campaign?.recentDocIds,
+        recentDocsForMention,
+        activeDocs,
+        campaign?.channels,
+        campaign?.projects,
+        users
+    ]);
 
     useEffect(() => {
         if (mentionIndex >= mentionCandidates.length) {
@@ -460,11 +681,90 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
 
     const resolveMentionsForAI = (text: string) => {
         return text.replace(/@([A-Za-z0-9-_]+)/g, (match, token) => {
-            const doc = resolveDocMention(token);
-            if (!doc) return match;
-            const stableToken = doc.shortId || doc.id;
-            return `@${stableToken} (${doc.title})`;
+            const key = normalizeMentionToken(token);
+            const aliasMatches = referenceAliasMap.get(key) || [];
+            const entity = mentionTokenIndex.get(key) || (aliasMatches.length === 1 ? aliasMatches[0] : null);
+            if (!entity) return match;
+            const typeLabel = entity.type === 'ticket'
+                ? 'Ticket'
+                : entity.type === 'doc'
+                    ? 'Doc'
+                    : entity.type === 'user'
+                        ? 'User'
+                        : entity.type === 'channel'
+                            ? 'Channel'
+                            : 'Project';
+            const stableToken = entity.shortId || entity.token || token;
+            return `@${stableToken} (${typeLabel}: ${entity.label})`;
         });
+    };
+
+    const buildReferenceResolution = (text: string, mentionTokens: string[]) => {
+        const resolved = {
+            tickets: [] as string[],
+            docs: [] as string[],
+            channels: [] as string[],
+            projects: [] as string[],
+            users: [] as string[],
+            ambiguous: [] as Array<{ token: string; candidates: Array<{ type: ReferenceType; id: string; label: string }> }>,
+            unresolved: [] as string[]
+        };
+
+        const seen = new Set<string>();
+        const addResolved = (entity: ReferenceEntity) => {
+            const key = `${entity.type}:${entity.id}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+            if (entity.type === 'ticket') resolved.tickets.push(entity.id);
+            else if (entity.type === 'doc') resolved.docs.push(entity.id);
+            else if (entity.type === 'channel') resolved.channels.push(entity.id);
+            else if (entity.type === 'project') resolved.projects.push(entity.id);
+            else if (entity.type === 'user') resolved.users.push(entity.id);
+        };
+
+        const tokens = uniqueStrings([...mentionTokens, ...extractMentionTokens(text)].map(token => token.trim()));
+        tokens.forEach(token => {
+            const key = normalizeMentionToken(token);
+            const matches = referenceAliasMap.get(key) || [];
+            if (matches.length === 1) {
+                addResolved(matches[0]);
+                return;
+            }
+            if (matches.length > 1) {
+                resolved.ambiguous.push({
+                    token,
+                    candidates: matches.map(match => ({ type: match.type, id: match.id, label: match.label }))
+                });
+                return;
+            }
+            if (token) resolved.unresolved.push(token);
+        });
+
+        const normalizedText = normalizeText(text || '');
+        if (normalizedText) {
+            const allEntities = [
+                ...referenceIndex.tickets,
+                ...referenceIndex.docs,
+                ...referenceIndex.channels,
+                ...referenceIndex.projects,
+                ...referenceIndex.users
+            ];
+            allEntities.forEach(entity => {
+                if (isSemanticMatch(entity.labelNormalized, normalizedText)) {
+                    addResolved(entity);
+                }
+            });
+        }
+
+        return resolved;
+    };
+
+    const buildDocExcerpt = (doc: ContextDoc) => {
+        if (!doc) return '';
+        if (doc.format === 'CANVAS') return 'Canvas document';
+        const content = typeof doc.content === 'string' ? doc.content : '';
+        const stripped = content.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+        return stripped.slice(0, 280);
     };
 
     const parseInlineUpdates = (text: string) => {
@@ -753,6 +1053,145 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
         setIsTyping(false);
     };
 
+    const handleResolveReferencesCalls = async (calls: PendingAction[]) => {
+        if (!chatRef.current) return;
+        setIsTyping(true);
+        for (const call of calls) {
+            try {
+                const args = call.args || {};
+                const text = typeof args.text === 'string' ? args.text : '';
+                const mentionTokens = Array.isArray(args.mentionTokens)
+                    ? args.mentionTokens.filter((token: unknown) => typeof token === 'string') as string[]
+                    : [];
+                const resolution = buildReferenceResolution(text, mentionTokens);
+                const toolResponse = {
+                    functionResponse: {
+                        name: call.name,
+                        id: call.callId || call.id,
+                        response: resolution
+                    }
+                };
+                const response = await chatRef.current.sendMessage({ message: [toolResponse] });
+                processResponse(response);
+            } catch (e) {
+                console.error("Resolve references tool error:", e);
+            }
+        }
+        setIsTyping(false);
+    };
+
+    const handleFetchReferenceContextCalls = async (calls: PendingAction[]) => {
+        if (!chatRef.current) return;
+        setIsTyping(true);
+        for (const call of calls) {
+            try {
+                const args = call.args || {};
+                const ticketIds = Array.isArray(args.tickets) ? args.tickets.filter((id: unknown) => typeof id === 'string') as string[] : [];
+                const docIds = Array.isArray(args.docs) ? args.docs.filter((id: unknown) => typeof id === 'string') as string[] : [];
+                const channelIds = Array.isArray(args.channels) ? args.channels.filter((id: unknown) => typeof id === 'string') as string[] : [];
+                const projectIds = Array.isArray(args.projects) ? args.projects.filter((id: unknown) => typeof id === 'string') as string[] : [];
+                const userIds = Array.isArray(args.users) ? args.users.filter((id: unknown) => typeof id === 'string') as string[] : [];
+
+                const tickets = ticketIds.map(id => {
+                    const target = findTicketTargetById(id);
+                    const ticket = target?.ticket;
+                    if (!ticket) return null;
+                    const assigneeName = ticket.assigneeId ? userNameById.get(ticket.assigneeId) : undefined;
+                    const channelId = target?.type === 'CHANNEL' ? target.parentId : ticket.channelId;
+                    const projectId = target?.type === 'PROJECT' ? target.parentId : ticket.projectId;
+                    const channelName = channelId ? channelById.get(channelId)?.name : undefined;
+                    const projectName = projectId ? projectById.get(projectId)?.name : undefined;
+                    return {
+                        id: ticket.id,
+                        shortId: ticket.shortId,
+                        title: ticket.title,
+                        status: ticket.status,
+                        priority: ticket.priority,
+                        assigneeId: ticket.assigneeId,
+                        assigneeName,
+                        startDate: ticket.startDate,
+                        dueDate: ticket.dueDate,
+                        channelId,
+                        channelName,
+                        projectId,
+                        projectName
+                    };
+                }).filter(Boolean);
+
+                const docs = docIds.map(id => {
+                    const doc = docById.get(id);
+                    if (!doc) return null;
+                    const channelName = doc.channelId ? channelById.get(doc.channelId)?.name : undefined;
+                    return {
+                        id: doc.id,
+                        shortId: doc.shortId,
+                        title: doc.title,
+                        lastUpdated: doc.lastUpdated,
+                        channelId: doc.channelId,
+                        channelName,
+                        excerpt: buildDocExcerpt(doc)
+                    };
+                }).filter(Boolean);
+
+                const channels = channelIds.map(id => {
+                    const channel = channelById.get(id);
+                    if (!channel) return null;
+                    return {
+                        id: channel.id,
+                        name: channel.name,
+                        ticketCount: channel.tickets?.length || 0,
+                        memberCount: channel.memberIds?.length || 0,
+                        tags: channel.tags
+                    };
+                }).filter(Boolean);
+
+                const projects = projectIds.map(id => {
+                    const project = projectById.get(id);
+                    if (!project) return null;
+                    const ownerName = project.ownerId ? userNameById.get(project.ownerId) : undefined;
+                    return {
+                        id: project.id,
+                        name: project.name,
+                        status: project.status,
+                        description: project.description,
+                        ownerId: project.ownerId,
+                        ownerName,
+                        ticketCount: project.tickets?.length || 0
+                    };
+                }).filter(Boolean);
+
+                const resolvedUsers = userIds.map(id => {
+                    const user = userById.get(id);
+                    if (!user) return null;
+                    return {
+                        id: user.id,
+                        name: user.name,
+                        role: user.role
+                    };
+                }).filter(Boolean);
+
+                const toolResponse = {
+                    functionResponse: {
+                        name: call.name,
+                        id: call.callId || call.id,
+                        response: {
+                            tickets,
+                            docs,
+                            channels,
+                            projects,
+                            users: resolvedUsers
+                        }
+                    }
+                };
+                const response = await chatRef.current.sendMessage({ message: [toolResponse] });
+                processResponse(response);
+            } catch (e) {
+                console.error("Fetch reference context tool error:", e);
+            }
+        }
+        setIsTyping(false);
+    };
+
     // --- Processing ---
     const processResponse = (response: any) => {
         if (response.candidates && response.candidates[0]) {
@@ -782,11 +1221,22 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
                     args: tc.functionCall!.args,
                     status: 'PENDING' as const
                 }));
-                setPendingActions(prev => [...prev, ...newActions.filter(a => a.name !== 'show_tasks')]);
+                const autoHandled = new Set(['show_tasks', 'resolve_references', 'fetch_reference_context']);
+                setPendingActions(prev => [...prev, ...newActions.filter(a => !autoHandled.has(a.name))]);
 
                 const showTaskCalls = newActions.filter(a => a.name === 'show_tasks');
                 if (showTaskCalls.length > 0) {
                     void handleShowTasksCalls(showTaskCalls);
+                }
+
+                const resolveCalls = newActions.filter(a => a.name === 'resolve_references');
+                if (resolveCalls.length > 0) {
+                    void handleResolveReferencesCalls(resolveCalls);
+                }
+
+                const fetchCalls = newActions.filter(a => a.name === 'fetch_reference_context');
+                if (fetchCalls.length > 0) {
+                    void handleFetchReferenceContextCalls(fetchCalls);
                 }
             }
         }
@@ -1239,7 +1689,15 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
                                         {candidate.label}
                                     </span>
                                     <span className={`ml-auto text-[9px] font-semibold uppercase tracking-wider ${idx === mentionIndex ? 'text-white/70' : 'text-zinc-400'}`}>
-                                        {candidate.kind === 'ticket' ? 'Ticket' : 'Doc'}
+                                        {candidate.kind === 'ticket'
+                                            ? 'Ticket'
+                                            : candidate.kind === 'doc'
+                                                ? 'Doc'
+                                                : candidate.kind === 'user'
+                                                    ? 'User'
+                                                    : candidate.kind === 'channel'
+                                                        ? 'Channel'
+                                                        : 'Project'}
                                     </span>
                                 </button>
                             ))}

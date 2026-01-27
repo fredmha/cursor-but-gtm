@@ -102,10 +102,40 @@ const UPDATE_STATUS_TOOL = {
   }
 };
 
+const RESOLVE_REFERENCES_TOOL = {
+  name: "resolve_references",
+  description: "Resolve referenced tickets, docs, channels, projects, and users from a user prompt.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      text: { type: Type.STRING, description: "Raw user input." },
+      mentionTokens: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Explicit @ tokens if detected." }
+    },
+    required: ["text"]
+  }
+};
+
+const FETCH_REFERENCE_CONTEXT_TOOL = {
+  name: "fetch_reference_context",
+  description: "Fetch brief context for referenced entities so you can answer accurately.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      tickets: { type: Type.ARRAY, items: { type: Type.STRING } },
+      docs: { type: Type.ARRAY, items: { type: Type.STRING } },
+      channels: { type: Type.ARRAY, items: { type: Type.STRING } },
+      projects: { type: Type.ARRAY, items: { type: Type.STRING } },
+      users: { type: Type.ARRAY, items: { type: Type.STRING } }
+    }
+  }
+};
+
 export const WEEKLY_TOOLS: Tool[] = [
   {
     functionDeclarations: [
       SHOW_TASKS_TOOL,
+      RESOLVE_REFERENCES_TOOL,
+      FETCH_REFERENCE_CONTEXT_TOOL,
       PROPOSE_RESCHEDULE_TOOL,
       PROPOSE_TICKET_TOOL,
       PROPOSE_STATUS_CHANGE_TOOL
@@ -117,6 +147,8 @@ export const DAILY_TOOLS: Tool[] = [
   {
     functionDeclarations: [
       SHOW_TASKS_TOOL,
+      RESOLVE_REFERENCES_TOOL,
+      FETCH_REFERENCE_CONTEXT_TOOL,
       CREATE_TASK_TOOL,
       UPDATE_STATUS_TOOL
     ]
@@ -286,6 +318,7 @@ export const WEEKLY_SYSTEM_INSTRUCTION = `
   - NEVER say "I have updated the ticket". You cannot update the database. You MUST emit a Tool Call (proposal) and wait for the user to approve it.
   - If the user says "Move X to next week", calculate the date for next Friday and use 'propose_reschedule'.
   - If the user asks to see tasks, use 'show_tasks' with the relevant ticket IDs.
+  - If the user references tickets, docs, channels, projects, or team members (with or without @), call 'resolve_references' first. If you need details to answer, call 'fetch_reference_context' next.
 
   SOP:
   ${REVIEW_AGENT_SOP}
@@ -310,6 +343,7 @@ export const DAILY_SYSTEM_INSTRUCTION = `
   4. If they confirm a ticket status change, immediately use 'update_status'.
   5. If they say "I need to do Y", use 'create_task'.
   6. If the user asks to see tasks, use 'show_tasks' with the relevant ticket IDs.
+  7. If the user references tickets, docs, channels, projects, or team members (with or without @), call 'resolve_references' first. If you need details to answer, call 'fetch_reference_context' next.
 
   SOP:
   ${REVIEW_AGENT_SOP}
