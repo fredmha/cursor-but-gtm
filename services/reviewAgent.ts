@@ -62,6 +62,31 @@ const PROPOSE_TICKET_TOOL = {
   }
 };
 
+const PROPOSE_BULK_TASKS_TOOL = {
+  name: "propose_bulk_tasks",
+  description: "Generate multiple tickets at once from a meeting or plan.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      origin: { type: Type.STRING, description: "Meeting content source or title" },
+      tasks: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            title: { type: Type.STRING },
+            description: { type: Type.STRING },
+            assigneeId: { type: Type.STRING },
+            priority: { type: Type.STRING, enum: ["Urgent", "High", "Medium", "Low"] }
+          },
+          required: ["title"]
+        }
+      }
+    },
+    required: ["tasks"]
+  }
+};
+
 const PROPOSE_STATUS_CHANGE_TOOL = {
   name: "propose_status_change",
   description: "Propose marking a ticket as Done, Canceled (Kill), or Backlog.",
@@ -138,6 +163,7 @@ export const WEEKLY_TOOLS: Tool[] = [
       FETCH_REFERENCE_CONTEXT_TOOL,
       PROPOSE_RESCHEDULE_TOOL,
       PROPOSE_TICKET_TOOL,
+      PROPOSE_BULK_TASKS_TOOL,
       PROPOSE_STATUS_CHANGE_TOOL
     ]
   }
@@ -150,6 +176,7 @@ export const DAILY_TOOLS: Tool[] = [
       RESOLVE_REFERENCES_TOOL,
       FETCH_REFERENCE_CONTEXT_TOOL,
       CREATE_TASK_TOOL,
+      PROPOSE_BULK_TASKS_TOOL,
       UPDATE_STATUS_TOOL
     ]
   }
@@ -319,6 +346,7 @@ export const WEEKLY_SYSTEM_INSTRUCTION = `
   - If the user says "Move X to next week", calculate the date for next Friday and use 'propose_reschedule'.
   - If the user asks to see tasks, use 'show_tasks' with the relevant ticket IDs.
   - If the user references tickets, docs, channels, projects, or team members (with or without @), call 'resolve_references' first. If you need details to answer, call 'fetch_reference_context' next.
+  - If the user pastes a long plan or uses /plan, summarize into 'propose_bulk_tasks' only.
 
   SOP:
   ${REVIEW_AGENT_SOP}
@@ -344,6 +372,7 @@ export const DAILY_SYSTEM_INSTRUCTION = `
   5. If they say "I need to do Y", use 'create_task'.
   6. If the user asks to see tasks, use 'show_tasks' with the relevant ticket IDs.
   7. If the user references tickets, docs, channels, projects, or team members (with or without @), call 'resolve_references' first. If you need details to answer, call 'fetch_reference_context' next.
+  8. If the user pastes a long plan or uses /plan, summarize into 'propose_bulk_tasks' only.
 
   SOP:
   ${REVIEW_AGENT_SOP}

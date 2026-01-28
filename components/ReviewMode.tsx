@@ -13,6 +13,7 @@ import { AgentTicketCard } from './AgentTicketCard';
 import { buildReviewAgentTestCampaign } from '../fixtures/reviewAgentFixture';
 import { ChatKanbanCallout } from './ChatKanbanCallout';
 import { TicketModal } from './TicketModal';
+import { BulkTaskCallout, BulkDraftTask } from './BulkTaskCallout';
 
 interface PendingAction {
     id: string; 
@@ -67,6 +68,12 @@ type InlineEditDraft = {
     form: TicketModalInitialData;
 };
 
+type BulkDraft = {
+    origin: string;
+    tasks: BulkDraftTask[];
+    callId?: string;
+};
+
 const normalizeMentionToken = (token: string) => token.replace(/^@/, '').trim().toLowerCase();
 const cleanExtract = (value: string) => value.trim().replace(/[.!,]+$/g, '').trim();
 const normalizeDateInput = (value?: string) => (value && value.trim() ? value : undefined);
@@ -104,6 +111,24 @@ const parsePriorityValue = (value: string): Priority | null => {
     return null;
 };
 
+const parseStatusValue = (value: string): TicketStatus | null => {
+    const normalized = value.trim().toLowerCase();
+    if (normalized.includes('in progress') || normalized.includes('in-progress')) return TicketStatus.InProgress;
+    if (normalized.includes('todo')) return TicketStatus.Todo;
+    if (normalized.includes('backlog')) return TicketStatus.Backlog;
+    if (normalized.includes('blocked')) return TicketStatus.Backlog;
+    if (normalized.includes('done')) return TicketStatus.Done;
+    if (normalized.includes('canceled') || normalized.includes('cancelled') || normalized.includes('killed')) return TicketStatus.Canceled;
+    return null;
+};
+
+const isTranscriptLike = (text: string) => {
+    if (text.length <= 300) return false;
+    const hasBullets = /\n\s*[-*]\s+/.test(text);
+    const hasTimestamps = /\b\d{1,2}:\d{2}\b/.test(text);
+    return hasBullets || hasTimestamps;
+};
+
 const isSemanticMatch = (labelNormalized: string, textNormalized: string) => {
     if (!labelNormalized || labelNormalized.length < 3) return false;
     if (textNormalized.includes(labelNormalized)) return true;
@@ -133,6 +158,8 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
     const [editingTicket, setEditingTicket] = useState<Ticket | null>(null);
     const [showTicketModal, setShowTicketModal] = useState(false);
     const [inlineEditDraft, setInlineEditDraft] = useState<InlineEditDraft | null>(null);
+    const [bulkDraft, setBulkDraft] = useState<BulkDraft | null>(null);
+    const [isProcessingTranscript, setIsProcessingTranscript] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
     const [mentionQuery, setMentionQuery] = useState('');
     const [mentionOpen, setMentionOpen] = useState(false);
@@ -324,6 +351,14 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
         return new Map((campaign?.projects || []).map(project => [project.id, project]));
     }, [campaign?.projects]);
 
+    const defaultBulkContext = useMemo<{ channelId?: string; projectId?: string }>(() => {
+        const channels = campaign?.channels || [];
+        const projects = campaign?.projects || [];
+        if (channels.length === 1) return { channelId: channels[0].id };
+        if (channels.length === 0 && projects.length === 1) return { projectId: projects[0].id };
+        return {};
+    }, [campaign?.channels, campaign?.projects]);
+
     const referenceIndex = useMemo(() => {
         const ticketRefs: ReferenceEntity[] = allTickets.map(ticket => {
             const token = ticket.shortId || ticket.id;
@@ -437,6 +472,15 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
         return map;
     }, [referenceIndex]);
 
+    const resolveReferenceEntity = (token: string) => {
+        const key = normalizeMentionToken(token);
+        const direct = mentionTokenIndex.get(key);
+        if (direct) return direct;
+        const aliasMatches = referenceAliasMap.get(key) || [];
+        if (aliasMatches.length === 1) return aliasMatches[0];
+        return null;
+    };
+
     const findTicketTargetById = (ticketId: string) => {
         const key = ticketId.toLowerCase();
         return ticketLookup.byId.get(ticketId)
@@ -478,7 +522,7 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
         }));
 
         const recentIds = campaign?.recentDocIds || [];
-        const recentRank = new Map(recentIds.map((id, idx) => [id, idx]));
+        const recentRank = new Map<string, number>(recentIds.map((id, idx) => [id, idx] as const));
 
         const docSource = !query ? recentDocsForMention : activeDocs
             .filter(d => {
@@ -582,6 +626,8 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
         setInlineEditDraft(null);
         setShowTicketModal(false);
         setEditingTicket(null);
+        setBulkDraft(null);
+        setIsProcessingTranscript(false);
     };
 
     const closeTicketModal = () => {
@@ -765,6 +811,36 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
         const content = typeof doc.content === 'string' ? doc.content : '';
         const stripped = content.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
         return stripped.slice(0, 280);
+    };
+
+    const buildBulkDraftTasks = (rawTasks: any[]) => {
+        if (!Array.isArray(rawTasks)) return [];
+        return rawTasks.map((task) => {
+            const title = typeof task?.title === 'string' ? task.title.trim() : '';
+            if (!title) return null;
+
+            const description = typeof task?.description === 'string' ? task.description.trim() : '';
+            const priorityRaw = typeof task?.priority === 'string' ? task.priority : '';
+            const priority = priorityRaw ? parsePriorityValue(priorityRaw) : null;
+            const assigneeRaw = typeof task?.assigneeId === 'string' ? task.assigneeId : '';
+            const assigneeId = assigneeRaw && userById.has(assigneeRaw) ? assigneeRaw : undefined;
+            const channelId = typeof task?.channelId === 'string' ? task.channelId : undefined;
+            const projectId = typeof task?.projectId === 'string' ? task.projectId : undefined;
+
+            const base: BulkDraftTask = {
+                id: generateId(),
+                title,
+                description: description || undefined,
+                assigneeId,
+                priority: priority || 'Medium'
+            };
+
+            if (channelId) return { ...base, channelId };
+            if (projectId) return { ...base, projectId };
+            if (defaultBulkContext.channelId) return { ...base, channelId: defaultBulkContext.channelId };
+            if (defaultBulkContext.projectId) return { ...base, projectId: defaultBulkContext.projectId };
+            return base;
+        }).filter(Boolean) as BulkDraftTask[];
     };
 
     const parseInlineUpdates = (text: string) => {
@@ -954,6 +1030,291 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
             `Approved changes for @${target.ticket.shortId}.\n${formatSummaryBlock(summaryLines)}`
         );
         setInlineEditDraft(null);
+    };
+
+    const buildQueryTitle = (entity: ReferenceEntity | null, status: TicketStatus | null) => {
+        const parts: string[] = [];
+        if (entity) parts.push(entity.label);
+        if (status) parts.push(status);
+        return parts.length > 0 ? parts.join(' - ') : 'Filtered Tasks';
+    };
+
+    const handleQueryCommand = (args: string) => {
+        const tokens = extractMentionTokens(args);
+        const entity = tokens.length > 0 ? resolveReferenceEntity(tokens[0]) : null;
+        const status = parseStatusValue(args);
+
+        if (entity?.type === 'doc') {
+            appendModelMessage('Query by doc is not supported yet.');
+            return;
+        }
+
+        let filtered = allTicketTargets;
+        if (entity) {
+            if (entity.type === 'ticket') {
+                filtered = filtered.filter(t => t.ticket.id === entity.id);
+            } else if (entity.type === 'user') {
+                filtered = filtered.filter(t => t.ticket.assigneeId === entity.id);
+            } else if (entity.type === 'channel') {
+                filtered = filtered.filter(t => t.ticket.channelId === entity.id);
+            } else if (entity.type === 'project') {
+                filtered = filtered.filter(t => t.ticket.projectId === entity.id);
+            }
+        }
+        if (status) {
+            filtered = filtered.filter(t => t.ticket.status === status);
+        }
+
+        const ticketIds = filtered.map(t => t.ticket.id);
+        if (ticketIds.length === 0) {
+            appendModelMessage('No matching tasks found for that query.');
+            return;
+        }
+
+        const title = buildQueryTitle(entity, status);
+        const message: ChatMessage = {
+            id: generateId(),
+            role: 'model',
+            parts: [{
+                functionCall: {
+                    name: 'show_tasks',
+                    args: { title, ticketIds }
+                }
+            }],
+            timestamp: Date.now()
+        };
+
+        setMessages(prev => {
+            const next = [...prev, message];
+            updateChatHistory(mode, next);
+            return next;
+        });
+    };
+
+    const handleTranscriptSynthesis = async (notes: string) => {
+        if (!notes.trim()) {
+            appendModelMessage('Paste your notes after /plan to extract tasks.');
+            return;
+        }
+        if (!campaign) return;
+        setBulkDraft(null);
+        setIsProcessingTranscript(true);
+
+        if (!chatRef.current) {
+            await ensureChat();
+        }
+        if (!chatRef.current || typeof chatRef.current.sendMessage !== 'function') {
+            setClientError("Chat is not ready. Please try again.");
+            setIsProcessingTranscript(false);
+            return;
+        }
+
+        setIsTyping(true);
+        try {
+            const resolvedNotes = resolveMentionsForAI(notes);
+            const synthesisPrompt = [
+                "SYNTHESIS MODE: Extract actionable tasks from the notes below.",
+                "Return ONLY a propose_bulk_tasks tool call with 5-20 tasks.",
+                "Each task should include a short title, optional description, assigneeId if clear, and a priority.",
+                "Notes:",
+                resolvedNotes
+            ].join("\n");
+            const response = await chatRef.current.sendMessage({ message: synthesisPrompt });
+            processResponse(response);
+        } catch (e) {
+            console.error("Transcript synthesis error:", e);
+            setClientError("Transcript synthesis failed. Check console for details.");
+            setIsProcessingTranscript(false);
+        } finally {
+            setIsTyping(false);
+        }
+    };
+
+    const handleSlashCommand = async (rawText: string) => {
+        const trimmed = rawText.trim();
+        const match = trimmed.match(/^\/([a-zA-Z]+)\b([\s\S]*)$/);
+        if (!match) return false;
+        const command = match[1].toLowerCase();
+        const args = match[2]?.trim() || '';
+
+        appendUserMessage(rawText);
+
+        if (command === 'help') {
+            appendModelMessage([
+                "## Command Cheat Sheet",
+                "- /task <title> [priority]",
+                "- /query [@mention] [status]",
+                "- /edit @T-123",
+                "- /plan <paste notes>",
+                "- /help"
+            ].join('\n'));
+            return true;
+        }
+
+        if (command === 'task') {
+            if (!args) {
+                appendModelMessage('Usage: /task <title> [priority]');
+                return true;
+            }
+            const parts = args.split(/\s+/).filter(Boolean);
+            let priority: Priority | null = null;
+            if (parts.length > 1) {
+                const maybePriority = parsePriorityValue(parts[parts.length - 1]);
+                if (maybePriority) {
+                    priority = maybePriority;
+                    parts.pop();
+                }
+            }
+            const title = parts.join(' ').trim();
+            if (!title) {
+                appendModelMessage('Usage: /task <title> [priority]');
+                return true;
+            }
+            const mockCallId = generateId();
+            setPendingActions(prev => [...prev, {
+                id: generateId(),
+                callId: mockCallId,
+                name: 'propose_ticket',
+                args: { title, priority: priority || 'Medium' },
+                status: 'PENDING'
+            }]);
+            appendModelMessage('Draft ticket created. Fill in details and approve.');
+            return true;
+        }
+
+        if (command === 'query') {
+            handleQueryCommand(args);
+            return true;
+        }
+
+        if (command === 'edit') {
+            const tokens = extractMentionTokens(args);
+            if (tokens.length === 0) {
+                appendModelMessage('Usage: /edit @T-123');
+                return true;
+            }
+            const target = resolveMentionToTarget(tokens[0]);
+            if (!target) {
+                appendModelMessage('No ticket found for that reference.');
+                return true;
+            }
+            setInlineEditDraft({
+                target,
+                form: buildTicketModalInitialData(target.ticket)
+            });
+            appendModelMessage(`Review edits for @${target.ticket.shortId} below, then approve.`);
+            return true;
+        }
+
+        if (command === 'plan') {
+            const notes = rawText.replace(/^\/plan\s*/i, '').trim();
+            await handleTranscriptSynthesis(notes);
+            return true;
+        }
+
+        appendModelMessage(`Unknown command: /${command}. Try /help for options.`);
+        return true;
+    };
+
+    const handleBulkApprove = async (tasks: BulkDraftTask[]) => {
+        if (!campaign) return;
+        const fallbackChannelId = campaign.channels[0]?.id;
+        const fallbackProjectId = campaign.projects[0]?.id;
+        const createdAt = new Date().toISOString();
+
+        let createdCount = 0;
+        let skippedCount = 0;
+
+        tasks.forEach(task => {
+            const title = task.title?.trim();
+            if (!title) {
+                skippedCount += 1;
+                return;
+            }
+
+            const assigneeId = task.assigneeId && userById.has(task.assigneeId) ? task.assigneeId : undefined;
+            const baseTicket = {
+                id: generateId(),
+                shortId: `T-${Math.floor(Math.random() * 1000)}`,
+                title,
+                description: task.description || '',
+                priority: task.priority || 'Medium',
+                status: TicketStatus.Todo,
+                assigneeId,
+                createdAt
+            };
+
+            const channelId = task.channelId || defaultBulkContext.channelId || fallbackChannelId;
+            const projectId = !channelId ? (task.projectId || defaultBulkContext.projectId || fallbackProjectId) : undefined;
+
+            if (channelId) {
+                addTicket(channelId, { ...baseTicket, channelId });
+                createdCount += 1;
+            } else if (projectId) {
+                addProjectTicket(projectId, { ...baseTicket, projectId });
+                createdCount += 1;
+            } else {
+                skippedCount += 1;
+            }
+        });
+
+        const callId = bulkDraft?.callId;
+        setBulkDraft(null);
+        setIsProcessingTranscript(false);
+
+        if (!chatRef.current || !callId) {
+            appendModelMessage(`Created ${createdCount} tasks. ${skippedCount ? `Skipped ${skippedCount} missing context.` : ''}`.trim());
+            return;
+        }
+
+        setIsTyping(true);
+        try {
+            const toolResponse = {
+                functionResponse: {
+                    name: 'propose_bulk_tasks',
+                    id: callId,
+                    response: {
+                        result: 'Approved',
+                        createdCount,
+                        skippedCount
+                    }
+                }
+            };
+            const response = await chatRef.current.sendMessage({ message: [toolResponse] });
+            processResponse(response);
+        } catch (e) {
+            console.error("Bulk approve tool error:", e);
+        } finally {
+            setIsTyping(false);
+        }
+    };
+
+    const handleBulkDiscard = async () => {
+        const callId = bulkDraft?.callId;
+        setBulkDraft(null);
+        setIsProcessingTranscript(false);
+
+        if (!chatRef.current || !callId) {
+            appendModelMessage('Bulk draft discarded.');
+            return;
+        }
+
+        setIsTyping(true);
+        try {
+            const toolResponse = {
+                functionResponse: {
+                    name: 'propose_bulk_tasks',
+                    id: callId,
+                    response: { result: 'User discarded draft.' }
+                }
+            };
+            const response = await chatRef.current.sendMessage({ message: [toolResponse] });
+            processResponse(response);
+        } catch (e) {
+            console.error("Bulk discard tool error:", e);
+        } finally {
+            setIsTyping(false);
+        }
     };
 
     // --- Load History / Init Session ---
@@ -1192,6 +1553,29 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
         setIsTyping(false);
     };
 
+    const handleBulkTasksCalls = (calls: PendingAction[]) => {
+        if (calls.length === 0) return;
+        const call = calls[calls.length - 1];
+        const args = call.args || {};
+        const origin = typeof args.origin === 'string' && args.origin.trim()
+            ? args.origin.trim()
+            : 'Transcript';
+        const tasks = buildBulkDraftTasks(args.tasks);
+
+        setIsProcessingTranscript(false);
+
+        if (tasks.length === 0) {
+            appendModelMessage('No actionable tasks were extracted from those notes.');
+            return;
+        }
+
+        setBulkDraft({
+            origin,
+            tasks,
+            callId: call.callId || call.id
+        });
+    };
+
     // --- Processing ---
     const processResponse = (response: any) => {
         if (response.candidates && response.candidates[0]) {
@@ -1221,7 +1605,7 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
                     args: tc.functionCall!.args,
                     status: 'PENDING' as const
                 }));
-                const autoHandled = new Set(['show_tasks', 'resolve_references', 'fetch_reference_context']);
+                const autoHandled = new Set(['show_tasks', 'resolve_references', 'fetch_reference_context', 'propose_bulk_tasks']);
                 setPendingActions(prev => [...prev, ...newActions.filter(a => !autoHandled.has(a.name))]);
 
                 const showTaskCalls = newActions.filter(a => a.name === 'show_tasks');
@@ -1238,6 +1622,15 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
                 if (fetchCalls.length > 0) {
                     void handleFetchReferenceContextCalls(fetchCalls);
                 }
+
+                const bulkCalls = newActions.filter(a => a.name === 'propose_bulk_tasks');
+                if (bulkCalls.length > 0) {
+                    handleBulkTasksCalls(bulkCalls);
+                } else if (isProcessingTranscript) {
+                    setIsProcessingTranscript(false);
+                }
+            } else if (isProcessingTranscript) {
+                setIsProcessingTranscript(false);
             }
         }
     };
@@ -1254,6 +1647,15 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
         setMentionOpen(false);
         setMentionQuery('');
         setMentionStart(null);
+
+        const slashHandled = await handleSlashCommand(rawText);
+        if (slashHandled) return;
+
+        if (isTranscriptLike(rawText)) {
+            appendUserMessage(rawText);
+            await handleTranscriptSynthesis(rawText);
+            return;
+        }
 
         const inlineRequest = parseInlineTicketEditRequest(trimmedText);
         if (inlineRequest) {
@@ -1399,7 +1801,7 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
     // --- Render ---
     useEffect(() => {
         scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages, pendingActions, isTyping]);
+    }, [messages, pendingActions, isTyping, bulkDraft, isProcessingTranscript]);
 
     return (
         <div className="h-full flex flex-col bg-white">
@@ -1509,6 +1911,31 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
                             })}
                         </div>
                     ))}
+
+                    {isProcessingTranscript && !bulkDraft && (
+                        <BulkTaskCallout
+                            origin="Parsing notes..."
+                            initialTasks={[]}
+                            users={users}
+                            channels={campaign?.channels || []}
+                            projects={campaign?.projects || []}
+                            onApprove={() => {}}
+                            onDiscard={handleBulkDiscard}
+                            isLoading
+                        />
+                    )}
+
+                    {bulkDraft && (
+                        <BulkTaskCallout
+                            origin={bulkDraft.origin}
+                            initialTasks={bulkDraft.tasks}
+                            users={users}
+                            channels={campaign?.channels || []}
+                            projects={campaign?.projects || []}
+                            onApprove={handleBulkApprove}
+                            onDiscard={handleBulkDiscard}
+                        />
+                    )}
 
                     {/* Pending Actions (Widgets) */}
                     {pendingActions.map(action => (
