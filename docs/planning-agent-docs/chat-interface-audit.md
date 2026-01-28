@@ -8,12 +8,6 @@ This audit focuses on how the current chat interface works, where slash commands
   - Main chat UI, input handling, tool call parsing, and action cards.
   - Runs Gemini via `GoogleGenAI`, keeps local chat state, and persists chat history in store.
   - Houses mention resolver and @ picker; most command routing should live here.
-- `components/AgentTicketCard.tsx`
-  - Renders tool proposals like `propose_ticket` and `create_task`.
-- `components/ChatKanbanCallout.tsx`
-  - Renders `show_tasks` results as a kanban-like callout.
-- `components/BulkTaskCallout.tsx`
-  - Renders `propose_bulk_tasks` results for batch approval.
 - `services/reviewAgent.ts`
   - Defines tools (`show_tasks`, `propose_ticket`, `propose_bulk_tasks`, `resolve_references`, etc.).
   - Builds Daily/Weekly context strings and sets system instructions.
@@ -27,6 +21,12 @@ This audit focuses on how the current chat interface works, where slash commands
   - LocalStorage persistence.
 - `types.ts`
   - Shared data shapes, including `ContextDoc` and `DocFolder`.
+- `components/AgentTicketCard.tsx`
+  - Renders tool proposals like `propose_ticket` and `create_task`.
+- `components/ChatKanbanCallout.tsx`
+  - Renders `show_tasks` results as a kanban-like callout.
+- `components/BulkTaskCallout.tsx`
+  - Renders `propose_bulk_tasks` results for batch approval.
 
 ## Current Chat Architecture (ReviewMode)
 1) Input capture and local state
@@ -58,7 +58,14 @@ This audit focuses on how the current chat interface works, where slash commands
   - `/start weekly plan`
   - `/start quarterly plan`
   - `/set sprint plan`
-- The router belongs in `ReviewMode.tsx` before the LLM call.
+
+## Recent Changes That Impact Planning
+- Slash command parsing currently only supports single-token commands.
+  - `/start daily plan` will be parsed as `/start` and treated as unknown until the parser is updated.
+- `ReviewMode` only supports `DAILY | WEEKLY` system instructions and tools.
+  - Planning needs a new mode or a separate planning agent.
+- `WeeklyReviewWizard.tsx` is deleted.
+  - Planning UI should attach to `ReviewMode` or a new Planning view, not the wizard.
 
 ## Gaps vs. Desired Planning Workflow
 1) No slash command picker UI
@@ -86,6 +93,7 @@ This audit focuses on how the current chat interface works, where slash commands
 
 ## Recommended Next Steps
 - Implement a slash command picker alongside the existing @ mention picker.
+- Update the slash parser to support multi-word commands.
 - Add planning folder bootstrap in store migration (create `Planning`, `Daily`, `Weekly`, `Quarterly`, `Sprint`, `Context`, `Uploads`).
 - Add a lightweight file upload path in ReviewMode:
   - Create a `ContextDoc` in `Planning/Uploads`.

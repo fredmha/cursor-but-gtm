@@ -8,6 +8,11 @@
 - File upload ingestion (documents, spreadsheets, notes).
 - Optional: web search tool (research support).
 
+## Current Interface Constraints (from ReviewMode)
+- `ReviewMode` only supports `DAILY | WEEKLY` system instructions, tools, and chat history.
+- Slash command parser only recognizes single-token commands (e.g., `/plan`), so `/start daily plan` will not route correctly until updated.
+- `WeeklyReviewWizard.tsx` is deleted; planning must attach to `ReviewMode` or a new Planning view.
+
 ## Constraints
 - Must be usable for 1-50 person SaaS teams (small-team workflows, limited process overhead).
 - Plans must align to goals and north star objective.
@@ -45,22 +50,26 @@
 ### Phase 0: Data Model + Storage
 - Implement Planning folder tree in Docs workspace.
 - Define plan schema and embed JSON payloads in plan docs.
-- Add Index docs for “Latest” and “Recent” lists.
+- Add Index docs for "Latest" and "Recent" lists.
 
 ### Phase 1: Command Routing + SOP Engine
-- Map slash commands to SOPs with Notion-style slash picker UI.
+- Update slash parser to support multi-word commands (e.g., `/start daily plan`).
+- Map planning commands to SOPs with Notion-style slash picker UI.
 - Implement readiness gate logic.
 - Add plan summaries and confirmations.
+- Decide planning execution path:
+  - Option A: Add a `PLANNING` mode to `ReviewMode`.
+  - Option B: Create a separate Planning chat engine.
 
 ### Phase 2: Task and Team Integrations
 - Wire task creation and updates.
 - Add team roster and capacity inputs.
- - Add file upload to chat for context docs (auto-saved to Planning/Uploads).
+- Add file upload to chat for context docs (auto-saved to Planning/Uploads).
 
 ### Phase 3: Subagent Orchestration
 - Parallelize context retrieval, blocker scan, and plan synthesis.
 - Add consistency checks (goal-to-task coverage).
- - Enforce token-aware subagent selection.
+- Enforce token-aware subagent selection.
 
 ### Phase 4: Research Augmentation
 - Add web search for market/competitor benchmarks.
@@ -77,9 +86,12 @@
   - Mitigation: require goal-to-task linkage before plan finalization.
 - Risk: Tool dependency failures.
   - Mitigation: fallback to manual plan capture.
+- Risk: Planning uses wrong system instruction.
+  - Mitigation: introduce a planning-specific mode or a separate planning agent.
 
 ## Open Questions
 - What is the minimum viable set of tools for Phase 1?
 - How should multi-owner tasks be represented?
 - What file types should be supported for uploads (PDF, CSV, DOCX)?
+- Which planning execution path do we want (new mode vs separate engine)?
 
