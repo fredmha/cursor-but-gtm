@@ -1,4 +1,4 @@
-# Planning Agent Implementation Plan
+﻿# Planning Agent Implementation Plan (Agentic)
 
 ## Dependencies
 - Command router for slash commands with Notion-style picker in chat input.
@@ -10,7 +10,7 @@
 
 ## Current Interface Constraints (from ReviewMode)
 - `ReviewMode` only supports `DAILY | WEEKLY` system instructions, tools, and chat history.
-- Slash command parser only recognizes single-token commands (e.g., `/plan`), so `/start daily plan` will not route correctly until updated.
+- Slash command parser only recognizes single-token commands in the original implementation; multi-word support is required.
 - `WeeklyReviewWizard.tsx` is deleted; planning must attach to `ReviewMode` or a new Planning view.
 
 ## Constraints
@@ -20,6 +20,11 @@
 - Data privacy: store only user-provided content and keep access scoped to org.
 - Time zone awareness and date boundaries.
 - Subagent selection must be token-budget aware (use only what is needed per session).
+
+## Agentic Requirements
+- Planning commands must retrieve context before prompting the user.
+- Ask only for missing inputs; do not ask the user to list tasks if tasks already exist.
+- All writes (docs or tasks) require explicit confirmation.
 
 ## Subagents (Proposed)
 1) Context Retriever
@@ -52,11 +57,15 @@
 - Define plan schema and embed JSON payloads in plan docs.
 - Add Index docs for "Latest" and "Recent" lists.
 
-### Phase 1: Command Routing + SOP Engine
+### Phase 1: Agentic Command Routing + SOP Engine
 - Update slash parser to support multi-word commands (e.g., `/start daily plan`).
 - Map planning commands to SOPs with Notion-style slash picker UI.
 - Implement readiness gate logic.
 - Add plan summaries and confirmations.
+- Add context retrieval that auto-loads:
+  - Recent plans for the horizon
+  - Active tasks (In Progress / Todo)
+  - Active projects and owners
 - Decide planning execution path:
   - Option A: Add a `PLANNING` mode to `ReviewMode`.
   - Option B: Create a separate Planning chat engine.
@@ -94,4 +103,3 @@
 - How should multi-owner tasks be represented?
 - What file types should be supported for uploads (PDF, CSV, DOCX)?
 - Which planning execution path do we want (new mode vs separate engine)?
-

@@ -1,4 +1,4 @@
-# Planning Storage and Context Model
+﻿# Planning Storage and Context Model
 
 ## Goals
 - Durable, queryable history of plans and conversations.
@@ -39,14 +39,22 @@ Docs/
 Each planning artifact is a `ContextDoc`. Content is HTML for human readability, with a structured payload embedded for machine use.
 
 Recommended layout inside each doc:
-- **Summary (HTML)**: goal, priorities, risks, decisions.
-- **Structured payload**: embedded JSON block in a `<pre data-plan-json>` section.
-- **Transcript summary**: compact Q/A notes (optional).
+- Summary (HTML): goals, priorities, risks, decisions.
+- Structured payload: embedded JSON block in a `<pre data-plan-json>` section.
+- Transcript summary: compact Q/A notes (optional).
+
+Daily Plan docs should include these sections:
+- Top 3 priorities
+- Other priorities
+- Brain dump (verbatim notes)
+- North Star goal check-in
+- Tasks created/updated
+- End of day review (empty for user input)
 
 If we need strict separation, create paired docs:
 - `{date} - Plan` (summary + JSON)
 - `{date} - Transcript` (conversation notes)
- 
+
 ## Tagging & Metadata
 - Use `tags` to classify: `Planning`, `Daily`, `Weekly`, `Quarterly`, `Sprint`, plus date markers like `2026-01-28`.
 - Set `isRagIndexed` on the Planning folder and specific docs to include them in retrieval.
@@ -80,4 +88,3 @@ If we need strict separation, create paired docs:
 - Each write is append-only; edits create a new version with a timestamp.
 - Store user confirmations in the embedded JSON payload as `confirmedBy` and `confirmedAt`.
 - Do not store sensitive data unless explicitly provided by user.
-

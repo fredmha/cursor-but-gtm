@@ -1,7 +1,7 @@
-# Planning Prototype Implementation Roadmap (Frontend-First)
+﻿# Planning Prototype Implementation Roadmap (Frontend-First, Agentic)
 
 ## Objective
-Deliver a fully functional planning prototype in the existing chat interface before any backend integration. All data persists via the current client-side store/localStorage and Docs workspace.
+Deliver a fully functional planning prototype in the existing chat interface before any backend integration. All data persists via the current client-side store/localStorage and Docs workspace, but the flow must feel agentic (data-aware, minimal prompting).
 
 ## Prototype Constraints
 - No backend calls or server persistence.
@@ -20,7 +20,13 @@ Deliver a fully functional planning prototype in the existing chat interface bef
 - Update slash parser to support multi-word commands (e.g., `/start daily plan`).
 - Add command list: `/start daily plan`, `/start weekly plan`, `/start quarterly plan`, `/set sprint plan`, `/plan`, `/task`, `/help`.
 
-### Step 2: Planning Agent Service
+### Step 2: Agentic Context Loader
+- Load recent plans by horizon from Docs.
+- Load current tasks (In Progress + Todo), sorted by priority/due date.
+- Load active projects/channels for alignment.
+- Summarize context in chat before asking questions.
+
+### Step 3: Planning Agent Service
 - Create `services/planningAgent.ts` (parallel to `reviewAgent.ts`).
 - Define planning tools and system instructions.
 - Build planning context from:
@@ -29,27 +35,28 @@ Deliver a fully functional planning prototype in the existing chat interface bef
   - Active tasks and projects
   - Uploaded context docs
 
-### Step 3: Planning Flow State Machine
+### Step 4: Planning Flow State Machine
 - Implement readiness gate (confirm status, blockers, capacity, backlog alignment).
 - Implement SOPs for daily/weekly/quarterly/sprint.
 - Draft plan -> user confirm -> finalize.
+- Do not ask user to list tasks if task data already exists; propose based on context.
 
-### Step 4: Planning Storage in Docs
+### Step 5: Planning Storage in Docs
 - Ensure Planning folder tree exists in Docs workspace.
 - Save plan artifacts as `ContextDoc` in `Planning/*` folders.
 - Embed structured JSON payload in the doc body.
 - Update "Index" docs (Latest, Recent Daily/Weekly/Quarterly).
 
-### Step 5: File Uploads in Chat
+### Step 6: File Uploads in Chat
 - Add upload control in ReviewMode input.
 - Save uploaded files to `Planning/Uploads` as docs.
 - Mark planning docs and uploads as `isRagIndexed: true` by default.
 
-### Step 6: Token-Aware Subagent Stubs
+### Step 7: Token-Aware Subagent Stubs
 - For prototype, simulate subagents as ordered LLM calls (no parallel infra).
 - Add token budget guard: if context is large, summarize and reduce inputs.
 
-### Step 7: QA & UX Validation
+### Step 8: QA & UX Validation
 - Verify all slash commands resolve correctly.
 - Confirm plans can be created, saved, and retrieved from Docs.
 - Validate task proposals and approvals still work in ReviewMode.
@@ -58,6 +65,7 @@ Deliver a fully functional planning prototype in the existing chat interface bef
 ## Prototype Definition of Done
 - `/start daily plan`, `/start weekly plan`, `/start quarterly plan`, `/set sprint plan` all run through SOPs and save plans to Docs.
 - Plans are visible in `Docs > Planning/*` and can be reopened.
+- Proposed tasks are generated from existing data (tickets/plans), not hard-coded prompts.
 - Uploaded files appear in `Docs > Planning/Uploads` and are indexed for context.
 - ReviewMode daily/weekly flows remain functional.
 
@@ -66,4 +74,3 @@ Deliver a fully functional planning prototype in the existing chat interface bef
 - Server-side indexing / RAG.
 - File storage beyond local browser limits.
 - Cross-device sync and search.
-

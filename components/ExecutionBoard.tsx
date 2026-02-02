@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useStore, generateId } from '../store';
 import { TicketStatus, Ticket, Priority } from '../types';
 import { Icons, PRIORITIES } from '../constants';
@@ -7,7 +7,7 @@ import { ProjectDashboard } from './ProjectDashboard';
 import { ChannelDashboard } from './ChannelDashboard';
 import { TicketModal } from './TicketModal';
 import { TeamHealthHeader } from './TeamHealthHeader';
-import { TicketList } from './TicketList';
+import { TicketList, TicketListGroupMode, TicketListWeekStart } from './TicketList';
 import { TicketBoard } from './TicketBoard';
 
 type ViewState =
@@ -90,9 +90,32 @@ const ProjectCreationModal: React.FC<{
 export const ExecutionBoard: React.FC = () => {
     const { campaign, users, currentUser, addChannel, addProject, deleteChannel, deleteProject, addTicket, updateTicket, updateProjectTicket, deleteTicket, deleteProjectTicket, addProjectTicket } = useStore();
 
+    const listGroupKey = 'ticketListGroupMode';
+    const listWeekStartKey = 'ticketListWeekStart';
+
+    const getStoredGroupMode = () => {
+        if (typeof window === 'undefined') return 'WEEK_ASSIGNEE' as TicketListGroupMode;
+        const stored = window.localStorage.getItem(listGroupKey) as TicketListGroupMode | null;
+        if (stored === 'WEEK_ASSIGNEE' || stored === 'ASSIGNEE_PRIORITY' || stored === 'CONTEXT_WEEK') {
+            return stored;
+        }
+        return 'WEEK_ASSIGNEE' as TicketListGroupMode;
+    };
+
+    const getStoredWeekStart = () => {
+        if (typeof window === 'undefined') return 'MON' as TicketListWeekStart;
+        const stored = window.localStorage.getItem(listWeekStartKey) as TicketListWeekStart | null;
+        if (stored === 'MON' || stored === 'SUN') {
+            return stored;
+        }
+        return 'MON' as TicketListWeekStart;
+    };
+
     const [view, setView] = useState<ViewState>({ type: 'MY_ISSUES' });
     const [scope, setScope] = useState<'MINE' | 'TEAM'>('MINE');
     const [viewType, setViewType] = useState<'LIST' | 'BOARD'>('LIST');
+    const [listGroupMode, setListGroupMode] = useState<TicketListGroupMode>(getStoredGroupMode);
+    const [listWeekStart, setListWeekStart] = useState<TicketListWeekStart>(getStoredWeekStart);
     const [showProjectModal, setShowProjectModal] = useState(false);
     const [editingTicket, setEditingTicket] = useState<Ticket | null>(null);
     const [showTicketModal, setShowTicketModal] = useState(false);
@@ -229,6 +252,28 @@ export const ExecutionBoard: React.FC = () => {
         setShowTicketModal(false);
     };
 
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            window.localStorage.setItem(listGroupKey, listGroupMode);
+        }
+    }, [listGroupMode, listGroupKey]);
+
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            window.localStorage.setItem(listWeekStartKey, listWeekStart);
+        }
+    }, [listWeekStart, listWeekStartKey]);
+
+    const listGroupOptions: { id: TicketListGroupMode; label: string }[] = [
+        { id: 'WEEK_ASSIGNEE', label: 'Time & Owner' },
+        { id: 'ASSIGNEE_PRIORITY', label: 'Owner & Priority' },
+        { id: 'CONTEXT_WEEK', label: 'Workstream & Time' }
+    ];
+    const listWeekStartOptions: { id: TicketListWeekStart; label: string }[] = [
+        { id: 'MON', label: 'Mon Start' },
+        { id: 'SUN', label: 'Sun Start' }
+    ];
+
     return (
         <div className="h-full flex bg-white font-sans text-zinc-900">
 
@@ -357,14 +402,45 @@ export const ExecutionBoard: React.FC = () => {
 
                             <div className="h-auto px-8 pb-8">
                                 {viewType === 'LIST' ? (
-                                    <TicketList
-                                        tickets={displayTickets}
-                                        users={users}
-                                        channels={channels}
-                                        projects={projects}
-                                        onTicketClick={handleTicketClick}
-                                        onToggleStatus={handleToggleStatus}
-                                    />
+                                    <>
+                                        <div className="flex flex-wrap items-center justify-between gap-4 py-5">
+                                            <div className="text-[12px] font-bold uppercase tracking-[0.22em] text-zinc-600">Grouping</div>
+                                            <div className="flex flex-wrap items-center gap-4">
+                                                <div className="flex bg-zinc-100/80 border border-zinc-100 p-0.5 rounded-lg">
+                                                    {listGroupOptions.map(option => (
+                                                        <button
+                                                            key={option.id}
+                                                            onClick={() => setListGroupMode(option.id)}
+                                                            className={`px-4 py-1.5 text-[11px] font-bold uppercase tracking-wider rounded-md transition-all ${listGroupMode === option.id ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-500 hover:text-zinc-700'}`}
+                                                        >
+                                                            {option.label}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                                <div className="flex bg-zinc-100/80 border border-zinc-100 p-0.5 rounded-lg">
+                                                    {listWeekStartOptions.map(option => (
+                                                        <button
+                                                            key={option.id}
+                                                            onClick={() => setListWeekStart(option.id)}
+                                                            className={`px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider rounded-md transition-all ${listWeekStart === option.id ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-500 hover:text-zinc-700'}`}
+                                                        >
+                                                            {option.label}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <TicketList
+                                            tickets={displayTickets}
+                                            users={users}
+                                            channels={channels}
+                                            projects={projects}
+                                            onTicketClick={handleTicketClick}
+                                            onToggleStatus={handleToggleStatus}
+                                            groupMode={listGroupMode}
+                                            weekStart={listWeekStart}
+                                        />
+                                    </>
                                 ) : (
                                     <div className="h-full overflow-hidden">
                                         {displayTickets.length === 0 ? (

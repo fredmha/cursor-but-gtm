@@ -34,7 +34,7 @@ export const ChatKanbanCallout: React.FC<ChatKanbanCalloutProps> = ({
         </div>
         <span className="text-[10px] font-bold text-zinc-300 uppercase tracking-[0.2em]">{tickets.length} items</span>
       </div>
-      <div className="h-[420px] bg-white">
+      <div className="h-[420px] bg-white overflow-y-auto">
         <TicketBoard
           tickets={tickets}
           channels={channels}

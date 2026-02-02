@@ -5,6 +5,7 @@ import { Icons, PRIORITIES } from '../constants';
 import { Status, ProjectHealth, Priority, TicketStatus, Ticket, Channel } from '../types';
 import { TicketBoard } from './TicketBoard';
 import { TicketModal } from './TicketModal';
+import { TicketList, TicketListGroupMode, TicketListWeekStart } from './TicketList';
 
 interface ProjectDashboardProps {
     projectId: string;
@@ -29,9 +30,33 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
         deleteTicket, deleteProjectTicket
     } = useStore();
 
+    const listGroupKey = 'ticketListGroupMode';
+    const listWeekStartKey = 'ticketListWeekStart';
+
+    const getStoredGroupMode = () => {
+        if (typeof window === 'undefined') return 'WEEK_ASSIGNEE' as TicketListGroupMode;
+        const stored = window.localStorage.getItem(listGroupKey) as TicketListGroupMode | null;
+        if (stored === 'WEEK_ASSIGNEE' || stored === 'ASSIGNEE_PRIORITY' || stored === 'CONTEXT_WEEK') {
+            return stored;
+        }
+        return 'WEEK_ASSIGNEE' as TicketListGroupMode;
+    };
+
+    const getStoredWeekStart = () => {
+        if (typeof window === 'undefined') return 'MON' as TicketListWeekStart;
+        const stored = window.localStorage.getItem(listWeekStartKey) as TicketListWeekStart | null;
+        if (stored === 'MON' || stored === 'SUN') {
+            return stored;
+        }
+        return 'MON' as TicketListWeekStart;
+    };
+
     const [newUpdate, setNewUpdate] = useState('');
     const [showNewTicketModal, setShowNewTicketModal] = useState(false);
     const [editingTicket, setEditingTicket] = useState<Ticket | null>(null);
+    const [viewType, setViewType] = useState<'BOARD' | 'LIST'>('BOARD');
+    const [listGroupMode, setListGroupMode] = useState<TicketListGroupMode>(getStoredGroupMode);
+    const [listWeekStart, setListWeekStart] = useState<TicketListWeekStart>(getStoredWeekStart);
 
     const project = campaign?.projects.find(p => p.id === projectId);
     const channels = campaign?.channels || [];
@@ -141,6 +166,34 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
         }
     };
 
+    const handleToggleStatus = (e: React.MouseEvent, ticket: Ticket) => {
+        e.stopPropagation();
+        const newStatus = ticket.status === TicketStatus.Done ? TicketStatus.Todo : TicketStatus.Done;
+        handleStatusChange(ticket.id, newStatus);
+    };
+
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            window.localStorage.setItem(listGroupKey, listGroupMode);
+        }
+    }, [listGroupMode, listGroupKey]);
+
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            window.localStorage.setItem(listWeekStartKey, listWeekStart);
+        }
+    }, [listWeekStart, listWeekStartKey]);
+
+    const listGroupOptions: { id: TicketListGroupMode; label: string }[] = [
+        { id: 'WEEK_ASSIGNEE', label: 'Time & Owner' },
+        { id: 'ASSIGNEE_PRIORITY', label: 'Owner & Priority' },
+        { id: 'CONTEXT_WEEK', label: 'Workstream & Time' }
+    ];
+    const listWeekStartOptions: { id: TicketListWeekStart; label: string }[] = [
+        { id: 'MON', label: 'Mon Start' },
+        { id: 'SUN', label: 'Sun Start' }
+    ];
+
     return (
         <div className={`flex flex-col bg-white h-full ${isModal ? 'rounded-xl overflow-hidden' : ''}`}>
 
@@ -193,25 +246,85 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
                                 <Icons.Kanban className="w-4 h-4" /> Live Execution
                             </div>
                         </div>
-                        <button
-                            onClick={() => { setEditingTicket(null); setShowNewTicketModal(true); }}
-                            className="px-4 py-1.5 bg-zinc-900 text-white text-xs font-bold rounded hover:bg-zinc-800 transition-colors flex items-center gap-2"
-                        >
-                            <Icons.Plus className="w-3.5 h-3.5" />
-                            New Ticket
-                        </button>
+                        <div className="flex items-center gap-3">
+                            <div className="flex bg-zinc-100 p-0.5 rounded-lg">
+                                <button
+                                    onClick={() => setViewType('LIST')}
+                                    className={`p-1.5 rounded-md transition-all ${viewType === 'LIST' ? 'bg-white shadow-sm text-zinc-900' : 'text-zinc-400 hover:text-zinc-600'}`}
+                                    title="List View"
+                                >
+                                    <Icons.List className="w-4 h-4" />
+                                </button>
+                                <button
+                                    onClick={() => setViewType('BOARD')}
+                                    className={`p-1.5 rounded-md transition-all ${viewType === 'BOARD' ? 'bg-white shadow-sm text-zinc-900' : 'text-zinc-400 hover:text-zinc-600'}`}
+                                    title="Board View"
+                                >
+                                    <Icons.Kanban className="w-4 h-4" />
+                                </button>
+                            </div>
+                            <button
+                                onClick={() => { setEditingTicket(null); setShowNewTicketModal(true); }}
+                                className="px-4 py-1.5 bg-zinc-900 text-white text-xs font-bold rounded hover:bg-zinc-800 transition-colors flex items-center gap-2"
+                            >
+                                <Icons.Plus className="w-3.5 h-3.5" />
+                                New Ticket
+                            </button>
+                        </div>
                     </div>
 
                     {/* Kanban Board Area */}
                     <div className="flex-1 overflow-y-auto custom-scrollbar p-6 bg-white">
-                        <TicketBoard
-                            tickets={projectTickets}
-                            channels={campaign?.channels || []}
-                            users={users}
-                            onTicketClick={handleTicketClick}
-                            onStatusChange={handleStatusChange}
-                            groupByChannel={true}
-                        />
+                        {viewType === 'LIST' ? (
+                            <div className="h-full">
+                                <div className="flex flex-wrap items-center justify-between gap-4 pb-5">
+                                    <div className="text-[12px] font-bold uppercase tracking-[0.22em] text-zinc-600">Grouping</div>
+                                    <div className="flex flex-wrap items-center gap-4">
+                                        <div className="flex bg-zinc-100/80 border border-zinc-100 p-0.5 rounded-lg">
+                                            {listGroupOptions.map(option => (
+                                                <button
+                                                    key={option.id}
+                                                    onClick={() => setListGroupMode(option.id)}
+                                                    className={`px-4 py-1.5 text-[11px] font-bold uppercase tracking-wider rounded-md transition-all ${listGroupMode === option.id ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-500 hover:text-zinc-700'}`}
+                                                >
+                                                    {option.label}
+                                                </button>
+                                            ))}
+                                        </div>
+                                        <div className="flex bg-zinc-100/80 border border-zinc-100 p-0.5 rounded-lg">
+                                            {listWeekStartOptions.map(option => (
+                                                <button
+                                                    key={option.id}
+                                                    onClick={() => setListWeekStart(option.id)}
+                                                    className={`px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider rounded-md transition-all ${listWeekStart === option.id ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-500 hover:text-zinc-700'}`}
+                                                >
+                                                    {option.label}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                                <TicketList
+                                    tickets={projectTickets}
+                                    users={users}
+                                    channels={campaign?.channels || []}
+                                    projects={projects}
+                                    onTicketClick={handleTicketClick}
+                                    onToggleStatus={handleToggleStatus}
+                                    groupMode={listGroupMode}
+                                    weekStart={listWeekStart}
+                                />
+                            </div>
+                        ) : (
+                            <TicketBoard
+                                tickets={projectTickets}
+                                channels={campaign?.channels || []}
+                                users={users}
+                                onTicketClick={handleTicketClick}
+                                onStatusChange={handleStatusChange}
+                                groupByChannel={true}
+                            />
+                        )}
                     </div>
 
                 </div>

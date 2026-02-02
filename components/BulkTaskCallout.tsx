@@ -10,6 +10,7 @@ export interface BulkDraftTask {
   priority?: Priority;
   channelId?: string;
   projectId?: string;
+  sourceTicketId?: string;
 }
 
 interface BulkTaskCalloutProps {

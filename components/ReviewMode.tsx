@@ -8,7 +8,7 @@ import {
     WEEKLY_SYSTEM_INSTRUCTION, DAILY_SYSTEM_INSTRUCTION, 
     buildWeeklyContext, buildDailyContext 
 } from '../services/reviewAgent';
-import { TicketStatus, ChatMessage, Ticket, Priority, ContextDoc } from '../types';
+import { TicketStatus, ChatMessage, Ticket, Priority, ContextDoc, DocFolder } from '../types';
 import { AgentTicketCard } from './AgentTicketCard';
 import { buildReviewAgentTestCampaign } from '../fixtures/reviewAgentFixture';
 import { ChatKanbanCallout } from './ChatKanbanCallout';
@@ -29,6 +29,88 @@ type MentionCandidate =
     | { kind: 'user'; id: string; token: string; label: string }
     | { kind: 'channel'; id: string; token: string; label: string }
     | { kind: 'project'; id: string; token: string; label: string };
+
+interface SlashCommandOption {
+    command: string;
+    label: string;
+    description: string;
+    showInMenu: boolean;
+}
+
+type PlanningHorizon = 'daily' | 'weekly' | 'quarterly' | 'sprint';
+
+type PlanningStep = {
+    key: string;
+    prompt: string;
+};
+
+type PlanningDateRange = {
+    start: string;
+    end: string;
+};
+
+type PlanningGoal = {
+    id: string;
+    title: string;
+    metric?: string;
+    priority?: number;
+};
+
+type PlanningTask = {
+    id: string;
+    title: string;
+    owner?: string;
+    dueDate?: string;
+    deps?: string[];
+    sourceTicketId?: string;
+};
+
+type PlanningRisk = {
+    id: string;
+    title: string;
+    mitigation?: string;
+};
+
+type PlanningStatusChange = {
+    ticketId: string;
+    status: TicketStatus;
+    label: string;
+};
+
+type PlanningPayload = {
+    horizon: PlanningHorizon;
+    dateRange: PlanningDateRange;
+    northStar?: string;
+    goals: PlanningGoal[];
+    tasks: PlanningTask[];
+    risks: PlanningRisk[];
+    assumptions: string[];
+    notes: string;
+    confirmedBy?: string;
+    confirmedAt?: string;
+};
+
+type PlanningDraft = {
+    title: string;
+    summaryMarkdown: string;
+    summaryHtml: string;
+    payload: PlanningPayload;
+    folderKey: 'Daily' | 'Weekly' | 'Quarterly' | 'Sprint';
+    tags: string[];
+    bulkTasks: BulkDraftTask[];
+};
+
+type PlanningSession = {
+    id: string;
+    horizon: PlanningHorizon;
+    command: string;
+    steps: PlanningStep[];
+    answers: Record<string, string>;
+    stepIndex: number;
+    status: 'collecting' | 'awaiting_confirmation';
+    startedAt: string;
+    draft?: PlanningDraft;
+};
 
 type ReferenceType = 'ticket' | 'doc' | 'channel' | 'project' | 'user';
 
@@ -80,6 +162,182 @@ const normalizeDateInput = (value?: string) => (value && value.trim() ? value : 
 const normalizeText = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 const slugify = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 const compactText = (value: string) => normalizeText(value).replace(/\s+/g, '');
+const normalizeCommandText = (value: string) => value.toLowerCase().replace(/\s+/g, ' ').trim();
+const ORDER_STEP_VALUE = 1000;
+const PRIORITY_RANK: Record<Priority, number> = {
+    Urgent: 0,
+    High: 1,
+    Medium: 2,
+    Low: 3,
+    None: 4
+};
+
+const escapeHtml = (value: string) => value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+const isoDate = (date: Date) => date.toISOString().split('T')[0];
+
+const getWeekRange = (now: Date) => {
+    const day = now.getDay(); // 0 = Sun, 1 = Mon
+    const diffToMonday = day === 0 ? -6 : 1 - day;
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() + diffToMonday);
+    weekStart.setHours(0, 0, 0, 0);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 6);
+    weekEnd.setHours(23, 59, 59, 999);
+    return { weekStart, weekEnd };
+};
+
+const getIsoWeek = (now: Date) => {
+    const date = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+    date.setUTCDate(date.getUTCDate() + 4 - (date.getUTCDay() || 7));
+    const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+    const week = Math.ceil((((date.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+    return { year: date.getUTCFullYear(), week };
+};
+
+const getQuarterRange = (now: Date) => {
+    const quarter = Math.floor(now.getMonth() / 3) + 1;
+    const start = new Date(now.getFullYear(), (quarter - 1) * 3, 1);
+    const end = new Date(now.getFullYear(), quarter * 3, 0);
+    start.setHours(0, 0, 0, 0);
+    end.setHours(23, 59, 59, 999);
+    return { quarter, start, end };
+};
+
+const getPlanningDateRange = (horizon: PlanningHorizon, now: Date): PlanningDateRange => {
+    if (horizon === 'daily') {
+        const today = isoDate(now);
+        return { start: today, end: today };
+    }
+    if (horizon === 'weekly') {
+        const { weekStart, weekEnd } = getWeekRange(now);
+        return { start: isoDate(weekStart), end: isoDate(weekEnd) };
+    }
+    if (horizon === 'quarterly') {
+        const { start, end } = getQuarterRange(now);
+        return { start: isoDate(start), end: isoDate(end) };
+    }
+    const today = isoDate(now);
+    return { start: today, end: today };
+};
+
+const getHorizonLabel = (horizon: PlanningHorizon) => {
+    if (horizon === 'daily') return 'Daily';
+    if (horizon === 'weekly') return 'Weekly';
+    if (horizon === 'quarterly') return 'Quarterly';
+    return 'Sprint';
+};
+
+const getFolderKeyForHorizon = (horizon: PlanningHorizon): PlanningDraft['folderKey'] => {
+    if (horizon === 'daily') return 'Daily';
+    if (horizon === 'weekly') return 'Weekly';
+    if (horizon === 'quarterly') return 'Quarterly';
+    return 'Sprint';
+};
+
+const getNextFolderOrder = (folders: DocFolder[], parentId: string | undefined) => {
+    const siblings = folders.filter(folder => folder.parentId === parentId && !folder.isArchived);
+    const maxOrder = siblings.reduce((max, folder) => Math.max(max, folder.order ?? 0), 0);
+    return maxOrder + ORDER_STEP_VALUE;
+};
+
+const isActiveTicket = (ticket: Ticket) => ticket.status !== TicketStatus.Done && ticket.status !== TicketStatus.Canceled;
+
+const SLASH_COMMANDS = [
+    {
+        command: 'start daily plan',
+        label: '/start daily plan',
+        description: 'Kick off a daily planning session',
+        showInMenu: true
+    },
+    {
+        command: 'start weekly plan',
+        label: '/start weekly plan',
+        description: 'Kick off a weekly planning session',
+        showInMenu: true
+    },
+    {
+        command: 'start quarterly plan',
+        label: '/start quarterly plan',
+        description: 'Kick off a quarterly planning session',
+        showInMenu: true
+    },
+    {
+        command: 'set sprint plan',
+        label: '/set sprint plan',
+        description: 'Bind to a sprint or launch window',
+        showInMenu: true
+    },
+    {
+        command: 'plan',
+        label: '/plan',
+        description: 'Extract tasks from pasted notes',
+        showInMenu: true
+    },
+    {
+        command: 'task',
+        label: '/task',
+        description: 'Draft a task proposal',
+        showInMenu: true
+    },
+    {
+        command: 'help',
+        label: '/help',
+        description: 'Show command help',
+        showInMenu: true
+    },
+    {
+        command: 'query',
+        label: '/query',
+        description: 'Query tasks by status or mention',
+        showInMenu: false
+    },
+    {
+        command: 'edit',
+        label: '/edit',
+        description: 'Edit a ticket by mention',
+        showInMenu: false
+    }
+] as const satisfies ReadonlyArray<SlashCommandOption>;
+
+const SLASH_COMMAND_MATCHERS = [...SLASH_COMMANDS].sort((a, b) => b.command.length - a.command.length);
+const COMMANDS_REQUIRING_ARGS = new Set(['plan', 'task', 'query', 'edit']);
+
+const PLANNING_QUESTIONS: Record<PlanningHorizon, PlanningStep[]> = {
+    daily: [
+        { 
+            key: 'daily_intake', 
+            prompt: 'Give me a quick update: changes since yesterday, today\'s top outcome, blockers, capacity, and any task moves/priorities. You can say "Move @T-123 to In Progress; Mark build retargeting list Done; Priorities: A, B, C; Capacity: focus."'
+        }
+    ],
+    weekly: [
+        { key: 'week_win', prompt: 'What must be true by Friday to call this week a win?' },
+        { key: 'risks', prompt: 'Which tasks are at risk due to dependencies or staffing?' },
+        { key: 'descopes', prompt: 'What should be de-scoped to protect focus?' },
+        { key: 'capacity', prompt: 'What is team capacity/availability this week?' },
+        { key: 'task_list', prompt: 'List the key tasks for the week (one per line, include @owner if known).' }
+    ],
+    quarterly: [
+        { key: 'quarter_outcomes', prompt: 'What are the top 3 outcomes this quarter?' },
+        { key: 'north_star_metric', prompt: 'Which metric is the single source of truth for success?' },
+        { key: 'tradeoffs', prompt: 'What tradeoffs are we willing to make?' },
+        { key: 'resourcing', prompt: 'Any resourcing gaps or hiring needs?' },
+        { key: 'task_list', prompt: 'List the key initiatives for the quarter (one per line, include @owner if known).' }
+    ],
+    sprint: [
+        { key: 'launch_definition', prompt: 'What is the launch date and definition of done?' },
+        { key: 'dependencies', prompt: 'Which dependencies could slip the launch?' },
+        { key: 'milestone_owners', prompt: 'Who owns each milestone?' },
+        { key: 'scope_freeze', prompt: 'What scope is frozen for this sprint?' },
+        { key: 'task_list', prompt: 'List the sprint backlog items (one per line, include @owner if known).' }
+    ]
+};
 
 const uniqueStrings = (values: string[]) => {
     const set = new Set<string>();
@@ -122,6 +380,31 @@ const parseStatusValue = (value: string): TicketStatus | null => {
     return null;
 };
 
+const splitList = (value: string) => value
+    .split(/[;,]/g)
+    .map(item => item.trim())
+    .filter(Boolean);
+
+const parseStatusChangeLine = (line: string) => {
+    const cleaned = line.replace(/['"]/g, '').trim();
+    if (!cleaned) return null;
+    const patterns: RegExp[] = [
+        /^(?:move|mark|set)\s+(.+?)\s+(?:to\s+)?(done|in progress|in-progress|todo|backlog|blocked|canceled|cancelled|killed|kill)\s*$/i,
+        /^(.+?)\s*(?:->|=>)\s*(done|in progress|in-progress|todo|backlog|blocked|canceled|cancelled|killed|kill)\s*$/i,
+        /^(.+?)\s+(?:is now|is|now)\s+(done|in progress|in-progress|todo|backlog|blocked|canceled|cancelled|killed|kill)\s*$/i
+    ];
+    for (const pattern of patterns) {
+        const match = cleaned.match(pattern);
+        if (!match) continue;
+        const status = parseStatusValue(match[2]);
+        const subject = cleanExtract(match[1]);
+        if (status && subject) {
+            return { subject, status };
+        }
+    }
+    return null;
+};
+
 const isTranscriptLike = (text: string) => {
     if (text.length <= 300) return false;
     const hasBullets = /\n\s*[-*]\s+/.test(text);
@@ -144,7 +427,7 @@ interface ReviewModeProps {
 
 export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' }) => {
     const { 
-        campaign, currentUser, setCampaign,
+        campaign, currentUser, setCampaign, updateCampaign, addDoc,
         updateTicket, updateProjectTicket, deleteTicket, deleteProjectTicket, addTicket, addProjectTicket,
         updateChatHistory, completeReviewSession, users
     } = useStore();
@@ -165,6 +448,11 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
     const [mentionOpen, setMentionOpen] = useState(false);
     const [mentionIndex, setMentionIndex] = useState(0);
     const [mentionStart, setMentionStart] = useState<number | null>(null);
+    const [commandQuery, setCommandQuery] = useState('');
+    const [commandOpen, setCommandOpen] = useState(false);
+    const [commandIndex, setCommandIndex] = useState(0);
+    const [commandStart, setCommandStart] = useState<number | null>(null);
+    const [planningSession, setPlanningSession] = useState<PlanningSession | null>(null);
     
     const apiKey = "AIzaSyAvHokD5AdbLMPbKyFEgpTfq0HI7NTJ4cQ";
     const client = useMemo(() => {
@@ -489,6 +777,150 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
             || null;
     };
 
+    const findTicketTargetByText = (text: string) => {
+        const trimmed = cleanExtract(text).replace(/['"]/g, '').trim();
+        if (!trimmed) return null;
+
+        const mentionTokens = extractMentionTokens(trimmed);
+        for (const token of mentionTokens) {
+            const entity = resolveReferenceEntity(token);
+            if (entity?.type === 'ticket') {
+                const direct = findTicketTargetById(entity.id);
+                if (direct) return direct;
+            }
+        }
+
+        const shortMatch = trimmed.match(/\bT-\d+\b/i);
+        if (shortMatch) {
+            const byShortId = findTicketTargetById(shortMatch[0]);
+            if (byShortId) return byShortId;
+        }
+
+        const normalizedQuery = normalizeText(trimmed);
+        if (!normalizedQuery || normalizedQuery.length < 3) return null;
+
+        let best: { target: TicketTarget; score: number } | null = null;
+        const queryTokens = normalizedQuery.split(' ').filter(Boolean);
+
+        allTicketTargets.forEach(target => {
+            const titleNormalized = normalizeText(target.ticket.title || '');
+            if (!titleNormalized) return;
+            let score = 0;
+            if (titleNormalized === normalizedQuery) score = 1;
+            else if (titleNormalized.includes(normalizedQuery)) {
+                score = Math.min(0.95, normalizedQuery.length / Math.max(titleNormalized.length, 1) + 0.2);
+            } else {
+                const titleTokens = new Set(titleNormalized.split(' ').filter(Boolean));
+                const matchCount = queryTokens.filter(token => titleTokens.has(token)).length;
+                score = matchCount / Math.max(queryTokens.length, 1);
+            }
+
+            if (!best || score > best.score) {
+                best = { target, score };
+            }
+        });
+
+        if (best && best.score >= 0.55) return best.target;
+        return null;
+    };
+
+    const parseDailyIntake = (text: string) => {
+        const answers: Record<string, string> = { daily_intake: text.trim() };
+        const priorities: string[] = [];
+        const statusChanges: PlanningStatusChange[] = [];
+        const unmatchedStatus: string[] = [];
+        const changeLines: string[] = [];
+        let activeSection: 'change_since_yesterday' | 'primary_outcome' | 'blockers' | 'capacity' | 'task_list' | null = null;
+
+        const resolveSection = (label: string) => {
+            const normalized = label.toLowerCase();
+            if (normalized.includes('change') || normalized.includes('yesterday')) return 'change_since_yesterday';
+            if (normalized.includes('outcome') || normalized.includes('goal') || normalized.includes('important')) return 'primary_outcome';
+            if (normalized.includes('block') || normalized.includes('risk')) return 'blockers';
+            if (normalized.includes('capacity') || normalized.includes('availability') || normalized.includes('meeting') || normalized.includes('ooo')) return 'capacity';
+            if (normalized.includes('priority') || normalized.includes('priorities') || normalized.includes('focus') || normalized.includes('today')) return 'task_list';
+            return null;
+        };
+
+        const addAnswerLine = (key: string, value: string) => {
+            answers[key] = answers[key] ? `${answers[key]}\n${value}` : value;
+        };
+
+        text.split('\n').forEach(rawLine => {
+            const line = rawLine.trim();
+            if (!line) return;
+
+            const cleaned = line.replace(/^[-*]\s+/, '').replace(/^\d+\.\s+/, '').trim();
+            if (!cleaned) return;
+
+            const statusMatch = parseStatusChangeLine(cleaned);
+            if (statusMatch) {
+                const target = findTicketTargetByText(statusMatch.subject);
+                if (target) {
+                    statusChanges.push({
+                        ticketId: target.ticket.id,
+                        status: statusMatch.status,
+                        label: target.ticket.shortId || target.ticket.title
+                    });
+                } else {
+                    unmatchedStatus.push(statusMatch.subject);
+                }
+                changeLines.push(cleaned);
+                return;
+            }
+
+            const labelMatch = cleaned.match(/^([A-Za-z][A-Za-z\s]+):\s*(.*)$/);
+            if (labelMatch) {
+                const section = resolveSection(labelMatch[1]);
+                if (section) {
+                    activeSection = section;
+                    const remainder = labelMatch[2].trim();
+                    if (remainder) {
+                        if (section === 'task_list') {
+                            priorities.push(...splitList(remainder));
+                        } else {
+                            addAnswerLine(section, remainder);
+                        }
+                    }
+                    return;
+                }
+            }
+
+            if (activeSection === 'task_list') {
+                priorities.push(cleaned);
+                return;
+            }
+
+            if (activeSection) {
+                addAnswerLine(activeSection, cleaned);
+                return;
+            }
+
+            if (/^(create|add|new task|task)\b/i.test(cleaned)) {
+                const stripped = cleaned.replace(/^(create|add|new task|task)\b[:\s-]*/i, '').trim();
+                if (stripped) priorities.push(stripped);
+                return;
+            }
+
+            if (/^\d+\./.test(rawLine) || rawLine.trim().startsWith('-')) {
+                priorities.push(cleaned);
+                return;
+            }
+
+            changeLines.push(cleaned);
+        });
+
+        if (!answers.change_since_yesterday && changeLines.length > 0) {
+            answers.change_since_yesterday = changeLines.join('\n');
+        }
+
+        if (priorities.length > 0) {
+            answers.task_list = priorities.join('\n');
+        }
+
+        return { answers, priorities, statusChanges, unmatchedStatus };
+    };
+
     const calloutTickets = useMemo(() => {
         const ids = new Set<string>();
         messages.forEach(msg => {
@@ -606,11 +1038,27 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
         users
     ]);
 
+    const commandCandidates = useMemo(() => {
+        if (!commandOpen) return [];
+        const query = normalizeCommandText(commandQuery);
+        return SLASH_COMMANDS.filter(option => {
+            if (!option.showInMenu) return false;
+            if (!query) return true;
+            return option.command.startsWith(query) || option.command.includes(query);
+        }).slice(0, 10);
+    }, [commandOpen, commandQuery]);
+
     useEffect(() => {
         if (mentionIndex >= mentionCandidates.length) {
             setMentionIndex(0);
         }
     }, [mentionCandidates, mentionIndex]);
+
+    useEffect(() => {
+        if (commandIndex >= commandCandidates.length) {
+            setCommandIndex(0);
+        }
+    }, [commandCandidates, commandIndex]);
 
     useEffect(() => {
         if (!apiKey) {
@@ -628,11 +1076,717 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
         setEditingTicket(null);
         setBulkDraft(null);
         setIsProcessingTranscript(false);
+        setPlanningSession(null);
     };
 
     const closeTicketModal = () => {
         setShowTicketModal(false);
         setEditingTicket(null);
+    };
+
+    const isSuggestionRequest = (value: string) => {
+        const normalized = value.toLowerCase();
+        return [
+            'tell me',
+            'you decide',
+            'suggest',
+            'not sure',
+            'no idea',
+            'idk',
+            'i have them already planned',
+            'already planned'
+        ].some(fragment => normalized.includes(fragment));
+    };
+
+    const isNoTasksResponse = (value: string) => {
+        const normalized = value.toLowerCase().trim();
+        return ['none', 'no', 'no tasks', 'nothing', 'n/a'].includes(normalized);
+    };
+
+    const detectPlanningIntent = (value: string) => {
+        const normalized = value.toLowerCase().trim();
+        if (!normalized) return null;
+        if (isSuggestionRequest(normalized)) return 'show_tasks';
+        if (/(show|list|see)\s+.*tasks?/.test(normalized) || normalized === 'tasks') return 'show_tasks';
+        if (/(show|what(?:'s| is))\s+.*plan/.test(normalized) || normalized === 'plan') return 'show_plan';
+        if (/(cancel|stop|nevermind|never mind|exit)/.test(normalized)) return 'cancel';
+        if (/(skip|pass|next)/.test(normalized)) return 'skip';
+        if (/(save|confirm|approve)/.test(normalized)) return 'confirm';
+        if (/(not listening|this is terrible|what the fuck|wtf|you aren.t listening|losing your mind)/.test(normalized)) return 'meta';
+        return null;
+    };
+
+    const getSuggestedTasksForHorizon = (horizon: PlanningHorizon) => {
+        if (!campaign) return [];
+        const now = new Date();
+        const today = isoDate(now);
+        const activeTickets = allTickets.filter(isActiveTicket);
+        let candidates = activeTickets;
+
+        if (horizon === 'daily') {
+            candidates = activeTickets.filter(ticket =>
+                (ticket.dueDate && ticket.dueDate <= today) || ticket.status === TicketStatus.InProgress
+            );
+            if (candidates.length === 0) {
+                candidates = activeTickets.filter(ticket => ticket.status === TicketStatus.Todo);
+            }
+        } else if (horizon === 'weekly') {
+            const { weekStart, weekEnd } = getWeekRange(now);
+            const start = isoDate(weekStart);
+            const end = isoDate(weekEnd);
+            candidates = activeTickets.filter(ticket =>
+                ticket.dueDate && ticket.dueDate >= start && ticket.dueDate <= end
+            );
+            if (candidates.length === 0) {
+                candidates = activeTickets.filter(ticket => ticket.status === TicketStatus.InProgress);
+            }
+        } else if (horizon === 'quarterly') {
+            const { start, end } = getQuarterRange(now);
+            const rangeStart = isoDate(start);
+            const rangeEnd = isoDate(end);
+            candidates = activeTickets.filter(ticket =>
+                ticket.dueDate && ticket.dueDate >= rangeStart && ticket.dueDate <= rangeEnd
+            );
+        } else {
+            const sprintEnd = new Date(now);
+            sprintEnd.setDate(sprintEnd.getDate() + 14);
+            const end = isoDate(sprintEnd);
+            candidates = activeTickets.filter(ticket =>
+                (ticket.dueDate && ticket.dueDate >= today && ticket.dueDate <= end) || ticket.status === TicketStatus.InProgress
+            );
+        }
+
+        const sorted = [...candidates].sort((a, b) => {
+            const aDue = a.dueDate ? new Date(a.dueDate).getTime() : Number.POSITIVE_INFINITY;
+            const bDue = b.dueDate ? new Date(b.dueDate).getTime() : Number.POSITIVE_INFINITY;
+            if (aDue !== bDue) return aDue - bDue;
+            const aPriority = a.priority ? PRIORITY_RANK[a.priority] : PRIORITY_RANK.None;
+            const bPriority = b.priority ? PRIORITY_RANK[b.priority] : PRIORITY_RANK.None;
+            return aPriority - bPriority;
+        });
+
+        const limit = horizon === 'daily' ? 5 : horizon === 'weekly' ? 8 : 10;
+        return sorted.slice(0, limit).map(ticket => ({
+            id: generateId(),
+            title: ticket.title,
+            description: ticket.description,
+            assigneeId: ticket.assigneeId,
+            priority: ticket.priority,
+            channelId: ticket.channelId,
+            projectId: ticket.projectId,
+            sourceTicketId: ticket.id
+        }));
+    };
+
+    const getPlanningTicketsForHorizon = (horizon: PlanningHorizon) => {
+        if (!campaign) return [];
+        const activeTickets = allTickets.filter(isActiveTicket);
+        const sorted = [...activeTickets].sort((a, b) => {
+            const aDue = a.dueDate ? new Date(a.dueDate).getTime() : Number.POSITIVE_INFINITY;
+            const bDue = b.dueDate ? new Date(b.dueDate).getTime() : Number.POSITIVE_INFINITY;
+            if (aDue !== bDue) return aDue - bDue;
+            const aPriority = a.priority ? PRIORITY_RANK[a.priority] : PRIORITY_RANK.None;
+            const bPriority = b.priority ? PRIORITY_RANK[b.priority] : PRIORITY_RANK.None;
+            return aPriority - bPriority;
+        });
+        return sorted;
+    };
+
+    const showPlanningTasks = (horizon: PlanningHorizon) => {
+        const tickets = getPlanningTicketsForHorizon(horizon);
+        const ticketIds = tickets.map(ticket => ticket.id);
+        if (ticketIds.length === 0) {
+            appendModelMessage('No active tasks found for this horizon.');
+            return;
+        }
+        const title = `${getHorizonLabel(horizon)} Planning Tasks`;
+        const message: ChatMessage = {
+            id: generateId(),
+            role: 'model',
+            parts: [{
+                functionCall: {
+                    name: 'show_tasks',
+                    args: { title, ticketIds }
+                }
+            }],
+            timestamp: Date.now()
+        };
+        setMessages(prev => {
+            const next = [...prev, message];
+            updateChatHistory(mode, next);
+            return next;
+        });
+    };
+
+    const ensurePlanningFolders = () => {
+        if (!campaign) return null;
+        const now = new Date().toISOString();
+        const existing = campaign.docFolders || [];
+        const created: DocFolder[] = [];
+
+        const findFolder = (name: string, parentId: string | undefined) => {
+            return [...existing, ...created].find(folder =>
+                folder.name === name && folder.parentId === parentId && !folder.isArchived
+            );
+        };
+
+        const ensureFolder = (name: string, parentId: string | undefined, icon: string, isRagIndexed?: boolean) => {
+            const existingFolder = findFolder(name, parentId);
+            if (existingFolder) return existingFolder;
+            const folder: DocFolder = {
+                id: generateId(),
+                name,
+                icon,
+                parentId,
+                order: getNextFolderOrder([...existing, ...created], parentId),
+                isArchived: false,
+                isFavorite: false,
+                isRagIndexed,
+                createdAt: now
+            };
+            created.push(folder);
+            return folder;
+        };
+
+        const root = ensureFolder('Planning', undefined, '🗂️', true);
+        const daily = ensureFolder('Daily', root.id, '📅');
+        const weekly = ensureFolder('Weekly', root.id, '🗓️');
+        const quarterly = ensureFolder('Quarterly', root.id, '📌');
+        const sprint = ensureFolder('Sprint', root.id, '🏁');
+        const context = ensureFolder('Context', root.id, '🧭');
+        const uploads = ensureFolder('Uploads', root.id, '📎');
+        const index = ensureFolder('Index', root.id, '📍');
+
+        if (created.length > 0) {
+            updateCampaign({ docFolders: [...existing, ...created] });
+        }
+
+        return {
+            rootId: root.id,
+            Daily: daily.id,
+            Weekly: weekly.id,
+            Quarterly: quarterly.id,
+            Sprint: sprint.id,
+            Context: context.id,
+            Uploads: uploads.id,
+            Index: index.id
+        };
+    };
+
+    const parsePlanningTasks = (value: string) => {
+        const rawLines = value
+            .split('\n')
+            .map(line => line.trim())
+            .filter(Boolean);
+
+        const planningTasks: PlanningTask[] = [];
+        const bulkTasks: BulkDraftTask[] = [];
+
+        rawLines.forEach((line) => {
+            const cleaned = line.replace(/^[-*]\s+/, '').replace(/^\d+\.\s+/, '').trim();
+            if (!cleaned) return;
+
+            const mentionMatches = Array.from(cleaned.matchAll(/@([A-Za-z0-9-_]+)/g)).map(match => match[1]);
+            let assigneeId: string | undefined;
+            let ownerLabel: string | undefined;
+
+            for (const token of mentionMatches) {
+                const entity = resolveReferenceEntity(token);
+                if (entity?.type === 'user') {
+                    assigneeId = entity.id;
+                    ownerLabel = entity.label;
+                    break;
+                }
+            }
+
+            const dueMatch = cleaned.match(/\b\d{4}-\d{2}-\d{2}\b/);
+            const dueDate = dueMatch ? dueMatch[0] : undefined;
+
+            const title = cleaned
+                .replace(/@([A-Za-z0-9-_]+)/g, '')
+                .replace(/\b\d{4}-\d{2}-\d{2}\b/g, '')
+                .replace(/\s{2,}/g, ' ')
+                .trim();
+
+            const finalTitle = title || cleaned;
+            if (!finalTitle) return;
+
+            const matchedTarget = findTicketTargetByText(cleaned);
+            const matchedAssignee = matchedTarget?.ticket.assigneeId
+                ? userNameById.get(matchedTarget.ticket.assigneeId)
+                : undefined;
+
+            planningTasks.push({
+                id: generateId(),
+                title: finalTitle,
+                owner: ownerLabel || matchedAssignee,
+                dueDate,
+                sourceTicketId: matchedTarget?.ticket.id
+            });
+
+            if (!matchedTarget) {
+                bulkTasks.push({
+                    id: generateId(),
+                    title: finalTitle,
+                    assigneeId,
+                    priority: 'Medium'
+                });
+            }
+        });
+
+        return { planningTasks, bulkTasks };
+    };
+
+    const buildPlanningDraft = (session: PlanningSession, now: Date): PlanningDraft => {
+        const dateRange = getPlanningDateRange(session.horizon, now);
+        const horizonLabel = getHorizonLabel(session.horizon);
+        const folderKey = getFolderKeyForHorizon(session.horizon);
+
+        const primaryGoalAnswer = session.answers.primary_outcome
+            || session.answers.week_win
+            || session.answers.quarter_outcomes
+            || session.answers.scope_freeze
+            || '';
+
+        const goals: PlanningGoal[] = primaryGoalAnswer
+            ? [{ id: 'g-1', title: primaryGoalAnswer, priority: 1 }]
+            : [];
+
+        const riskAnswer = session.answers.blockers
+            || session.answers.risks
+            || session.answers.dependencies
+            || '';
+
+        const risks: PlanningRisk[] = riskAnswer
+            ? [{ id: 'r-1', title: riskAnswer }]
+            : [];
+
+        const assumptions = [
+            session.answers.capacity,
+            session.answers.tradeoffs,
+            session.answers.resourcing,
+            session.answers.descopes,
+            session.answers.scope_freeze
+        ].filter((value): value is string => !!value);
+
+        const notes = session.horizon === 'daily' && session.answers.daily_intake
+            ? [
+                `change_since_yesterday: ${session.answers.change_since_yesterday || ''}`,
+                `primary_outcome: ${session.answers.primary_outcome || ''}`,
+                `blockers: ${session.answers.blockers || ''}`,
+                `capacity: ${session.answers.capacity || ''}`,
+                `task_list: ${session.answers.task_list || ''}`,
+                `daily_intake: ${session.answers.daily_intake || ''}`
+            ].join('\n')
+            : session.steps
+                .map(step => `${step.key}: ${session.answers[step.key] || ''}`)
+                .join('\n');
+
+        const taskInput = session.answers.task_list || '';
+        const useAgenticTasks = taskInput === '__agentic__';
+        const noTasks = taskInput === '__none__';
+        const suggestedTasks = useAgenticTasks ? getSuggestedTasksForHorizon(session.horizon) : [];
+        const { planningTasks: parsedTasks, bulkTasks } = parsePlanningTasks(taskInput);
+        const planningTasks = useAgenticTasks
+            ? suggestedTasks.map(task => ({
+                id: generateId(),
+                title: task.title,
+                owner: task.assigneeId ? userNameById.get(task.assigneeId) : undefined,
+                dueDate: undefined,
+                sourceTicketId: task.sourceTicketId
+            }))
+            : noTasks
+                ? []
+                : parsedTasks;
+
+        const payload: PlanningPayload = {
+            horizon: session.horizon,
+            dateRange,
+            northStar: campaign?.objective,
+            goals,
+            tasks: planningTasks,
+            risks,
+            assumptions,
+            notes
+        };
+
+        const questionMarkdown = session.horizon === 'daily' && session.answers.daily_intake
+            ? [
+                `- **What changed since yesterday?**\n  ${session.answers.change_since_yesterday || '—'}`,
+                `- **What is the single most important outcome today?**\n  ${session.answers.primary_outcome || '—'}`,
+                `- **What is blocked and who can unblock it?**\n  ${session.answers.blockers || '—'}`,
+                `- **What is your capacity today (focus time, meetings, OOO)?**\n  ${session.answers.capacity || '—'}`
+            ].join('\n')
+            : session.steps.map(step => {
+                const answer = session.answers[step.key] || '—';
+                return `- **${step.prompt}**\n  ${answer}`;
+            }).join('\n');
+
+        const taskSummary = planningTasks.length > 0
+            ? planningTasks.map(task => `- ${task.title}${task.owner ? ` (${task.owner})` : ''}`).join('\n')
+            : '- No tasks selected.';
+
+        const summaryMarkdown = [
+            `## Draft ${horizonLabel} Plan`,
+            `**Date Range:** ${dateRange.start} - ${dateRange.end}`,
+            '',
+            '### Inputs',
+            questionMarkdown,
+            '',
+            '### Tasks',
+            taskSummary
+        ].join('\n');
+
+        const questionHtml = session.horizon === 'daily' && session.answers.daily_intake
+            ? [
+                `<li><strong>What changed since yesterday?</strong><br/>${escapeHtml(session.answers.change_since_yesterday || '—')}</li>`,
+                `<li><strong>What is the single most important outcome today?</strong><br/>${escapeHtml(session.answers.primary_outcome || '—')}</li>`,
+                `<li><strong>What is blocked and who can unblock it?</strong><br/>${escapeHtml(session.answers.blockers || '—')}</li>`,
+                `<li><strong>What is your capacity today (focus time, meetings, OOO)?</strong><br/>${escapeHtml(session.answers.capacity || '—')}</li>`
+            ].join('')
+            : session.steps.map(step => {
+                const answer = session.answers[step.key] || '—';
+                return `<li><strong>${escapeHtml(step.prompt)}</strong><br/>${escapeHtml(answer)}</li>`;
+            }).join('');
+
+        const tasksHtml = planningTasks.length > 0
+            ? `<ul>${planningTasks.map(task => `<li>${escapeHtml(task.title)}${task.owner ? ` (${escapeHtml(task.owner)})` : ''}</li>`).join('')}</ul>`
+            : '<p>No tasks selected.</p>';
+
+        const summaryHtml = [
+            `<h2>${escapeHtml(`${horizonLabel} Plan`)}</h2>`,
+            `<p><strong>Date Range:</strong> ${escapeHtml(`${dateRange.start} - ${dateRange.end}`)}</p>`,
+            '<h3>Inputs</h3>',
+            `<ul>${questionHtml}</ul>`,
+            '<h3>Tasks</h3>',
+            tasksHtml
+        ].join('');
+
+        const titleBase = (() => {
+            if (session.horizon === 'daily') return `${dateRange.start} - Daily Plan`;
+            if (session.horizon === 'weekly') {
+                const { year, week } = getIsoWeek(now);
+                return `${year}-W${String(week).padStart(2, '0')} - Weekly Plan`;
+            }
+            if (session.horizon === 'quarterly') {
+                const { quarter } = getQuarterRange(now);
+                return `${now.getFullYear()}-Q${quarter} - Quarterly Plan`;
+            }
+            return `Sprint Plan - ${dateRange.start}`;
+        })();
+
+        const tags = ['Planning', horizonLabel, dateRange.start];
+
+        return {
+            title: titleBase,
+            summaryMarkdown,
+            summaryHtml,
+            payload,
+            folderKey,
+            tags,
+            bulkTasks: useAgenticTasks || noTasks ? [] : bulkTasks
+        };
+    };
+
+    const buildDraftFromSession = (session: PlanningSession) => {
+        const nextAnswers = { ...session.answers };
+        if (!nextAnswers.task_list) {
+            const suggestions = getSuggestedTasksForHorizon(session.horizon);
+            if (suggestions.length > 0) {
+                nextAnswers.task_list = '__agentic__';
+            }
+        }
+        return buildPlanningDraft({ ...session, answers: nextAnswers }, new Date());
+    };
+
+    const savePlanningDraft = (draft: PlanningDraft) => {
+        if (!campaign) return null;
+        const folderIds = ensurePlanningFolders();
+        const folderId = folderIds?.[draft.folderKey];
+        if (!folderId) return null;
+
+        const nowIso = new Date().toISOString();
+        const payload: PlanningPayload = {
+            ...draft.payload,
+            confirmedBy: currentUser.id,
+            confirmedAt: nowIso
+        };
+
+        const planJson = escapeHtml(JSON.stringify(payload, null, 2));
+        const content = `${draft.summaryHtml}\n<pre data-plan-json>${planJson}</pre>`;
+
+        const doc: ContextDoc = {
+            id: generateId(),
+            title: draft.title,
+            content,
+            format: 'TEXT',
+            folderId,
+            lastUpdated: nowIso,
+            isAiGenerated: true,
+            tags: draft.tags,
+            isRagIndexed: true,
+            createdAt: nowIso,
+            createdBy: currentUser.id,
+            lastEditedBy: currentUser.id
+        };
+
+        addDoc(doc);
+        return doc.id;
+    };
+
+    const startPlanningSession = (horizon: PlanningHorizon, command: string) => {
+        const steps = PLANNING_QUESTIONS[horizon];
+        const now = new Date().toISOString();
+        ensurePlanningFolders();
+        const suggestions = getSuggestedTasksForHorizon(horizon);
+        const stepList = suggestions.length > 0
+            ? steps.filter(step => step.key !== 'task_list')
+            : steps;
+        const nextSession: PlanningSession = {
+            id: generateId(),
+            horizon,
+            command,
+            steps: stepList,
+            answers: suggestions.length > 0 ? { task_list: '__agentic__' } : {},
+            stepIndex: 0,
+            status: 'collecting',
+            startedAt: now
+        };
+        setPlanningSession(nextSession);
+        const planningTickets = getPlanningTicketsForHorizon(horizon);
+        const inProgress = planningTickets.filter(ticket => ticket.status === TicketStatus.InProgress).length;
+        const todo = planningTickets.filter(ticket => ticket.status === TicketStatus.Todo || ticket.status === TicketStatus.Backlog).length;
+        const overdue = planningTickets.filter(ticket => ticket.dueDate && ticket.dueDate < isoDate(new Date())).length;
+        const firstPrompt = stepList[0]?.prompt || 'Share the key inputs to start the plan.';
+        appendModelMessage(
+            `Starting ${getHorizonLabel(horizon)} plan. Context loaded: ${inProgress} in progress, ${todo} todo, ${overdue} overdue. Say "show tasks" to see details. ${firstPrompt}`
+        );
+    };
+
+    const handlePlanningInput = (text: string) => {
+        if (!planningSession) return false;
+        const trimmed = text.trim();
+        if (!trimmed) return true;
+
+        const intent = detectPlanningIntent(trimmed);
+        if (intent === 'show_tasks') {
+            showPlanningTasks(planningSession.horizon);
+            const prompt = planningSession.steps[planningSession.stepIndex]?.prompt;
+            if (prompt) {
+                appendModelMessage(`Tasks shown. When you're ready, answer: "${prompt}" or say "skip".`);
+            }
+            return true;
+        }
+        if (intent === 'show_plan') {
+            const draft = buildDraftFromSession(planningSession);
+            appendModelMessage(draft.summaryMarkdown);
+            return true;
+        }
+        if (intent === 'cancel') {
+            appendModelMessage('Okay, ending this planning session.');
+            setPlanningSession(null);
+            return true;
+        }
+        if (intent === 'meta') {
+            appendModelMessage('Got it. I can show tasks, propose priorities, or skip this question. What do you want?');
+            return true;
+        }
+
+        if (planningSession.status === 'collecting') {
+            if (intent === 'skip') {
+                const step = planningSession.steps[planningSession.stepIndex];
+                const answers = { ...planningSession.answers, [step.key]: '' };
+                const nextIndex = planningSession.stepIndex + 1;
+                if (nextIndex < planningSession.steps.length) {
+                    setPlanningSession({
+                        ...planningSession,
+                        answers,
+                        stepIndex: nextIndex
+                    });
+                    appendModelMessage(planningSession.steps[nextIndex].prompt);
+                    return true;
+                }
+                const draft = buildPlanningDraft({ ...planningSession, answers, stepIndex: nextIndex }, new Date());
+                setPlanningSession({
+                    ...planningSession,
+                    answers,
+                    stepIndex: nextIndex,
+                    status: 'awaiting_confirmation',
+                    draft
+                });
+                appendModelMessage(`${draft.summaryMarkdown}\n\nConfirm to save this plan? (yes/no)`);
+                return true;
+            }
+
+            const step = planningSession.steps[planningSession.stepIndex];
+            if (step.key === 'daily_intake' && planningSession.horizon === 'daily') {
+                const { answers: parsedAnswers, priorities, statusChanges, unmatchedStatus } = parseDailyIntake(trimmed);
+                const nextAnswers = { ...planningSession.answers, ...parsedAnswers };
+
+                if (!nextAnswers.task_list) {
+                    if (isNoTasksResponse(trimmed)) {
+                        nextAnswers.task_list = '__none__';
+                    } else {
+                        const suggestions = getSuggestedTasksForHorizon(planningSession.horizon);
+                        if (suggestions.length > 0) {
+                            nextAnswers.task_list = '__agentic__';
+                        }
+                    }
+                }
+
+                const statusSummaryLines = statusChanges.map(change => `- ${change.label} -> ${change.status}`);
+                statusChanges.forEach(change => handleStatusChange(change.ticketId, change.status));
+
+                const summaryParts: string[] = [];
+                if (statusSummaryLines.length > 0) {
+                    summaryParts.push(`Status updates:\n${statusSummaryLines.join('\n')}`);
+                }
+                if (priorities.length > 0) {
+                    summaryParts.push(`Priorities captured:\n${priorities.map(item => `- ${item}`).join('\n')}`);
+                }
+                if (unmatchedStatus.length > 0) {
+                    summaryParts.push(`Could not match these tasks:\n${unmatchedStatus.map(item => `- ${item}`).join('\n')}`);
+                }
+
+                if (summaryParts.length > 0) {
+                    appendModelMessage(`Got it. Here's what I captured:\n${summaryParts.join('\n\n')}`);
+                }
+
+                if (statusChanges.length > 0 || priorities.length > 0) {
+                    showPlanningTasks(planningSession.horizon);
+                }
+
+                const nextIndex = planningSession.steps.length;
+                const draft = buildPlanningDraft({ ...planningSession, answers: nextAnswers, stepIndex: nextIndex }, new Date());
+                setPlanningSession({
+                    ...planningSession,
+                    answers: nextAnswers,
+                    stepIndex: nextIndex,
+                    status: 'awaiting_confirmation',
+                    draft
+                });
+                appendModelMessage(`${draft.summaryMarkdown}\n\nConfirm to save this plan? (yes/no)`);
+                return true;
+            }
+            if (step.key === 'task_list') {
+                if (isNoTasksResponse(trimmed)) {
+                    const answers = { ...planningSession.answers, [step.key]: '__none__' };
+                    const nextIndex = planningSession.stepIndex + 1;
+                    const draft = buildPlanningDraft({ ...planningSession, answers, stepIndex: nextIndex }, new Date());
+                    setPlanningSession({
+                        ...planningSession,
+                        answers,
+                        stepIndex: nextIndex,
+                        status: 'awaiting_confirmation',
+                        draft
+                    });
+                    appendModelMessage(`${draft.summaryMarkdown}\n\nConfirm to save this plan? (yes/no)`);
+                    return true;
+                }
+
+                if (isSuggestionRequest(trimmed)) {
+                    const suggestions = getSuggestedTasksForHorizon(planningSession.horizon);
+                    if (suggestions.length === 0) {
+                        appendModelMessage('I could not find any existing tasks to suggest. Please list 1-3 priorities or say "no tasks".');
+                        return true;
+                    }
+                    const answers = { ...planningSession.answers, [step.key]: '__agentic__' };
+                    const nextIndex = planningSession.stepIndex + 1;
+                    const draft = buildPlanningDraft({ ...planningSession, answers, stepIndex: nextIndex }, new Date());
+                    setPlanningSession({
+                        ...planningSession,
+                        answers,
+                        stepIndex: nextIndex,
+                        status: 'awaiting_confirmation',
+                        draft
+                    });
+                    appendModelMessage(`${draft.summaryMarkdown}\n\nConfirm to save this plan? (yes/no)`);
+                    return true;
+                }
+            }
+
+            const answers = { ...planningSession.answers, [step.key]: trimmed };
+            const nextIndex = planningSession.stepIndex + 1;
+
+            if (nextIndex < planningSession.steps.length) {
+                setPlanningSession({
+                    ...planningSession,
+                    answers,
+                    stepIndex: nextIndex
+                });
+                appendModelMessage(planningSession.steps[nextIndex].prompt);
+                return true;
+            }
+
+            const draft = buildPlanningDraft({ ...planningSession, answers, stepIndex: nextIndex }, new Date());
+            setPlanningSession({
+                ...planningSession,
+                answers,
+                stepIndex: nextIndex,
+                status: 'awaiting_confirmation',
+                draft
+            });
+            appendModelMessage(`${draft.summaryMarkdown}\n\nConfirm to save this plan? (yes/no)`);
+            return true;
+        }
+
+        if (planningSession.status === 'awaiting_confirmation') {
+            const normalized = trimmed.toLowerCase();
+            const isAffirmative = ['yes', 'y', 'confirm', 'approved', 'approve', 'save', 'ok', 'okay', 'sure'].includes(normalized);
+            const isNegative = ['no', 'n', 'cancel', 'discard', 'stop', 'nevermind', 'never mind'].includes(normalized);
+
+            if (isAffirmative) {
+                if (!planningSession.draft) {
+                    appendModelMessage('Missing draft details. Restart the plan with /start daily plan.');
+                    setPlanningSession(null);
+                    return true;
+                }
+                const docId = savePlanningDraft(planningSession.draft);
+                if (docId) {
+                    appendModelMessage(`Plan saved to Docs > Planning > ${planningSession.draft.folderKey}.`);
+                } else {
+                    appendModelMessage('Unable to save the plan. Please try again.');
+                }
+                if (planningSession.draft.bulkTasks.length > 0) {
+                    setBulkDraft({
+                        origin: `${getHorizonLabel(planningSession.horizon)} Plan` ,
+                        tasks: planningSession.draft.bulkTasks
+                    });
+                    appendModelMessage('Review the drafted tasks below and approve to create them.');
+                }
+                setPlanningSession(null);
+                return true;
+            }
+
+            if (isNegative) {
+                const restartHint = planningSession.horizon === 'sprint'
+                    ? '/set sprint plan'
+                    : `/start ${planningSession.horizon} plan`;
+                appendModelMessage(`Okay, I will not save this plan. If you want to restart, use ${restartHint}.`);
+                setPlanningSession(null);
+                return true;
+            }
+
+            if (intent === 'show_tasks') {
+                showPlanningTasks(planningSession.horizon);
+                return true;
+            }
+
+            if (planningSession.draft) {
+                const nextDraft: PlanningDraft = {
+                    ...planningSession.draft,
+                    payload: {
+                        ...planningSession.draft.payload,
+                        notes: `${planningSession.draft.payload.notes}\nUser note: ${trimmed}`
+                    }
+                };
+                setPlanningSession({ ...planningSession, draft: nextDraft });
+            }
+            appendModelMessage('Noted. Reply "yes" to save or "no" to discard.');
+            return true;
+        }
+
+        return false;
     };
 
     const getMentionContext = (value: string, cursor: number) => {
@@ -644,18 +1798,70 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
         return { start, query };
     };
 
-    const updateMentionState = (value: string, cursor: number) => {
-        const ctx = getMentionContext(value, cursor);
-        if (!ctx) {
-            setMentionOpen(false);
-            setMentionQuery('');
-            setMentionStart(null);
+    const getCommandContext = (value: string, cursor: number) => {
+        const text = value.slice(0, cursor);
+        const match = text.match(/(^|\s)\/([A-Za-z0-9-_ ]*)$/);
+        if (!match) return null;
+        const query = match[2] || '';
+        const start = cursor - query.length - 1;
+        return { start, query };
+    };
+
+    const closeMentionState = () => {
+        setMentionOpen(false);
+        setMentionQuery('');
+        setMentionStart(null);
+    };
+
+    const closeCommandState = () => {
+        setCommandOpen(false);
+        setCommandQuery('');
+        setCommandStart(null);
+    };
+
+    const updateAutocompleteState = (value: string, cursor: number) => {
+        const mentionCtx = getMentionContext(value, cursor);
+        const commandCtx = getCommandContext(value, cursor);
+
+        if (!mentionCtx && !commandCtx) {
+            closeMentionState();
+            closeCommandState();
             return;
         }
-        setMentionOpen(true);
-        setMentionQuery(ctx.query);
-        setMentionStart(ctx.start);
-        setMentionIndex(0);
+
+        if (mentionCtx && commandCtx) {
+            if (mentionCtx.start > commandCtx.start) {
+                setMentionOpen(true);
+                setMentionQuery(mentionCtx.query);
+                setMentionStart(mentionCtx.start);
+                setMentionIndex(0);
+                closeCommandState();
+            } else {
+                setCommandOpen(true);
+                setCommandQuery(commandCtx.query);
+                setCommandStart(commandCtx.start);
+                setCommandIndex(0);
+                closeMentionState();
+            }
+            return;
+        }
+
+        if (mentionCtx) {
+            setMentionOpen(true);
+            setMentionQuery(mentionCtx.query);
+            setMentionStart(mentionCtx.start);
+            setMentionIndex(0);
+            closeCommandState();
+            return;
+        }
+
+        if (commandCtx) {
+            setCommandOpen(true);
+            setCommandQuery(commandCtx.query);
+            setCommandStart(commandCtx.start);
+            setCommandIndex(0);
+            closeMentionState();
+        }
     };
 
     const insertMention = (candidate: MentionCandidate) => {
@@ -677,14 +1883,58 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
         });
     };
 
+    const insertCommand = (command: SlashCommandOption) => {
+        if (commandStart === null) return;
+        const cursor = inputRef.current?.selectionStart ?? input.length;
+        const before = input.slice(0, commandStart);
+        const after = input.slice(cursor);
+        const commandText = `/${command.command}`;
+        const needsArgs = COMMANDS_REQUIRING_ARGS.has(command.command);
+        const spacer = needsArgs
+            ? (after.startsWith(' ') ? '' : ' ')
+            : (after.startsWith(' ') || after.length === 0 ? '' : ' ');
+        const nextValue = `${before}${commandText}${spacer}${after}`;
+        setInput(nextValue);
+        closeCommandState();
+        requestAnimationFrame(() => {
+            const pos = (before + commandText + spacer).length;
+            inputRef.current?.focus();
+            inputRef.current?.setSelectionRange(pos, pos);
+        });
+    };
+
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const nextValue = e.target.value;
         setInput(nextValue);
         const cursor = e.target.selectionStart ?? nextValue.length;
-        updateMentionState(nextValue, cursor);
+        updateAutocompleteState(nextValue, cursor);
     };
 
     const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (commandOpen && commandCandidates.length > 0) {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                setCommandIndex(prev => Math.min(prev + 1, commandCandidates.length - 1));
+                return;
+            }
+            if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                setCommandIndex(prev => Math.max(prev - 1, 0));
+                return;
+            }
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const selected = commandCandidates[commandIndex];
+                if (selected) insertCommand(selected);
+                return;
+            }
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                closeCommandState();
+                return;
+            }
+        }
+
         if (mentionOpen && mentionCandidates.length > 0) {
             if (e.key === 'ArrowDown') {
                 e.preventDefault();
@@ -704,7 +1954,7 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
             }
             if (e.key === 'Escape') {
                 e.preventDefault();
-                setMentionOpen(false);
+                closeMentionState();
                 return;
             }
         }
@@ -1132,22 +2382,48 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
 
     const handleSlashCommand = async (rawText: string) => {
         const trimmed = rawText.trim();
-        const match = trimmed.match(/^\/([a-zA-Z]+)\b([\s\S]*)$/);
-        if (!match) return false;
-        const command = match[1].toLowerCase();
-        const args = match[2]?.trim() || '';
+        if (!trimmed.startsWith('/')) return false;
+        const normalized = trimmed.slice(1).trim();
+        if (!normalized) return false;
+        const normalizedLower = normalizeCommandText(normalized);
+        const match = SLASH_COMMAND_MATCHERS.find(option =>
+            normalizedLower === option.command || normalizedLower.startsWith(`${option.command} `)
+        );
+        if (!match) {
+            appendUserMessage(rawText);
+            appendModelMessage(`Unknown command: ${trimmed.split(/\s+/)[0]}. Try /help for options.`);
+            return true;
+        }
+        const command = match.command;
+        const args = normalizedLower === command ? '' : normalized.slice(command.length).trim();
 
         appendUserMessage(rawText);
 
         if (command === 'help') {
             appendModelMessage([
                 "## Command Cheat Sheet",
+                "- /start daily plan",
+                "- /start weekly plan",
+                "- /start quarterly plan",
+                "- /set sprint plan",
                 "- /task <title> [priority]",
+                "- /plan <paste notes>",
                 "- /query [@mention] [status]",
                 "- /edit @T-123",
-                "- /plan <paste notes>",
                 "- /help"
             ].join('\n'));
+            return true;
+        }
+
+        if (command === 'start daily plan' || command === 'start weekly plan' || command === 'start quarterly plan' || command === 'set sprint plan') {
+            const nextHorizon: PlanningHorizon = command.includes('daily')
+                ? 'daily'
+                : command.includes('weekly')
+                    ? 'weekly'
+                    : command.includes('quarterly')
+                        ? 'quarterly'
+                        : 'sprint';
+            startPlanningSession(nextHorizon, command);
             return true;
         }
 
@@ -1207,7 +2483,7 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
         }
 
         if (command === 'plan') {
-            const notes = rawText.replace(/^\/plan\s*/i, '').trim();
+            const notes = args;
             await handleTranscriptSynthesis(notes);
             return true;
         }
@@ -1644,9 +2920,14 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
         const trimmedText = rawText.trim();
 
         setInput('');
-        setMentionOpen(false);
-        setMentionQuery('');
-        setMentionStart(null);
+        closeMentionState();
+        closeCommandState();
+
+        if (planningSession && !trimmedText.startsWith('/')) {
+            appendUserMessage(rawText);
+            handlePlanningInput(rawText);
+            return;
+        }
 
         const slashHandled = await handleSlashCommand(rawText);
         if (slashHandled) return;
@@ -2097,6 +3378,28 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
             {/* Input */}
             <div className="p-6 bg-white border-t border-zinc-100 shrink-0">
                 <div className="max-w-2xl mx-auto relative">
+                    {commandOpen && commandCandidates.length > 0 && (
+                        <div className="absolute bottom-full left-0 mb-2 w-full bg-white border border-zinc-200 shadow-2xl rounded-none overflow-hidden z-30">
+                            {commandCandidates.map((command, idx) => (
+                                <button
+                                    key={command.command}
+                                    type="button"
+                                    onMouseDown={(e) => {
+                                        e.preventDefault();
+                                        insertCommand(command);
+                                    }}
+                                    className={`w-full flex items-center gap-3 px-4 py-2 text-left transition-colors ${idx === commandIndex ? 'bg-zinc-900 text-white' : 'text-zinc-700 hover:bg-zinc-50'}`}
+                                >
+                                    <span className={`text-[10px] font-bold uppercase tracking-[0.2em] ${idx === commandIndex ? 'text-white/70' : 'text-zinc-400'}`}>
+                                        {command.label}
+                                    </span>
+                                    <span className={`text-xs font-medium truncate ${idx === commandIndex ? 'text-white' : 'text-zinc-700'}`}>
+                                        {command.description}
+                                    </span>
+                                </button>
+                            ))}
+                        </div>
+                    )}
                     {mentionOpen && mentionCandidates.length > 0 && (
                         <div className="absolute bottom-full left-0 mb-2 w-full bg-white border border-zinc-200 shadow-2xl rounded-none overflow-hidden z-30">
                             {mentionCandidates.slice(0, 6).map((candidate, idx) => (
@@ -2136,7 +3439,7 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
                         value={input}
                         onChange={handleInputChange}
                         onKeyDown={handleInputKeyDown}
-                        onClick={(e) => updateMentionState(e.currentTarget.value, e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
+                        onClick={(e) => updateAutocompleteState(e.currentTarget.value, e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
                         autoFocus
                         disabled={isTyping}
                         ref={inputRef}
@@ -2179,3 +3482,5 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
         </div>
     );
 };
+
+

@@ -1,10 +1,11 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useStore, generateId } from '../store';
 import { Icons } from '../constants';
 import { TicketStatus, Ticket } from '../types';
 import { TicketBoard } from './TicketBoard';
 import { TicketModal } from './TicketModal';
+import { TicketList, TicketListGroupMode, TicketListWeekStart } from './TicketList';
 
 interface ChannelDashboardProps {
     channelId: string;
@@ -30,6 +31,29 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
     } = useStore();
 
     const [activeTab, setActiveTab] = useState<'QUEUE' | 'KANBAN'>('QUEUE');
+    const listGroupKey = 'ticketListGroupMode';
+    const listWeekStartKey = 'ticketListWeekStart';
+
+    const getStoredGroupMode = () => {
+        if (typeof window === 'undefined') return 'WEEK_ASSIGNEE' as TicketListGroupMode;
+        const stored = window.localStorage.getItem(listGroupKey) as TicketListGroupMode | null;
+        if (stored === 'WEEK_ASSIGNEE' || stored === 'ASSIGNEE_PRIORITY' || stored === 'CONTEXT_WEEK') {
+            return stored;
+        }
+        return 'WEEK_ASSIGNEE' as TicketListGroupMode;
+    };
+
+    const getStoredWeekStart = () => {
+        if (typeof window === 'undefined') return 'MON' as TicketListWeekStart;
+        const stored = window.localStorage.getItem(listWeekStartKey) as TicketListWeekStart | null;
+        if (stored === 'MON' || stored === 'SUN') {
+            return stored;
+        }
+        return 'MON' as TicketListWeekStart;
+    };
+
+    const [listGroupMode, setListGroupMode] = useState<TicketListGroupMode>(getStoredGroupMode);
+    const [listWeekStart, setListWeekStart] = useState<TicketListWeekStart>(getStoredWeekStart);
     const [showTicketModal, setShowTicketModal] = useState(false);
     const [editingTicket, setEditingTicket] = useState<Ticket | null>(null);
 
@@ -91,6 +115,34 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
     const handleStatusChange = (ticketId: string, newStatus: TicketStatus) => {
         updateTicket(channelId, ticketId, { status: newStatus });
     };
+
+    const handleToggleStatus = (e: React.MouseEvent, ticket: Ticket) => {
+        e.stopPropagation();
+        const newStatus = ticket.status === TicketStatus.Done ? TicketStatus.Todo : TicketStatus.Done;
+        handleStatusChange(ticket.id, newStatus);
+    };
+
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            window.localStorage.setItem(listGroupKey, listGroupMode);
+        }
+    }, [listGroupMode, listGroupKey]);
+
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            window.localStorage.setItem(listWeekStartKey, listWeekStart);
+        }
+    }, [listWeekStart, listWeekStartKey]);
+
+    const listGroupOptions: { id: TicketListGroupMode; label: string }[] = [
+        { id: 'WEEK_ASSIGNEE', label: 'Time & Owner' },
+        { id: 'ASSIGNEE_PRIORITY', label: 'Owner & Priority' },
+        { id: 'CONTEXT_WEEK', label: 'Workstream & Time' }
+    ];
+    const listWeekStartOptions: { id: TicketListWeekStart; label: string }[] = [
+        { id: 'MON', label: 'Mon Start' },
+        { id: 'SUN', label: 'Sun Start' }
+    ];
 
     const handleSaveTicket = (data: any) => {
         const ticketData: Ticket = {
@@ -283,46 +335,43 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
                     <div className="flex-1 overflow-hidden relative">
                         {activeTab === 'QUEUE' && (
                             <div className="h-full overflow-y-auto custom-scrollbar px-8 pb-10">
-                                <div className="space-y-2">
-                                    {allTickets.map(t => {
-                                        const assignee = users.find(u => u.id === t.assigneeId);
-                                        return (
-                                            <div
-                                                key={t.id}
-                                                onClick={() => handleTicketClick(t)}
-                                                className="flex items-center gap-6 p-4 bg-white border border-zinc-100 rounded-none hover:border-zinc-300 hover:shadow-sm cursor-pointer group transition-all duration-300"
-                                            >
-                                                <div className={`shrink-0 w-2.5 h-2.5 rounded-full ${t.status === TicketStatus.Done ? 'bg-emerald-500' : t.status === TicketStatus.InProgress ? 'bg-amber-500' : 'bg-zinc-200 shadow-inner'}`}></div>
-                                                <span className="text-[10px] font-bold text-zinc-400 tabular-nums w-14">{t.shortId}</span>
-                                                <span className="text-sm text-zinc-800 truncate flex-1 font-semibold tracking-tight">{t.title}</span>
-
-                                                <div className="flex items-center gap-8">
-                                                    <div className="flex flex-col items-end min-w-20">
-                                                        <span className={`text-[8px] font-black uppercase tracking-[0.2em] px-2 py-0.5 rounded-none ${t.priority === 'Urgent' ? 'bg-red-50 text-red-600' : 'text-zinc-400'}`}>
-                                                            {t.priority}
-                                                        </span>
-                                                        <span className="text-[10px] text-zinc-400 tabular-nums font-medium pt-0.5">
-                                                            {t.dueDate ? new Date(t.dueDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '--'}
-                                                        </span>
-                                                    </div>
-                                                    <div className="w-8 flex justify-center">
-                                                        {assignee ? (
-                                                            <div className={`w-5 h-5 rounded-none ${assignee.color} text-[9px] text-white flex items-center justify-center font-bold shadow-sm ring-1 ring-white`}>{assignee.initials}</div>
-                                                        ) : (
-                                                            <Icons.User className="w-5 h-5 text-zinc-200" />
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        )
-                                    })}
-                                    {allTickets.length === 0 && (
-                                        <div className="flex flex-col items-center justify-center py-20 text-zinc-400">
-                                            <Icons.Inbox className="w-10 h-10 mb-4 opacity-10" />
-                                            <p className="text-xs font-medium uppercase tracking-widest">Queue Clear</p>
+                                <div className="flex flex-wrap items-center justify-between gap-4 py-5">
+                                    <div className="text-[12px] font-bold uppercase tracking-[0.22em] text-zinc-600">Grouping</div>
+                                    <div className="flex flex-wrap items-center gap-4">
+                                        <div className="flex bg-zinc-100/80 border border-zinc-100 p-0.5 rounded-lg">
+                                            {listGroupOptions.map(option => (
+                                                <button
+                                                    key={option.id}
+                                                    onClick={() => setListGroupMode(option.id)}
+                                                    className={`px-4 py-1.5 text-[11px] font-bold uppercase tracking-wider rounded-md transition-all ${listGroupMode === option.id ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-500 hover:text-zinc-700'}`}
+                                                >
+                                                    {option.label}
+                                                </button>
+                                            ))}
                                         </div>
-                                    )}
+                                        <div className="flex bg-zinc-100/80 border border-zinc-100 p-0.5 rounded-lg">
+                                            {listWeekStartOptions.map(option => (
+                                                <button
+                                                    key={option.id}
+                                                    onClick={() => setListWeekStart(option.id)}
+                                                    className={`px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider rounded-md transition-all ${listWeekStart === option.id ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-500 hover:text-zinc-700'}`}
+                                                >
+                                                    {option.label}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
                                 </div>
+                                <TicketList
+                                    tickets={allTickets}
+                                    users={users}
+                                    channels={campaign?.channels || []}
+                                    projects={projects}
+                                    onTicketClick={handleTicketClick}
+                                    onToggleStatus={handleToggleStatus}
+                                    groupMode={listGroupMode}
+                                    weekStart={listWeekStart}
+                                />
                             </div>
                         )}
 
