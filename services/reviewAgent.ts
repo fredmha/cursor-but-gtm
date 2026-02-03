@@ -1,6 +1,5 @@
 import { Type, Tool } from "@google/genai";
 import { Campaign, Ticket, TicketStatus, User } from "../types";
-import REVIEW_AGENT_SOP from "../docs/review-agent-sop.md?raw";
 
 // ------------------------------------------------------------
 // Constants
@@ -56,7 +55,9 @@ const PROPOSE_TICKET_TOOL = {
       channelId: { type: Type.STRING },
       projectId: { type: Type.STRING },
       description: { type: Type.STRING },
-      priority: { type: Type.STRING, enum: ["Urgent", "High", "Medium", "Low"] }
+      priority: { type: Type.STRING, enum: ["Urgent", "High", "Medium", "Low"] },
+      startDate: { type: Type.STRING, description: "ISO Date string (YYYY-MM-DD)." },
+      endDate: { type: Type.STRING, description: "ISO Date string (YYYY-MM-DD)." }
     },
     required: ["title"]
   }
@@ -108,7 +109,9 @@ const CREATE_TASK_TOOL = {
     type: Type.OBJECT,
     properties: {
       title: { type: Type.STRING },
-      priority: { type: Type.STRING, enum: ["Urgent", "High", "Medium"] }
+      priority: { type: Type.STRING, enum: ["Urgent", "High", "Medium"] },
+      startDate: { type: Type.STRING, description: "ISO Date string (YYYY-MM-DD)." },
+      endDate: { type: Type.STRING, description: "ISO Date string (YYYY-MM-DD)." }
     },
     required: ["title"]
   }
@@ -192,13 +195,6 @@ const getAllTickets = (campaign: Campaign) => [
   ...(campaign.projects || []).flatMap((p) => p.tickets),
 ];
 
-const getWeeklyTicketsForUser = (campaign: Campaign, userId: string | null | undefined, now: Date) => {
-  const { weekStart, weekEnd } = getWeekRange(now);
-  const allTickets = getAllTickets(campaign);
-  const byUser = userId ? allTickets.filter((t) => t.assigneeId === userId) : allTickets;
-  return byUser.filter((t) => isDueBetween(t, weekStart, weekEnd));
-};
-
 const isActiveTicket = (t: Ticket) => !DONE_OR_CANCELED.has(t.status);
 
 const getWeekRange = (now: Date) => {
@@ -213,11 +209,29 @@ const getWeekRange = (now: Date) => {
   return { weekStart, weekEnd };
 };
 
-const isDueBetween = (t: Ticket, start: Date, end: Date) => {
-  if (!t.dueDate) return false;
-  const due = new Date(t.dueDate);
-  return due >= start && due <= end;
+const isValidDate = (value?: string) => {
+  if (!value) return false;
+  const parsed = new Date(value);
+  return !Number.isNaN(parsed.getTime());
 };
+
+const hasDateRange = (t: Ticket) => isValidDate(t.startDate) && isValidDate(t.dueDate);
+
+const isWithinRange = (t: Ticket, date: Date) => {
+  if (!hasDateRange(t)) return false;
+  const start = new Date(t.startDate!);
+  const end = new Date(t.dueDate!);
+  return start <= date && date <= end;
+};
+
+const overlapsRange = (t: Ticket, start: Date, end: Date) => {
+  if (!hasDateRange(t)) return false;
+  const tStart = new Date(t.startDate!);
+  const tEnd = new Date(t.dueDate!);
+  return tStart <= end && tEnd >= start;
+};
+
+const isUndated = (t: Ticket) => !hasDateRange(t);
 
 const formatTicketLine = (t: Ticket) => `- [ID: ${t.id} | ${t.shortId}] "${t.title}" (${t.status}${t.dueDate ? `, Due: ${t.dueDate}` : ""})`;
 
@@ -229,21 +243,29 @@ const formatTicketList = (label: string, items: Ticket[]) => {
 // ------------------------------------------------------------
 // Context builders
 // ------------------------------------------------------------
-export const buildWeeklyContext = (campaign: Campaign) => {
+export const buildWeeklyContext = (campaign: Campaign, user: User) => {
   const now = new Date();
   const { weekStart, weekEnd } = getWeekRange(now);
   const weekStartStr = isoDate(weekStart);
   const weekEndStr = isoDate(weekEnd);
 
-  const allTickets = getWeeklyTicketsForUser(campaign, null, now);
+  const allTickets = getAllTickets(campaign).filter(t => t.assigneeId === user.id);
   const hasAnyTickets = allTickets.length > 0;
 
   const overdue = allTickets.filter(t =>
-    isActiveTicket(t) && t.dueDate && new Date(t.dueDate) < now
+    isActiveTicket(t) && hasDateRange(t) && new Date(t.dueDate!) < weekStart
   );
 
   const inWeek = allTickets.filter(t =>
-    isActiveTicket(t) && isDueBetween(t, weekStart, weekEnd)
+    isActiveTicket(t) && overlapsRange(t, weekStart, weekEnd)
+  );
+
+  const backlog = allTickets.filter(t =>
+    isActiveTicket(t) && t.status === TicketStatus.Backlog && hasDateRange(t)
+  );
+
+  const undated = allTickets.filter(t =>
+    isActiveTicket(t) && isUndated(t)
   );
 
   const inWeekByStatus: Record<string, Ticket[]> = {
@@ -281,6 +303,12 @@ export const buildWeeklyContext = (campaign: Campaign) => {
     ${hasAnyTickets ? formatTicketList("Backlog", inWeekByStatus[TicketStatus.Backlog]) : ""}
     ${hasAnyTickets ? formatTicketList("Blocked", inWeekByStatus[TicketStatus.Blocked]) : ""}
 
+    BACKLOG (Assigned, Dated):
+    ${backlog.length > 0 ? backlog.map(formatTicketLine).join("\n") : "None."}
+
+    UNDATED (Missing start/end dates):
+    ${undated.length > 0 ? undated.map(formatTicketLine).join("\n") : "None."}
+
     ACTIVE PROJECTS:
     ${projectList}
 
@@ -297,11 +325,26 @@ export const buildDailyContext = (campaign: Campaign, user: User) => {
 
   const allTickets = getAllTickets(campaign).filter(t => t.assigneeId === user.id);
 
-  const todaysWork = allTickets.filter(t =>
-    isActiveTicket(t) && t.dueDate && t.dueDate <= todayStr
+  const overdue = allTickets.filter(t =>
+    isActiveTicket(t) && hasDateRange(t) && new Date(t.dueDate!) < now
   );
 
-  const todoList = todaysWork.map(t => `- [ID: ${t.id} | ${t.shortId}] "${t.title}" (${t.status})`).join("\n");
+  const current = allTickets.filter(t =>
+    isActiveTicket(t) && isWithinRange(t, now)
+  );
+
+  const backlog = allTickets.filter(t =>
+    isActiveTicket(t) && t.status === TicketStatus.Backlog && hasDateRange(t)
+  );
+
+  const undated = allTickets.filter(t =>
+    isActiveTicket(t) && isUndated(t)
+  );
+
+  const currentList = current.map(t => `- [ID: ${t.id} | ${t.shortId}] "${t.title}" (${t.status}${t.startDate ? `, Start: ${t.startDate}` : ""}${t.dueDate ? `, End: ${t.dueDate}` : ""})`).join("\n");
+  const overdueList = overdue.map(t => `- [ID: ${t.id} | ${t.shortId}] "${t.title}" (${t.status}, Due: ${t.dueDate})`).join("\n");
+  const backlogList = backlog.map(t => `- [ID: ${t.id} | ${t.shortId}] "${t.title}" (${t.status}${t.startDate ? `, Start: ${t.startDate}` : ""}${t.dueDate ? `, End: ${t.dueDate}` : ""})`).join("\n");
+  const undatedList = undated.map(t => `- [ID: ${t.id} | ${t.shortId}] "${t.title}" (${t.status})`).join("\n");
 
   return `
     Today is: ${now.toLocaleDateString()}
@@ -313,8 +356,17 @@ export const buildDailyContext = (campaign: Campaign, user: User) => {
     2. Review today's plan based on the following assigned tickets.
     3. Identify blockers.
 
-    ASSIGNED WORK (Due Today/Overdue):
-    ${todoList || "There aren't any ongoing tasks."}
+    CURRENT WORK (Within Start/End):
+    ${currentList || "None."}
+
+    OVERDUE WORK:
+    ${overdueList || "None."}
+
+    BACKLOG (Assigned, Dated):
+    ${backlogList || "None."}
+
+    UNDATED (Missing start/end dates):
+    ${undatedList || "None."}
 
     NOTE: ${NOTE_SHOW_TASKS}
   `;
@@ -348,9 +400,6 @@ export const WEEKLY_SYSTEM_INSTRUCTION = `
   - If the user references tickets, docs, channels, projects, or team members (with or without @), call 'resolve_references' first. If you need details to answer, call 'fetch_reference_context' next.
   - If the user pastes a long plan or uses /plan, summarize into 'propose_bulk_tasks' only.
 
-  SOP:
-  ${REVIEW_AGENT_SOP}
-  
   ${FORMAT_RULES}
 `;
 
@@ -374,8 +423,5 @@ export const DAILY_SYSTEM_INSTRUCTION = `
   7. If the user references tickets, docs, channels, projects, or team members (with or without @), call 'resolve_references' first. If you need details to answer, call 'fetch_reference_context' next.
   8. If the user pastes a long plan or uses /plan, summarize into 'propose_bulk_tasks' only.
 
-  SOP:
-  ${REVIEW_AGENT_SOP}
-  
   ${FORMAT_RULES}
 `;

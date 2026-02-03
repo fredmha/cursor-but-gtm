@@ -25,15 +25,10 @@ const MainLayout: React.FC = () => {
           principles: [],
           roadmapItems: [],
           timelineTags: [],
-          docFolders: [
-            { id: 'f_strategy', name: 'Strategy', icon: '♟️', order: 1000, createdAt: new Date().toISOString() },
-            { id: 'f_personas', name: 'Personas', icon: '👥', order: 2000, createdAt: new Date().toISOString() },
-            { id: 'f_brand', name: 'Brand', icon: '🎨', order: 3000, createdAt: new Date().toISOString() },
-            { id: 'f_process', name: 'Process', icon: '⚙️', order: 4000, createdAt: new Date().toISOString() },
-          ],
+          docFolders: [],
           docs: [],
           recentDocIds: [],
-          availableTags: ['Q1', 'Q2', 'Urgent', 'Draft']
+          availableTags: []
       };
       setCampaign(newCampaign);
   };

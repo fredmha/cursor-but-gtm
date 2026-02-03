@@ -435,7 +435,8 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
         deleteProject,
         addTimelineTag,
         deleteTimelineTag,
-        users
+        users,
+        toggleSampleData
     } = useStore();
 
     const [showChannelModal, setShowChannelModal] = useState(false);
@@ -455,6 +456,8 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
         }
         return w;
     }, [campaign?.startDate]);
+
+    const hasSampleData = !!campaign?.sampleData?.enabled;
 
     const channels = campaign?.channels || [];
     const projects = campaign?.projects || [];
@@ -561,7 +564,15 @@ export const RoadmapSandbox: React.FC<RoadmapSandboxProps> = ({ onNext, onBack }
                     {/* TIMELINE HEADER */}
                     <div className="flex sticky top-0 z-40 bg-white min-w-max border-b border-zinc-100">
                         <div className="shrink-0 border-r border-zinc-100 bg-zinc-50 p-3 flex items-end pb-3 sticky left-0 z-50 shadow-[1px_0_0_0_rgba(0,0,0,0.05)]" style={{ width: LEFT_PANEL_WIDTH }}>
-                            <span className="text-[10px] font-mono font-bold text-zinc-400 uppercase">Channels</span>
+                            <div className="flex flex-col gap-2">
+                                <span className="text-[10px] font-mono font-bold text-zinc-400 uppercase">Channels</span>
+                                <button
+                                    onClick={toggleSampleData}
+                                    className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md border border-zinc-200 text-zinc-600 bg-white hover:bg-zinc-100 transition-colors w-fit"
+                                >
+                                    {hasSampleData ? 'Remove sample data' : 'Populate with data'}
+                                </button>
+                            </div>
                         </div>
                         <div className="flex">
                             {weeks.map((date, i) => {

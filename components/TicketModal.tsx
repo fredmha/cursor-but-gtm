@@ -254,6 +254,9 @@ export const TicketModal: React.FC<TicketModalProps> = ({ initialData, context, 
                                 />
                             </div>
                         </div>
+                        <p className="mt-3 text-[10px] text-zinc-500">
+                            Tasks without dates appear in the Undated list and won’t show on Kanban boards.
+                        </p>
                         {startDate && endDate && (
                             <div className="mt-3 text-[10px] text-zinc-500 font-medium italic">
                                 Estimated duration: {Math.ceil((new Date(endDate).getTime() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24 * 7))} week(s)

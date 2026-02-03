@@ -1,6 +1,5 @@
 import { Type, Tool } from "@google/genai";
 import { Campaign } from "../types";
-import PLANNING_SOPS from "../docs/planning-agent-docs/planning-sops.md?raw";
 
 const LOAD_PLANS_TOOL = {
   name: "load_plans",
@@ -82,7 +81,7 @@ Rules:
 - Persist plans only after confirmation.
 
 SOP:
-${PLANNING_SOPS}
+Follow the system rules and use the tools as instructed.
 `;
 
 export const buildPlanningContext = (campaign: Campaign) => {

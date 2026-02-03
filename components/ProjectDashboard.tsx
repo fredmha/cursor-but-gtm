@@ -107,6 +107,8 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
             assigneeId: data.assigneeId,
             channelId: data.channelId,
             projectId: projectId,
+            startDate: data.startDate,
+            dueDate: data.endDate,
             createdAt: editingTicket?.createdAt || new Date().toISOString()
         };
 
@@ -449,6 +451,8 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = ({
                         assigneeId: editingTicket.assigneeId,
                         channelId: editingTicket.channelId,
                         projectId: editingTicket.projectId || projectId,
+                        startDate: editingTicket.startDate,
+                        endDate: editingTicket.dueDate
                     } : { projectId }}
                     context={{ channels, projects, users }}
                     onClose={() => { setShowNewTicketModal(false); setEditingTicket(null); }}

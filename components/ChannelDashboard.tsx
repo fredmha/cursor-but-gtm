@@ -1,11 +1,11 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useStore, generateId } from '../store';
 import { Icons } from '../constants';
 import { TicketStatus, Ticket } from '../types';
 import { TicketBoard } from './TicketBoard';
 import { TicketModal } from './TicketModal';
-import { TicketList, TicketListGroupMode, TicketListWeekStart } from './TicketList';
+import { SimpleTicketList } from './SimpleTicketList';
 
 interface ChannelDashboardProps {
     channelId: string;
@@ -30,30 +30,7 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
         addChannelMember, removeChannelMember
     } = useStore();
 
-    const [activeTab, setActiveTab] = useState<'QUEUE' | 'KANBAN'>('QUEUE');
-    const listGroupKey = 'ticketListGroupMode';
-    const listWeekStartKey = 'ticketListWeekStart';
-
-    const getStoredGroupMode = () => {
-        if (typeof window === 'undefined') return 'WEEK_ASSIGNEE' as TicketListGroupMode;
-        const stored = window.localStorage.getItem(listGroupKey) as TicketListGroupMode | null;
-        if (stored === 'WEEK_ASSIGNEE' || stored === 'ASSIGNEE_PRIORITY' || stored === 'CONTEXT_WEEK') {
-            return stored;
-        }
-        return 'WEEK_ASSIGNEE' as TicketListGroupMode;
-    };
-
-    const getStoredWeekStart = () => {
-        if (typeof window === 'undefined') return 'MON' as TicketListWeekStart;
-        const stored = window.localStorage.getItem(listWeekStartKey) as TicketListWeekStart | null;
-        if (stored === 'MON' || stored === 'SUN') {
-            return stored;
-        }
-        return 'MON' as TicketListWeekStart;
-    };
-
-    const [listGroupMode, setListGroupMode] = useState<TicketListGroupMode>(getStoredGroupMode);
-    const [listWeekStart, setListWeekStart] = useState<TicketListWeekStart>(getStoredWeekStart);
+    const [activeTab, setActiveTab] = useState<'TASK' | 'KANBAN'>('TASK');
     const [showTicketModal, setShowTicketModal] = useState(false);
     const [editingTicket, setEditingTicket] = useState<Ticket | null>(null);
 
@@ -122,28 +99,6 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
         handleStatusChange(ticket.id, newStatus);
     };
 
-    useEffect(() => {
-        if (typeof window !== 'undefined') {
-            window.localStorage.setItem(listGroupKey, listGroupMode);
-        }
-    }, [listGroupMode, listGroupKey]);
-
-    useEffect(() => {
-        if (typeof window !== 'undefined') {
-            window.localStorage.setItem(listWeekStartKey, listWeekStart);
-        }
-    }, [listWeekStart, listWeekStartKey]);
-
-    const listGroupOptions: { id: TicketListGroupMode; label: string }[] = [
-        { id: 'WEEK_ASSIGNEE', label: 'Time & Owner' },
-        { id: 'ASSIGNEE_PRIORITY', label: 'Owner & Priority' },
-        { id: 'CONTEXT_WEEK', label: 'Workstream & Time' }
-    ];
-    const listWeekStartOptions: { id: TicketListWeekStart; label: string }[] = [
-        { id: 'MON', label: 'Mon Start' },
-        { id: 'SUN', label: 'Sun Start' }
-    ];
-
     const handleSaveTicket = (data: any) => {
         const ticketData: Ticket = {
             id: data.id || generateId(),
@@ -156,7 +111,9 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
             channelId: channelId,
             projectId: data.projectId,
             createdAt: editingTicket?.createdAt || new Date().toISOString(),
-            linkedDocIds: data.linkedDocIds
+            linkedDocIds: data.linkedDocIds,
+            startDate: data.startDate,
+            dueDate: data.endDate
         };
 
         if (editingTicket) {
@@ -310,7 +267,7 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
                     {/* Workspace Controls */}
                     <div className="px-8 py-6 flex items-center justify-between shrink-0">
                         <div className="flex gap-px bg-zinc-200 p-0 border border-zinc-200">
-                            {(['QUEUE', 'KANBAN'] as const).map(tab => (
+                            {(['TASK', 'KANBAN'] as const).map(tab => (
                                 <button
                                     key={tab}
                                     onClick={() => setActiveTab(tab)}
@@ -333,44 +290,15 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
                     </div>
 
                     <div className="flex-1 overflow-hidden relative">
-                        {activeTab === 'QUEUE' && (
+                        {activeTab === 'TASK' && (
                             <div className="h-full overflow-y-auto custom-scrollbar px-8 pb-10">
-                                <div className="flex flex-wrap items-center justify-between gap-4 py-5">
-                                    <div className="text-[12px] font-bold uppercase tracking-[0.22em] text-zinc-600">Grouping</div>
-                                    <div className="flex flex-wrap items-center gap-4">
-                                        <div className="flex bg-zinc-100/80 border border-zinc-100 p-0.5 rounded-lg">
-                                            {listGroupOptions.map(option => (
-                                                <button
-                                                    key={option.id}
-                                                    onClick={() => setListGroupMode(option.id)}
-                                                    className={`px-4 py-1.5 text-[11px] font-bold uppercase tracking-wider rounded-md transition-all ${listGroupMode === option.id ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-500 hover:text-zinc-700'}`}
-                                                >
-                                                    {option.label}
-                                                </button>
-                                            ))}
-                                        </div>
-                                        <div className="flex bg-zinc-100/80 border border-zinc-100 p-0.5 rounded-lg">
-                                            {listWeekStartOptions.map(option => (
-                                                <button
-                                                    key={option.id}
-                                                    onClick={() => setListWeekStart(option.id)}
-                                                    className={`px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider rounded-md transition-all ${listWeekStart === option.id ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-500 hover:text-zinc-700'}`}
-                                                >
-                                                    {option.label}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    </div>
-                                </div>
-                                <TicketList
+                                <SimpleTicketList
                                     tickets={allTickets}
                                     users={users}
                                     channels={campaign?.channels || []}
                                     projects={projects}
                                     onTicketClick={handleTicketClick}
                                     onToggleStatus={handleToggleStatus}
-                                    groupMode={listGroupMode}
-                                    weekStart={listWeekStart}
                                 />
                             </div>
                         )}
@@ -504,7 +432,9 @@ export const ChannelDashboard: React.FC<ChannelDashboardProps> = ({
                         assigneeId: editingTicket.assigneeId,
                         channelId: editingTicket.channelId,
                         projectId: editingTicket.projectId,
-                        linkedDocIds: editingTicket.linkedDocIds
+                        linkedDocIds: editingTicket.linkedDocIds,
+                        startDate: editingTicket.startDate,
+                        endDate: editingTicket.dueDate
                     } : { channelId }}
                     context={{ channels: campaign?.channels || [], projects, users, docs: campaign?.docs || [] }}
                     onClose={() => { setShowTicketModal(false); setEditingTicket(null); }}

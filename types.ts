@@ -252,6 +252,14 @@ export interface Campaign {
   docs: ContextDoc[];
   availableTags?: string[]; // Global tags list
   recentDocIds?: string[]; // Simple recency tracking for mentions/search
+  sampleData?: {
+    enabled: boolean;
+    channelIds: string[];
+    projectIds: string[];
+    ticketIds: string[];
+    roadmapItemIds: string[];
+    timelineTagIds: string[];
+  };
 
   // Agent / Review State
   lastDailyStandup?: string; // ISO Date

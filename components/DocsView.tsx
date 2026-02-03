@@ -244,7 +244,7 @@ export const DocsView: React.FC = () => {
     const docs = campaign?.docs || [];
     const folders = campaign?.docFolders || [];
     const channels = campaign?.channels || [];
-    const availableTags = campaign?.availableTags || ['Draft', 'Q4', 'Urgent', 'Review'];
+    const availableTags = campaign?.availableTags || [];
     const allTickets = [...(campaign?.channels.flatMap(c => c.tickets) || []), ...(campaign?.projects.flatMap(p => p.tickets) || [])];
 
     useEffect(() => {
@@ -316,7 +316,7 @@ export const DocsView: React.FC = () => {
             folderId: undefined,
             lastUpdated: new Date().toISOString(),
             isAiGenerated: false,
-            tags: ['Draft']
+            tags: []
         };
         addDoc(newDoc);
         recordRecentDoc(newDoc.id);

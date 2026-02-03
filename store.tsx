@@ -1,5 +1,5 @@
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { Campaign, Channel, Ticket, TicketStatus, Status, User, Priority, RoadmapItem, Project, ProjectUpdate, ChannelLink, ChannelNote, TimelineTag, ChannelPlan, ContextDoc, DocFolder, ViewMode, Role, ChatMessage } from './types';
 
 // Safe ID Generator
@@ -14,12 +14,13 @@ export const generateId = () => {
   return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
 };
 
-export const MOCK_USERS: User[] = [
-  { id: 'u1', name: 'Founder', initials: 'FD', color: 'bg-indigo-500', role: 'Admin' },
-  { id: 'u2', name: 'Growth Lead', initials: 'GL', color: 'bg-emerald-500', role: 'Member' },
-  { id: 'u3', name: 'Engineer', initials: 'EN', color: 'bg-purple-500', role: 'Member' },
-  { id: 'u4', name: 'Designer', initials: 'DS', color: 'bg-pink-500', role: 'Member' },
-];
+export const DEFAULT_USER: User = {
+  id: 'u_owner',
+  name: 'Owner',
+  initials: 'OW',
+  color: 'bg-indigo-500',
+  role: 'Admin'
+};
 
 const DOC_SHORT_ID_PREFIX = 'D-';
 
@@ -104,6 +105,7 @@ interface StoreState {
   importAIPlan: (channelsData: any[]) => void;
   switchUser: (userId: string) => void;
   reset: () => void;
+  toggleSampleData: () => void;
 
   // Agent / Review Actions
   updateChatHistory: (mode: 'DAILY' | 'WEEKLY', messages: ChatMessage[]) => void;
@@ -118,16 +120,28 @@ interface StoreState {
 const StoreContext = createContext<StoreState | undefined>(undefined);
 
 export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const shouldResetOnReload = import.meta.env.DEV;
+  const shouldPersist = !shouldResetOnReload;
+  const resetGuard = useRef(false);
+
+  if (shouldResetOnReload && !resetGuard.current) {
+    localStorage.removeItem('gtm-os-campaign');
+    localStorage.removeItem('gtm-os-users');
+    resetGuard.current = true;
+  }
+
   const [users, setUsers] = useState<User[]>(() => {
+    if (!shouldPersist) return [DEFAULT_USER];
     const saved = localStorage.getItem('gtm-os-users');
-    return saved ? JSON.parse(saved) : MOCK_USERS;
+    return saved ? JSON.parse(saved) : [DEFAULT_USER];
   });
 
-  const [currentUser, setCurrentUser] = useState<User>(users[0] || MOCK_USERS[0]);
+  const [currentUser, setCurrentUser] = useState<User>(users[0] || DEFAULT_USER);
   const [currentView, setCurrentView] = useState<ViewMode>('ROADMAP');
   const [pendingTicketLink, setPendingTicketLink] = useState<string | null>(null);
 
   const [campaign, setCampaignState] = useState<Campaign | null>(() => {
+    if (!shouldPersist) return null;
     const saved = localStorage.getItem('gtm-os-campaign');
     if (!saved) return null;
 
@@ -201,23 +215,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     // Folder Migration
     if (!data.docFolders) {
-      data.docFolders = [
-        { id: 'f_strategy', name: 'Strategy', icon: '♟️', order: 1000, createdAt: new Date().toISOString() },
-        { id: 'f_personas', name: 'Personas', icon: '👥', order: 2000, createdAt: new Date().toISOString() },
-        { id: 'f_brand', name: 'Brand', icon: '🎨', order: 3000, createdAt: new Date().toISOString() },
-        { id: 'f_process', name: 'Process', icon: '⚙️', order: 4000, createdAt: new Date().toISOString() },
-      ];
-      // Migrate existing docs to folders based on type
-      if (data.docs) {
-        data.docs = data.docs.map((d: any) => {
-          let folderId = undefined;
-          if (d.type === 'STRATEGY') folderId = 'f_strategy';
-          else if (d.type === 'PERSONA') folderId = 'f_personas';
-          else if (d.type === 'BRAND') folderId = 'f_brand';
-          else if (d.type === 'PROCESS') folderId = 'f_process';
-          return { ...d, folderId };
-        });
-      }
+      data.docFolders = [];
     } else {
       // Ensure icons exist if migrating from old version
       data.docFolders = data.docFolders.map((f: any) => ({
@@ -258,13 +256,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       data.recentDocIds = [];
     }
     if (!data.availableTags) {
-      data.availableTags = ['Draft', 'Q4', 'Urgent', 'Review'];
+      data.availableTags = [];
     }
 
     return data;
   });
 
   useEffect(() => {
+    if (!shouldPersist) return;
     if (campaign) {
       localStorage.setItem('gtm-os-campaign', JSON.stringify(campaign));
     } else {
@@ -273,6 +272,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [campaign]);
 
   useEffect(() => {
+    if (!shouldPersist) return;
     localStorage.setItem('gtm-os-users', JSON.stringify(users));
   }, [users]);
 
@@ -1251,6 +1251,288 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }) : null);
   };
 
+  const toggleSampleData = () => {
+    if (!campaign) return;
+
+    setCampaignState(prev => {
+      if (!prev) return null;
+      const sample = prev.sampleData;
+
+      if (!sample || !sample.enabled) {
+        const now = new Date();
+        const campaignStart = prev.startDate ? new Date(prev.startDate) : now;
+        const week1 = new Date(campaignStart);
+        week1.setDate(week1.getDate() + 7);
+        const week2 = new Date(campaignStart);
+        week2.setDate(week2.getDate() + 14);
+        const week3 = new Date(campaignStart);
+        week3.setDate(week3.getDate() + 21);
+
+        const channelPaidId = generateId();
+        const channelLifecycleId = generateId();
+        const projectId = generateId();
+
+        const ticketPaid1Id = generateId();
+        const ticketPaid2Id = generateId();
+        const ticketLifecycleId = generateId();
+        const ticketProject1Id = generateId();
+        const ticketProject2Id = generateId();
+
+        const roadmapPaid1Id = generateId();
+        const roadmapPaid2Id = generateId();
+        const roadmapLifecycleId = generateId();
+        const roadmapProjectId = generateId();
+
+        const timelineTag1Id = generateId();
+        const timelineTag2Id = generateId();
+
+        const tickets: Ticket[] = [
+          {
+            id: ticketPaid1Id,
+            shortId: `T-${Math.floor(Math.random() * 10000)}`,
+            title: 'Launch prospecting ads',
+            description: 'Initial campaign setup and testing.',
+            status: TicketStatus.Todo,
+            channelId: channelPaidId,
+            assigneeId: currentUser.id,
+            priority: 'High',
+            startDate: campaignStart.toISOString(),
+            dueDate: week1.toISOString(),
+            createdAt: now.toISOString(),
+            roadmapItemId: roadmapPaid1Id
+          },
+          {
+            id: ticketPaid2Id,
+            shortId: `T-${Math.floor(Math.random() * 10000)}`,
+            title: 'Refresh creative tests',
+            description: 'New variations for top ads.',
+            status: TicketStatus.InProgress,
+            channelId: channelPaidId,
+            assigneeId: currentUser.id,
+            priority: 'Medium',
+            startDate: week1.toISOString(),
+            dueDate: week2.toISOString(),
+            createdAt: now.toISOString(),
+            roadmapItemId: roadmapPaid2Id
+          },
+          {
+            id: ticketLifecycleId,
+            shortId: `T-${Math.floor(Math.random() * 10000)}`,
+            title: 'Draft onboarding sequence',
+            description: '3-email onboarding flow.',
+            status: TicketStatus.Todo,
+            channelId: channelLifecycleId,
+            assigneeId: currentUser.id,
+            priority: 'Medium',
+            startDate: campaignStart.toISOString(),
+            dueDate: week2.toISOString(),
+            createdAt: now.toISOString(),
+            roadmapItemId: roadmapLifecycleId
+          },
+          {
+            id: ticketProject1Id,
+            shortId: `T-${Math.floor(Math.random() * 10000)}`,
+            title: 'Rewrite hero section',
+            description: 'Improve value prop clarity.',
+            status: TicketStatus.InProgress,
+            projectId,
+            assigneeId: currentUser.id,
+            priority: 'High',
+            startDate: week1.toISOString(),
+            dueDate: week2.toISOString(),
+            createdAt: now.toISOString(),
+            roadmapItemId: roadmapProjectId
+          },
+          {
+            id: ticketProject2Id,
+            shortId: `T-${Math.floor(Math.random() * 10000)}`,
+            title: 'Audit CTA performance',
+            description: 'Review click-through trends.',
+            status: TicketStatus.Todo,
+            projectId,
+            assigneeId: currentUser.id,
+            priority: 'Low',
+            startDate: campaignStart.toISOString(),
+            dueDate: week1.toISOString(),
+            createdAt: now.toISOString()
+          }
+        ];
+
+        const channels: Channel[] = [
+          {
+            id: channelPaidId,
+            name: 'Paid Social',
+            campaignId: prev.id,
+            tickets: tickets.filter(t => t.channelId === channelPaidId),
+            principles: [],
+            tags: ['Outbound'],
+            links: [],
+            notes: [],
+            memberIds: []
+          },
+          {
+            id: channelLifecycleId,
+            name: 'Lifecycle',
+            campaignId: prev.id,
+            tickets: tickets.filter(t => t.channelId === channelLifecycleId),
+            principles: [],
+            tags: ['Inbound'],
+            links: [],
+            notes: [],
+            memberIds: []
+          }
+        ];
+
+        const projects: Project[] = [
+          {
+            id: projectId,
+            name: 'Website Refresh',
+            description: 'Improve landing page conversion rate.',
+            status: 'On Track',
+            priority: 'High',
+            startDate: campaignStart.toISOString(),
+            targetDate: week3.toISOString(),
+            updates: [],
+            tickets: tickets.filter(t => t.projectId === projectId)
+          }
+        ];
+
+        const roadmapItems: RoadmapItem[] = [
+          {
+            id: roadmapPaid1Id,
+            channelId: channelPaidId,
+            weekIndex: 0,
+            durationWeeks: 1,
+            title: 'Prospecting Phase 1',
+            description: 'Initial ad launch and testing.',
+            ownerIds: [currentUser.id],
+            type: 'CONTENT',
+            priority: 'High',
+            ticketId: ticketPaid1Id
+          },
+          {
+            id: roadmapPaid2Id,
+            channelId: channelPaidId,
+            weekIndex: 1,
+            durationWeeks: 1,
+            title: 'Creative Iteration',
+            description: 'Refresh performance creatives.',
+            ownerIds: [currentUser.id],
+            type: 'CONTENT',
+            priority: 'Medium',
+            ticketId: ticketPaid2Id
+          },
+          {
+            id: roadmapLifecycleId,
+            channelId: channelLifecycleId,
+            weekIndex: 0,
+            durationWeeks: 2,
+            title: 'Onboarding Drip',
+            description: 'Welcome and activation emails.',
+            ownerIds: [currentUser.id],
+            type: 'CONTENT',
+            priority: 'Medium',
+            ticketId: ticketLifecycleId
+          },
+          {
+            id: roadmapProjectId,
+            projectId,
+            weekIndex: 1,
+            durationWeeks: 2,
+            title: 'Hero Section Overhaul',
+            description: 'Main landing page restructure.',
+            ownerIds: [currentUser.id],
+            type: 'LAUNCH',
+            priority: 'Urgent',
+            ticketId: ticketProject1Id
+          }
+        ];
+
+        const timelineTags: TimelineTag[] = [
+          {
+            id: timelineTag1Id,
+            weekIndex: 0,
+            label: 'LAUNCH',
+            title: 'Campaign Kickoff',
+            color: 'bg-emerald-500'
+          },
+          {
+            id: timelineTag2Id,
+            weekIndex: 2,
+            label: 'EVENT',
+            title: 'Milestone Review',
+            color: 'bg-indigo-500'
+          }
+        ];
+
+        return {
+          ...prev,
+          channels: [...prev.channels, ...channels],
+          projects: [...prev.projects, ...projects],
+          roadmapItems: [...(prev.roadmapItems || []), ...roadmapItems],
+          timelineTags: [...(prev.timelineTags || []), ...timelineTags],
+          sampleData: {
+            enabled: true,
+            channelIds: [channelPaidId, channelLifecycleId],
+            projectIds: [projectId],
+            ticketIds: [
+              ticketPaid1Id,
+              ticketPaid2Id,
+              ticketLifecycleId,
+              ticketProject1Id,
+              ticketProject2Id
+            ],
+            roadmapItemIds: [
+              roadmapPaid1Id,
+              roadmapPaid2Id,
+              roadmapLifecycleId,
+              roadmapProjectId
+            ],
+            timelineTagIds: [timelineTag1Id, timelineTag2Id]
+          }
+        };
+      }
+
+      const removeChannelIds = new Set(sample.channelIds);
+      const removeProjectIds = new Set(sample.projectIds);
+      const removeTicketIds = new Set(sample.ticketIds);
+      const removeRoadmapItemIds = new Set(sample.roadmapItemIds);
+      const removeTimelineTagIds = new Set(sample.timelineTagIds);
+
+      const channels = prev.channels
+        .filter(c => !removeChannelIds.has(c.id))
+        .map(c => ({
+          ...c,
+          tickets: c.tickets.filter(t => !removeTicketIds.has(t.id))
+        }));
+
+      const projects = prev.projects
+        .filter(p => !removeProjectIds.has(p.id))
+        .map(p => ({
+          ...p,
+          tickets: p.tickets.filter(t => !removeTicketIds.has(t.id))
+        }));
+
+      const roadmapItems = (prev.roadmapItems || []).filter(item => {
+        if (removeRoadmapItemIds.has(item.id)) return false;
+        if (item.channelId && removeChannelIds.has(item.channelId)) return false;
+        if (item.projectId && removeProjectIds.has(item.projectId)) return false;
+        return true;
+      });
+
+      const timelineTags = (prev.timelineTags || []).filter(tag => !removeTimelineTagIds.has(tag.id));
+
+      return {
+        ...prev,
+        channels,
+        projects,
+        roadmapItems,
+        timelineTags,
+        sampleData: undefined
+      };
+    });
+  };
+
   const switchUser = (userId: string) => {
     const user = users.find(u => u.id === userId);
     if (user) setCurrentUser(user);
@@ -1357,6 +1639,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       importAIPlan,
       switchUser,
       reset,
+      toggleSampleData,
       updateChatHistory,
       completeReviewSession
     }}>

@@ -12,6 +12,8 @@ interface AgentTicketCardProps {
     channelId?: string;
     projectId?: string;
     assigneeId?: string;
+    startDate?: string;
+    endDate?: string;
   };
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
   users: User[];
@@ -90,6 +92,35 @@ export const AgentTicketCard: React.FC<AgentTicketCardProps> = ({
               placeholder="Add details..."
               rows={2}
            />
+        </div>
+
+        {/* Dates */}
+        <div className="px-4 pb-4">
+            <div className="grid grid-cols-2 gap-2">
+                <div className="flex items-center gap-1.5 bg-white border border-zinc-200 rounded-md px-2 py-1 shadow-sm">
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-400">Start</span>
+                    <input
+                        disabled={!isPending}
+                        type="date"
+                        value={args.startDate || ''}
+                        onChange={(e) => onUpdate({ startDate: e.target.value })}
+                        className="bg-transparent text-[10px] font-medium text-zinc-600 focus:outline-none w-full cursor-pointer disabled:cursor-default"
+                    />
+                </div>
+                <div className="flex items-center gap-1.5 bg-white border border-zinc-200 rounded-md px-2 py-1 shadow-sm">
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-400">End</span>
+                    <input
+                        disabled={!isPending}
+                        type="date"
+                        value={args.endDate || ''}
+                        onChange={(e) => onUpdate({ endDate: e.target.value })}
+                        className="bg-transparent text-[10px] font-medium text-zinc-600 focus:outline-none w-full cursor-pointer disabled:cursor-default"
+                    />
+                </div>
+            </div>
+            <div className="mt-2 text-[9px] text-zinc-400 uppercase tracking-[0.2em]">
+                Undated tasks show in the Undated list.
+            </div>
         </div>
 
         {/* Control Bar (Context | Assignee | Priority) */}

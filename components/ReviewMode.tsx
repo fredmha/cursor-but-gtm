@@ -10,7 +10,6 @@ import {
 } from '../services/reviewAgent';
 import { TicketStatus, ChatMessage, Ticket, Priority, ContextDoc, DocFolder } from '../types';
 import { AgentTicketCard } from './AgentTicketCard';
-import { buildReviewAgentTestCampaign } from '../fixtures/reviewAgentFixture';
 import { ChatKanbanCallout } from './ChatKanbanCallout';
 import { TicketModal } from './TicketModal';
 import { BulkTaskCallout, BulkDraftTask } from './BulkTaskCallout';
@@ -29,13 +28,6 @@ type MentionCandidate =
     | { kind: 'user'; id: string; token: string; label: string }
     | { kind: 'channel'; id: string; token: string; label: string }
     | { kind: 'project'; id: string; token: string; label: string };
-
-interface SlashCommandOption {
-    command: string;
-    label: string;
-    description: string;
-    showInMenu: boolean;
-}
 
 type PlanningHorizon = 'daily' | 'weekly' | 'quarterly' | 'sprint';
 
@@ -162,7 +154,6 @@ const normalizeDateInput = (value?: string) => (value && value.trim() ? value : 
 const normalizeText = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 const slugify = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 const compactText = (value: string) => normalizeText(value).replace(/\s+/g, '');
-const normalizeCommandText = (value: string) => value.toLowerCase().replace(/\s+/g, ' ').trim();
 const ORDER_STEP_VALUE = 1000;
 const PRIORITY_RANK: Record<Priority, number> = {
     Urgent: 0,
@@ -248,66 +239,18 @@ const getNextFolderOrder = (folders: DocFolder[], parentId: string | undefined) 
 };
 
 const isActiveTicket = (ticket: Ticket) => ticket.status !== TicketStatus.Done && ticket.status !== TicketStatus.Canceled;
-
-const SLASH_COMMANDS = [
-    {
-        command: 'start daily plan',
-        label: '/start daily plan',
-        description: 'Kick off a daily planning session',
-        showInMenu: true
-    },
-    {
-        command: 'start weekly plan',
-        label: '/start weekly plan',
-        description: 'Kick off a weekly planning session',
-        showInMenu: true
-    },
-    {
-        command: 'start quarterly plan',
-        label: '/start quarterly plan',
-        description: 'Kick off a quarterly planning session',
-        showInMenu: true
-    },
-    {
-        command: 'set sprint plan',
-        label: '/set sprint plan',
-        description: 'Bind to a sprint or launch window',
-        showInMenu: true
-    },
-    {
-        command: 'plan',
-        label: '/plan',
-        description: 'Extract tasks from pasted notes',
-        showInMenu: true
-    },
-    {
-        command: 'task',
-        label: '/task',
-        description: 'Draft a task proposal',
-        showInMenu: true
-    },
-    {
-        command: 'help',
-        label: '/help',
-        description: 'Show command help',
-        showInMenu: true
-    },
-    {
-        command: 'query',
-        label: '/query',
-        description: 'Query tasks by status or mention',
-        showInMenu: false
-    },
-    {
-        command: 'edit',
-        label: '/edit',
-        description: 'Edit a ticket by mention',
-        showInMenu: false
-    }
-] as const satisfies ReadonlyArray<SlashCommandOption>;
-
-const SLASH_COMMAND_MATCHERS = [...SLASH_COMMANDS].sort((a, b) => b.command.length - a.command.length);
-const COMMANDS_REQUIRING_ARGS = new Set(['plan', 'task', 'query', 'edit']);
+const isValidDate = (value?: string) => {
+    if (!value) return false;
+    const parsed = new Date(value);
+    return !Number.isNaN(parsed.getTime());
+};
+const hasDateRange = (ticket: Ticket) => isValidDate(ticket.startDate) && isValidDate(ticket.dueDate);
+const overlapsRange = (ticket: Ticket, start: Date, end: Date) => {
+    if (!hasDateRange(ticket)) return false;
+    const tStart = new Date(ticket.startDate!);
+    const tEnd = new Date(ticket.dueDate!);
+    return tStart <= end && tEnd >= start;
+};
 
 const PLANNING_QUESTIONS: Record<PlanningHorizon, PlanningStep[]> = {
     daily: [
@@ -380,6 +323,15 @@ const parseStatusValue = (value: string): TicketStatus | null => {
     return null;
 };
 
+const formatError = (error: unknown) => {
+    if (error instanceof Error) return error.message;
+    try {
+        return JSON.stringify(error);
+    } catch {
+        return String(error);
+    }
+};
+
 const splitList = (value: string) => value
     .split(/[;,]/g)
     .map(item => item.trim())
@@ -427,7 +379,7 @@ interface ReviewModeProps {
 
 export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' }) => {
     const { 
-        campaign, currentUser, setCampaign, updateCampaign, addDoc,
+        campaign, currentUser, updateCampaign, addDoc,
         updateTicket, updateProjectTicket, deleteTicket, deleteProjectTicket, addTicket, addProjectTicket,
         updateChatHistory, completeReviewSession, users
     } = useStore();
@@ -448,10 +400,6 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
     const [mentionOpen, setMentionOpen] = useState(false);
     const [mentionIndex, setMentionIndex] = useState(0);
     const [mentionStart, setMentionStart] = useState<number | null>(null);
-    const [commandQuery, setCommandQuery] = useState('');
-    const [commandOpen, setCommandOpen] = useState(false);
-    const [commandIndex, setCommandIndex] = useState(0);
-    const [commandStart, setCommandStart] = useState<number | null>(null);
     const [planningSession, setPlanningSession] = useState<PlanningSession | null>(null);
     
     const apiKey = "AIzaSyAvHokD5AdbLMPbKyFEgpTfq0HI7NTJ4cQ";
@@ -466,7 +414,6 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
     }, [apiKey]);
     const chatRef = useRef<any>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
-    const isDev = import.meta.env.DEV;
 
     const appendTextMessage = (role: 'user' | 'model', text: string) => {
         const message: ChatMessage = {
@@ -1038,27 +985,11 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
         users
     ]);
 
-    const commandCandidates = useMemo(() => {
-        if (!commandOpen) return [];
-        const query = normalizeCommandText(commandQuery);
-        return SLASH_COMMANDS.filter(option => {
-            if (!option.showInMenu) return false;
-            if (!query) return true;
-            return option.command.startsWith(query) || option.command.includes(query);
-        }).slice(0, 10);
-    }, [commandOpen, commandQuery]);
-
     useEffect(() => {
         if (mentionIndex >= mentionCandidates.length) {
             setMentionIndex(0);
         }
     }, [mentionCandidates, mentionIndex]);
-
-    useEffect(() => {
-        if (commandIndex >= commandCandidates.length) {
-            setCommandIndex(0);
-        }
-    }, [commandCandidates, commandIndex]);
 
     useEffect(() => {
         if (!apiKey) {
@@ -1180,8 +1111,39 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
 
     const getPlanningTicketsForHorizon = (horizon: PlanningHorizon) => {
         if (!campaign) return [];
-        const activeTickets = allTickets.filter(isActiveTicket);
-        const sorted = [...activeTickets].sort((a, b) => {
+        const ownedTickets = allTickets.filter(ticket => ticket.assigneeId === currentUser.id);
+        const activeTickets = ownedTickets.filter(isActiveTicket);
+        const now = new Date();
+        const today = new Date(now);
+        today.setHours(0, 0, 0, 0);
+        let rangeStart = today;
+        let rangeEnd = today;
+
+        if (horizon === 'weekly') {
+            const { weekStart, weekEnd } = getWeekRange(now);
+            rangeStart = weekStart;
+            rangeEnd = weekEnd;
+        } else if (horizon === 'quarterly') {
+            const { start, end } = getQuarterRange(now);
+            rangeStart = start;
+            rangeEnd = end;
+        } else if (horizon === 'sprint') {
+            const { weekStart, weekEnd } = getWeekRange(now);
+            rangeStart = weekStart;
+            rangeEnd = weekEnd;
+        }
+
+        const matchesRange = activeTickets.filter(ticket => overlapsRange(ticket, rangeStart, rangeEnd));
+        const backlog = activeTickets.filter(ticket => ticket.status === TicketStatus.Backlog && hasDateRange(ticket));
+        const undated = activeTickets.filter(ticket => !hasDateRange(ticket));
+        const merged = [...matchesRange, ...backlog, ...undated];
+        const seen = new Set<string>();
+        const unique = merged.filter(ticket => {
+            if (seen.has(ticket.id)) return false;
+            seen.add(ticket.id);
+            return true;
+        });
+        const sorted = [...unique].sort((a, b) => {
             const aDue = a.dueDate ? new Date(a.dueDate).getTime() : Number.POSITIVE_INFINITY;
             const bDue = b.dueDate ? new Date(b.dueDate).getTime() : Number.POSITIVE_INFINITY;
             if (aDue !== bDue) return aDue - bDue;
@@ -1798,70 +1760,23 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
         return { start, query };
     };
 
-    const getCommandContext = (value: string, cursor: number) => {
-        const text = value.slice(0, cursor);
-        const match = text.match(/(^|\s)\/([A-Za-z0-9-_ ]*)$/);
-        if (!match) return null;
-        const query = match[2] || '';
-        const start = cursor - query.length - 1;
-        return { start, query };
-    };
-
     const closeMentionState = () => {
         setMentionOpen(false);
         setMentionQuery('');
         setMentionStart(null);
     };
 
-    const closeCommandState = () => {
-        setCommandOpen(false);
-        setCommandQuery('');
-        setCommandStart(null);
-    };
-
     const updateAutocompleteState = (value: string, cursor: number) => {
         const mentionCtx = getMentionContext(value, cursor);
-        const commandCtx = getCommandContext(value, cursor);
-
-        if (!mentionCtx && !commandCtx) {
+        if (!mentionCtx) {
             closeMentionState();
-            closeCommandState();
             return;
         }
 
-        if (mentionCtx && commandCtx) {
-            if (mentionCtx.start > commandCtx.start) {
-                setMentionOpen(true);
-                setMentionQuery(mentionCtx.query);
-                setMentionStart(mentionCtx.start);
-                setMentionIndex(0);
-                closeCommandState();
-            } else {
-                setCommandOpen(true);
-                setCommandQuery(commandCtx.query);
-                setCommandStart(commandCtx.start);
-                setCommandIndex(0);
-                closeMentionState();
-            }
-            return;
-        }
-
-        if (mentionCtx) {
-            setMentionOpen(true);
-            setMentionQuery(mentionCtx.query);
-            setMentionStart(mentionCtx.start);
-            setMentionIndex(0);
-            closeCommandState();
-            return;
-        }
-
-        if (commandCtx) {
-            setCommandOpen(true);
-            setCommandQuery(commandCtx.query);
-            setCommandStart(commandCtx.start);
-            setCommandIndex(0);
-            closeMentionState();
-        }
+        setMentionOpen(true);
+        setMentionQuery(mentionCtx.query);
+        setMentionStart(mentionCtx.start);
+        setMentionIndex(0);
     };
 
     const insertMention = (candidate: MentionCandidate) => {
@@ -1883,26 +1798,6 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
         });
     };
 
-    const insertCommand = (command: SlashCommandOption) => {
-        if (commandStart === null) return;
-        const cursor = inputRef.current?.selectionStart ?? input.length;
-        const before = input.slice(0, commandStart);
-        const after = input.slice(cursor);
-        const commandText = `/${command.command}`;
-        const needsArgs = COMMANDS_REQUIRING_ARGS.has(command.command);
-        const spacer = needsArgs
-            ? (after.startsWith(' ') ? '' : ' ')
-            : (after.startsWith(' ') || after.length === 0 ? '' : ' ');
-        const nextValue = `${before}${commandText}${spacer}${after}`;
-        setInput(nextValue);
-        closeCommandState();
-        requestAnimationFrame(() => {
-            const pos = (before + commandText + spacer).length;
-            inputRef.current?.focus();
-            inputRef.current?.setSelectionRange(pos, pos);
-        });
-    };
-
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const nextValue = e.target.value;
         setInput(nextValue);
@@ -1911,30 +1806,6 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
     };
 
     const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-        if (commandOpen && commandCandidates.length > 0) {
-            if (e.key === 'ArrowDown') {
-                e.preventDefault();
-                setCommandIndex(prev => Math.min(prev + 1, commandCandidates.length - 1));
-                return;
-            }
-            if (e.key === 'ArrowUp') {
-                e.preventDefault();
-                setCommandIndex(prev => Math.max(prev - 1, 0));
-                return;
-            }
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                const selected = commandCandidates[commandIndex];
-                if (selected) insertCommand(selected);
-                return;
-            }
-            if (e.key === 'Escape') {
-                e.preventDefault();
-                closeCommandState();
-                return;
-            }
-        }
-
         if (mentionOpen && mentionCandidates.length > 0) {
             if (e.key === 'ArrowDown') {
                 e.preventDefault();
@@ -2373,123 +2244,11 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
             processResponse(response);
         } catch (e) {
             console.error("Transcript synthesis error:", e);
-            setClientError("Transcript synthesis failed. Check console for details.");
+            setClientError(`Transcript synthesis failed: ${formatError(e)}`);
             setIsProcessingTranscript(false);
         } finally {
             setIsTyping(false);
         }
-    };
-
-    const handleSlashCommand = async (rawText: string) => {
-        const trimmed = rawText.trim();
-        if (!trimmed.startsWith('/')) return false;
-        const normalized = trimmed.slice(1).trim();
-        if (!normalized) return false;
-        const normalizedLower = normalizeCommandText(normalized);
-        const match = SLASH_COMMAND_MATCHERS.find(option =>
-            normalizedLower === option.command || normalizedLower.startsWith(`${option.command} `)
-        );
-        if (!match) {
-            appendUserMessage(rawText);
-            appendModelMessage(`Unknown command: ${trimmed.split(/\s+/)[0]}. Try /help for options.`);
-            return true;
-        }
-        const command = match.command;
-        const args = normalizedLower === command ? '' : normalized.slice(command.length).trim();
-
-        appendUserMessage(rawText);
-
-        if (command === 'help') {
-            appendModelMessage([
-                "## Command Cheat Sheet",
-                "- /start daily plan",
-                "- /start weekly plan",
-                "- /start quarterly plan",
-                "- /set sprint plan",
-                "- /task <title> [priority]",
-                "- /plan <paste notes>",
-                "- /query [@mention] [status]",
-                "- /edit @T-123",
-                "- /help"
-            ].join('\n'));
-            return true;
-        }
-
-        if (command === 'start daily plan' || command === 'start weekly plan' || command === 'start quarterly plan' || command === 'set sprint plan') {
-            const nextHorizon: PlanningHorizon = command.includes('daily')
-                ? 'daily'
-                : command.includes('weekly')
-                    ? 'weekly'
-                    : command.includes('quarterly')
-                        ? 'quarterly'
-                        : 'sprint';
-            startPlanningSession(nextHorizon, command);
-            return true;
-        }
-
-        if (command === 'task') {
-            if (!args) {
-                appendModelMessage('Usage: /task <title> [priority]');
-                return true;
-            }
-            const parts = args.split(/\s+/).filter(Boolean);
-            let priority: Priority | null = null;
-            if (parts.length > 1) {
-                const maybePriority = parsePriorityValue(parts[parts.length - 1]);
-                if (maybePriority) {
-                    priority = maybePriority;
-                    parts.pop();
-                }
-            }
-            const title = parts.join(' ').trim();
-            if (!title) {
-                appendModelMessage('Usage: /task <title> [priority]');
-                return true;
-            }
-            const mockCallId = generateId();
-            setPendingActions(prev => [...prev, {
-                id: generateId(),
-                callId: mockCallId,
-                name: 'propose_ticket',
-                args: { title, priority: priority || 'Medium' },
-                status: 'PENDING'
-            }]);
-            appendModelMessage('Draft ticket created. Fill in details and approve.');
-            return true;
-        }
-
-        if (command === 'query') {
-            handleQueryCommand(args);
-            return true;
-        }
-
-        if (command === 'edit') {
-            const tokens = extractMentionTokens(args);
-            if (tokens.length === 0) {
-                appendModelMessage('Usage: /edit @T-123');
-                return true;
-            }
-            const target = resolveMentionToTarget(tokens[0]);
-            if (!target) {
-                appendModelMessage('No ticket found for that reference.');
-                return true;
-            }
-            setInlineEditDraft({
-                target,
-                form: buildTicketModalInitialData(target.ticket)
-            });
-            appendModelMessage(`Review edits for @${target.ticket.shortId} below, then approve.`);
-            return true;
-        }
-
-        if (command === 'plan') {
-            const notes = args;
-            await handleTranscriptSynthesis(notes);
-            return true;
-        }
-
-        appendModelMessage(`Unknown command: /${command}. Try /help for options.`);
-        return true;
     };
 
     const handleBulkApprove = async (tasks: BulkDraftTask[]) => {
@@ -2615,7 +2374,7 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
         try {
             const systemInstruction = mode === 'DAILY' ? DAILY_SYSTEM_INSTRUCTION : WEEKLY_SYSTEM_INSTRUCTION;
             const tools = mode === 'DAILY' ? DAILY_TOOLS : WEEKLY_TOOLS;
-            const context = mode === 'DAILY' ? buildDailyContext(campaign, currentUser) : buildWeeklyContext(campaign);
+            const context = mode === 'DAILY' ? buildDailyContext(campaign, currentUser) : buildWeeklyContext(campaign, currentUser);
 
             // Convert stored ChatMessage to SDK Content
             const historyContent: Content[] = [
@@ -2645,7 +2404,7 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
             // No auto-start; user initiates the conversation.
         } catch (e) {
             console.error("Chat Init Error:", e);
-            setClientError("Chat failed to initialize. Check console for details.");
+            setClientError(`Chat failed to initialize: ${formatError(e)}`);
             setIsTyping(false);
         }
     };
@@ -2661,12 +2420,6 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
         if (campaign && client) {
             initChat([]);
         }
-    };
-
-    const handleLoadTestData = () => {
-        const testCampaign = buildReviewAgentTestCampaign();
-        setCampaign(testCampaign);
-        clearChatState();
     };
 
     const handleShowTasksCalls = async (calls: PendingAction[]) => {
@@ -2921,16 +2674,11 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
 
         setInput('');
         closeMentionState();
-        closeCommandState();
-
         if (planningSession && !trimmedText.startsWith('/')) {
             appendUserMessage(rawText);
             handlePlanningInput(rawText);
             return;
         }
-
-        const slashHandled = await handleSlashCommand(rawText);
-        if (slashHandled) return;
 
         if (isTranscriptLike(rawText)) {
             appendUserMessage(rawText);
@@ -2978,7 +2726,7 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
             processResponse(response);
         } catch (e) {
             console.error("Chat Error:", e);
-            setClientError("Chat send failed. Check console for details.");
+            setClientError(`Chat send failed: ${formatError(e)}`);
         } finally {
             setIsTyping(false);
         }
@@ -3022,7 +2770,7 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
                 }
             } 
             else if (name === 'propose_ticket' || name === 'create_task') {
-                const { title, description, channelId, projectId, priority } = args;
+                const { title, description, channelId, projectId, priority, startDate, endDate } = args;
                 const newTicket = {
                     id: generateId(),
                     shortId: `T-${Math.floor(Math.random() * 1000)}`,
@@ -3031,6 +2779,8 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
                     priority: priority || 'Medium',
                     status: TicketStatus.Todo,
                     assigneeId: currentUser.id,
+                    startDate: startDate || undefined,
+                    dueDate: endDate || undefined,
                     createdAt: new Date().toISOString()
                 };
 
@@ -3124,15 +2874,6 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
                     <span className="text-[10px] font-mono text-zinc-400">
                         LAST SESSION: {mode === 'DAILY' ? (campaign?.lastDailyStandup ? new Date(campaign.lastDailyStandup).toLocaleDateString() : 'NEVER') : (campaign?.lastWeeklyReview ? new Date(campaign.lastWeeklyReview).toLocaleDateString() : 'NEVER')}
                     </span>
-                    {isDev && (
-                        <button
-                            onClick={handleLoadTestData}
-                            className="px-2 py-1 text-[10px] font-bold text-zinc-600 bg-zinc-100 rounded-md hover:bg-zinc-200 transition-colors"
-                            title="Load test data"
-                        >
-                            Load Test Data
-                        </button>
-                    )}
                     <button
                         onClick={handleResetChat}
                         className="px-2 py-1 text-[10px] font-bold text-zinc-500 hover:text-zinc-900 bg-zinc-100 rounded-md transition-colors"
@@ -3378,28 +3119,6 @@ export const ReviewMode: React.FC<ReviewModeProps> = ({ initialMode = 'DAILY' })
             {/* Input */}
             <div className="p-6 bg-white border-t border-zinc-100 shrink-0">
                 <div className="max-w-2xl mx-auto relative">
-                    {commandOpen && commandCandidates.length > 0 && (
-                        <div className="absolute bottom-full left-0 mb-2 w-full bg-white border border-zinc-200 shadow-2xl rounded-none overflow-hidden z-30">
-                            {commandCandidates.map((command, idx) => (
-                                <button
-                                    key={command.command}
-                                    type="button"
-                                    onMouseDown={(e) => {
-                                        e.preventDefault();
-                                        insertCommand(command);
-                                    }}
-                                    className={`w-full flex items-center gap-3 px-4 py-2 text-left transition-colors ${idx === commandIndex ? 'bg-zinc-900 text-white' : 'text-zinc-700 hover:bg-zinc-50'}`}
-                                >
-                                    <span className={`text-[10px] font-bold uppercase tracking-[0.2em] ${idx === commandIndex ? 'text-white/70' : 'text-zinc-400'}`}>
-                                        {command.label}
-                                    </span>
-                                    <span className={`text-xs font-medium truncate ${idx === commandIndex ? 'text-white' : 'text-zinc-700'}`}>
-                                        {command.description}
-                                    </span>
-                                </button>
-                            ))}
-                        </div>
-                    )}
                     {mentionOpen && mentionCandidates.length > 0 && (
                         <div className="absolute bottom-full left-0 mb-2 w-full bg-white border border-zinc-200 shadow-2xl rounded-none overflow-hidden z-30">
                             {mentionCandidates.slice(0, 6).map((candidate, idx) => (
