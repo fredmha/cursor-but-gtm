@@ -2,9 +2,10 @@
 import React, { useState, useMemo } from 'react';
 import { useStore } from '../store';
 import { Icons, PRIORITIES } from '../constants';
-import { User, Project, Channel, Priority, TicketStatus, ContextDoc } from '../types';
+import { User, Project, Channel, Priority, ContextDoc } from '../types';
 
 interface TicketModalProps {
+    variant?: 'full' | 'core';
     initialData?: {
         id?: string;
         title?: string;
@@ -30,7 +31,7 @@ interface TicketModalProps {
     onDelete?: (id: string) => void;
 }
 
-export const TicketModal: React.FC<TicketModalProps> = ({ initialData, context, onClose, onSave, onDelete }) => {
+export const TicketModal: React.FC<TicketModalProps> = ({ variant = 'full', initialData, context, onClose, onSave, onDelete }) => {
     const { channels, projects, users, docs = [] } = context;
     const { initiateDocCreationForTicket } = useStore();
 
@@ -126,8 +127,8 @@ export const TicketModal: React.FC<TicketModalProps> = ({ initialData, context, 
                         />
                     </div>
 
-                    {/* Context Selection (Matrix) */}
-                    <div className="bg-zinc-50/50 p-4 rounded-lg border border-zinc-100 space-y-4">
+                    {variant === 'full' && (
+                        <div className="bg-zinc-50/50 p-4 rounded-lg border border-zinc-100 space-y-4">
                         <h4 className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
                             <Icons.Layers className="w-3.5 h-3.5" /> Context & Linkage
                         </h4>
@@ -163,10 +164,11 @@ export const TicketModal: React.FC<TicketModalProps> = ({ initialData, context, 
                                 </select>
                             </div>
                         </div>
-                    </div>
+                        </div>
+                    )}
 
-                    {/* Properties (Assignee, Priority, Duration) */}
-                    <div className="grid grid-cols-2 gap-6">
+                    {variant === 'full' && (
+                        <div className="grid grid-cols-2 gap-6">
                         <div>
                             <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2 block">Assigned Owner</label>
                             <div className="flex flex-wrap gap-2">
@@ -196,10 +198,11 @@ export const TicketModal: React.FC<TicketModalProps> = ({ initialData, context, 
                                 ))}
                             </div>
                         </div>
-                    </div>
+                        </div>
+                    )}
 
-                    {/* Docs Attachment */}
-                    <div>
+                    {variant === 'full' && (
+                        <div>
                         <div className="flex items-center justify-between mb-2">
                             <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">Linked Documents</label>
                             {initialData?.id && (
@@ -229,10 +232,11 @@ export const TicketModal: React.FC<TicketModalProps> = ({ initialData, context, 
                                 No documents available. Create one to link.
                             </div>
                         )}
-                    </div>
+                        </div>
+                    )}
 
-                    {/* Duration / Dates (Roadmap Context) */}
-                    <div className="bg-zinc-50 p-4 rounded-lg border border-zinc-200">
+                    {variant === 'full' && (
+                        <div className="bg-zinc-50 p-4 rounded-lg border border-zinc-200">
                         <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-3 block">Schedule Assignment</label>
                         <div className="grid grid-cols-2 gap-4">
                             <div>
@@ -262,7 +266,8 @@ export const TicketModal: React.FC<TicketModalProps> = ({ initialData, context, 
                                 Estimated duration: {Math.ceil((new Date(endDate).getTime() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24 * 7))} week(s)
                             </div>
                         )}
-                    </div>
+                        </div>
+                    )}
                 </div>
 
                 {/* Footer */}

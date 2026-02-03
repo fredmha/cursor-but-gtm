@@ -93,7 +93,7 @@ GTM OS replaces the fragmented stack of Google Docs, Jira, and Miro with a singl
 │   └── ...
 ├── services/
 │   ├── geminiService.ts      # AI Logic for Strategy Generation
-│   └── reviewAgent.ts        # AI Logic for Daily/Weekly Reviews
+│   └── reviewAgent.ts        # AI Logic for Core Task Agent
 ├── store.tsx                 # Central State (Context + LocalStorage)
 ├── types.ts                  # TypeScript Definitions (The Source of Truth)
 └── constants.tsx             # Icons & Static Configs

@@ -21,16 +21,55 @@ const STATUS_CONFIG = {
 
 const PRIORITY_ORDER: Priority[] = ['Urgent', 'High', 'Medium', 'Low', 'None'];
 
-const getPriorityRank = (priority: Priority) => {
-    const idx = PRIORITY_ORDER.indexOf(priority);
-    return idx === -1 ? PRIORITY_ORDER.length : idx;
+// Convert a date string to a sortable numeric timestamp. Missing/invalid dates sort last.
+const getDateTimestamp = (dateString?: string) => {
+    if (!dateString) return Number.POSITIVE_INFINITY;
+    const parsedDate = new Date(dateString);
+    const timeValue = parsedDate.getTime();
+    return Number.isNaN(timeValue) ? Number.POSITIVE_INFINITY : timeValue;
 };
 
-const formatDueDate = (dueDate?: string) => {
+// Map priority to a numeric rank for sorting (lower is higher priority).
+const getPriorityRank = (priority: Priority) => {
+    const priorityIndex = PRIORITY_ORDER.indexOf(priority);
+    return priorityIndex === -1 ? PRIORITY_ORDER.length : priorityIndex;
+};
+
+// Format the due date for display; fall back to a friendly placeholder.
+const formatDueDateLabel = (dueDate?: string) => {
     if (!dueDate) return 'No due date';
-    const date = new Date(dueDate);
-    if (Number.isNaN(date.getTime())) return 'No due date';
-    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    const parsedDate = new Date(dueDate);
+    if (Number.isNaN(parsedDate.getTime())) return 'No due date';
+    return parsedDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+};
+
+// Sort by due date, then priority, then title for a stable list order.
+const compareTickets = (left: Ticket, right: Ticket) => {
+    const leftDue = getDateTimestamp(left.dueDate);
+    const rightDue = getDateTimestamp(right.dueDate);
+    if (leftDue !== rightDue) return leftDue - rightDue;
+
+    const leftPriority = getPriorityRank(left.priority);
+    const rightPriority = getPriorityRank(right.priority);
+    if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+
+    return left.title.localeCompare(right.title);
+};
+
+// Resolve a ticket's contextual label (project or team) for display.
+const getContextLabel = (ticket: Ticket, projects: Project[], channels: Channel[]) => {
+    const projectMatch = projects.find(p => p.id === ticket.projectId);
+    if (projectMatch) return `Project · ${projectMatch.name}`;
+    const channelMatch = channels.find(c => c.id === ticket.channelId);
+    if (channelMatch) return `Team · ${channelMatch.name}`;
+    return null;
+};
+
+// Determine whether a ticket's due date is in the past.
+const isTicketOverdue = (ticket: Ticket) => {
+    if (!ticket.dueDate) return false;
+    const dueTimestamp = getDateTimestamp(ticket.dueDate);
+    return dueTimestamp < Date.now();
 };
 
 export const SimpleTicketList: React.FC<SimpleTicketListProps> = ({
@@ -41,15 +80,9 @@ export const SimpleTicketList: React.FC<SimpleTicketListProps> = ({
     onTicketClick,
     onToggleStatus
 }) => {
+    // Compute a deterministic order without mutating the input array.
     const sortedTickets = useMemo(() => (
-        [...tickets].sort((a, b) => {
-            const aDue = a.dueDate ? new Date(a.dueDate).getTime() : Number.POSITIVE_INFINITY;
-            const bDue = b.dueDate ? new Date(b.dueDate).getTime() : Number.POSITIVE_INFINITY;
-            if (aDue !== bDue) return aDue - bDue;
-            const priorityDelta = getPriorityRank(a.priority) - getPriorityRank(b.priority);
-            if (priorityDelta !== 0) return priorityDelta;
-            return a.title.localeCompare(b.title);
-        })
+        [...tickets].sort(compareTickets)
     ), [tickets]);
 
     if (sortedTickets.length === 0) {
@@ -66,11 +99,9 @@ export const SimpleTicketList: React.FC<SimpleTicketListProps> = ({
             {sortedTickets.map(ticket => {
                 const StatusIcon = STATUS_CONFIG[ticket.status].icon;
                 const assignee = users.find(u => u.id === ticket.assigneeId);
-                const project = projects.find(p => p.id === ticket.projectId);
-                const channel = channels.find(c => c.id === ticket.channelId);
-                const contextLabel = project ? `Project · ${project.name}` : channel ? `Team · ${channel.name}` : null;
-                const dueLabel = formatDueDate(ticket.dueDate);
-                const isOverdue = ticket.dueDate ? new Date(ticket.dueDate).getTime() < Date.now() : false;
+                const contextLabel = getContextLabel(ticket, projects, channels);
+                const dueLabel = formatDueDateLabel(ticket.dueDate);
+                const isOverdue = isTicketOverdue(ticket);
 
                 return (
                     <li

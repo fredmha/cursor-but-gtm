@@ -1,11 +1,6 @@
 import { Type, Tool } from "@google/genai";
 import { Campaign, Ticket, TicketStatus, User } from "../types";
 
-// ------------------------------------------------------------
-// Constants
-// ------------------------------------------------------------
-const NOTE_SHOW_TASKS = "If the user asks to see tasks, you MUST call 'show_tasks' with the relevant ticketIds.";
-const DONE_OR_CANCELED = new Set<TicketStatus>([TicketStatus.Done, TicketStatus.Canceled]);
 const FORMAT_RULES = `
   Formatting:
   - Respond in Markdown with headings (##), bold labels, and short paragraphs.
@@ -15,12 +10,9 @@ const FORMAT_RULES = `
   - Do not send unsolicited opening messages; only respond to the user's prompt. You may ask clarifying questions.
 `;
 
-// ------------------------------------------------------------
-// Tool declarations (simple, explicit)
-// ------------------------------------------------------------
 const SHOW_TASKS_TOOL = {
   name: "show_tasks",
-  description: "Display a set of tickets in the chat as cards.",
+  description: "Display a set of tasks in the chat as cards.",
   parameters: {
     type: Type.OBJECT,
     properties: {
@@ -31,397 +23,113 @@ const SHOW_TASKS_TOOL = {
   }
 };
 
-const PROPOSE_RESCHEDULE_TOOL = {
-  name: "propose_reschedule",
-  description: "Propose moving an overdue or scheduled ticket to a new date.",
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      ticketId: { type: Type.STRING },
-      newDate: { type: Type.STRING, description: "ISO Date string (YYYY-MM-DD)." },
-      reason: { type: Type.STRING }
-    },
-    required: ["ticketId", "newDate"]
-  }
-};
-
-const PROPOSE_TICKET_TOOL = {
-  name: "propose_ticket",
-  description: "Propose creating a new execution ticket.",
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      title: { type: Type.STRING },
-      channelId: { type: Type.STRING },
-      projectId: { type: Type.STRING },
-      description: { type: Type.STRING },
-      priority: { type: Type.STRING, enum: ["Urgent", "High", "Medium", "Low"] },
-      startDate: { type: Type.STRING, description: "ISO Date string (YYYY-MM-DD)." },
-      endDate: { type: Type.STRING, description: "ISO Date string (YYYY-MM-DD)." }
-    },
-    required: ["title"]
-  }
-};
-
-const PROPOSE_BULK_TASKS_TOOL = {
-  name: "propose_bulk_tasks",
-  description: "Generate multiple tickets at once from a meeting or plan.",
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      origin: { type: Type.STRING, description: "Meeting content source or title" },
-      tasks: {
-        type: Type.ARRAY,
-        items: {
-          type: Type.OBJECT,
-          properties: {
-            title: { type: Type.STRING },
-            description: { type: Type.STRING },
-            assigneeId: { type: Type.STRING },
-            priority: { type: Type.STRING, enum: ["Urgent", "High", "Medium", "Low"] }
-          },
-          required: ["title"]
-        }
-      }
-    },
-    required: ["tasks"]
-  }
-};
-
-const PROPOSE_STATUS_CHANGE_TOOL = {
-  name: "propose_status_change",
-  description: "Propose marking a ticket as Done, Canceled (Kill), or Backlog.",
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      ticketId: { type: Type.STRING },
-      status: { type: Type.STRING, enum: ["Done", "Canceled", "Backlog"] },
-      reason: { type: Type.STRING }
-    },
-    required: ["ticketId", "status"]
-  }
-};
-
 const CREATE_TASK_TOOL = {
   name: "create_task",
-  description: "Quickly create a task for today or tomorrow.",
+  description: "Create a new task for the current user.",
   parameters: {
     type: Type.OBJECT,
     properties: {
       title: { type: Type.STRING },
-      priority: { type: Type.STRING, enum: ["Urgent", "High", "Medium"] },
-      startDate: { type: Type.STRING, description: "ISO Date string (YYYY-MM-DD)." },
-      endDate: { type: Type.STRING, description: "ISO Date string (YYYY-MM-DD)." }
+      notes: { type: Type.STRING }
     },
     required: ["title"]
   }
 };
 
-const UPDATE_STATUS_TOOL = {
-  name: "update_status",
-  description: "Mark a specific ticket as Done or In Progress.",
+const UPDATE_TASK_TOOL = {
+  name: "update_task",
+  description: "Update a task title, status, or notes.",
   parameters: {
     type: Type.OBJECT,
     properties: {
       ticketId: { type: Type.STRING },
-      status: { type: Type.STRING, enum: ["Done", "In Progress"] }
+      title: { type: Type.STRING },
+      status: { type: Type.STRING, enum: ["Todo", "In Progress", "Blocked", "Done"] },
+      notes: { type: Type.STRING }
     },
-    required: ["ticketId", "status"]
+    required: ["ticketId"]
   }
 };
 
-const RESOLVE_REFERENCES_TOOL = {
-  name: "resolve_references",
-  description: "Resolve referenced tickets, docs, channels, projects, and users from a user prompt.",
+const DELETE_TASK_TOOL = {
+  name: "delete_task",
+  description: "Delete a task by ID.",
   parameters: {
     type: Type.OBJECT,
     properties: {
-      text: { type: Type.STRING, description: "Raw user input." },
-      mentionTokens: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Explicit @ tokens if detected." }
+      ticketId: { type: Type.STRING }
     },
-    required: ["text"]
+    required: ["ticketId"]
   }
 };
 
-const FETCH_REFERENCE_CONTEXT_TOOL = {
-  name: "fetch_reference_context",
-  description: "Fetch brief context for referenced entities so you can answer accurately.",
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      tickets: { type: Type.ARRAY, items: { type: Type.STRING } },
-      docs: { type: Type.ARRAY, items: { type: Type.STRING } },
-      channels: { type: Type.ARRAY, items: { type: Type.STRING } },
-      projects: { type: Type.ARRAY, items: { type: Type.STRING } },
-      users: { type: Type.ARRAY, items: { type: Type.STRING } }
-    }
-  }
-};
-
-export const WEEKLY_TOOLS: Tool[] = [
+export const CORE_TOOLS: Tool[] = [
   {
     functionDeclarations: [
       SHOW_TASKS_TOOL,
-      RESOLVE_REFERENCES_TOOL,
-      FETCH_REFERENCE_CONTEXT_TOOL,
-      PROPOSE_RESCHEDULE_TOOL,
-      PROPOSE_TICKET_TOOL,
-      PROPOSE_BULK_TASKS_TOOL,
-      PROPOSE_STATUS_CHANGE_TOOL
-    ]
-  }
-];
-
-export const DAILY_TOOLS: Tool[] = [
-  {
-    functionDeclarations: [
-      SHOW_TASKS_TOOL,
-      RESOLVE_REFERENCES_TOOL,
-      FETCH_REFERENCE_CONTEXT_TOOL,
       CREATE_TASK_TOOL,
-      PROPOSE_BULK_TASKS_TOOL,
-      UPDATE_STATUS_TOOL
+      UPDATE_TASK_TOOL,
+      DELETE_TASK_TOOL
     ]
   }
 ];
 
-// ------------------------------------------------------------
-// Helpers (keep logic explicit and consistent)
-// ------------------------------------------------------------
 const isoDate = (date: Date) => date.toISOString().split("T")[0];
 
-const getAllTickets = (campaign: Campaign) => [
-  ...(campaign.channels || []).flatMap((c) => c.tickets),
-  ...(campaign.projects || []).flatMap((p) => p.tickets),
-];
+const getUserTickets = (campaign: Campaign, user: User) =>
+  [
+    ...(campaign.channels || []).flatMap(c => c.tickets || []),
+    ...(campaign.projects || []).flatMap(p => p.tickets || [])
+  ].filter(t => t.assigneeId === user.id);
 
-const isActiveTicket = (t: Ticket) => !DONE_OR_CANCELED.has(t.status);
-
-const getWeekRange = (now: Date) => {
-  const day = now.getDay(); // 0 = Sun, 1 = Mon
-  const diffToMonday = day === 0 ? -6 : 1 - day;
-  const weekStart = new Date(now);
-  weekStart.setDate(now.getDate() + diffToMonday);
-  weekStart.setHours(0, 0, 0, 0);
-  const weekEnd = new Date(weekStart);
-  weekEnd.setDate(weekStart.getDate() + 6);
-  weekEnd.setHours(23, 59, 59, 999);
-  return { weekStart, weekEnd };
+const formatTicketLine = (t: Ticket) => {
+  const status = t.status || TicketStatus.Todo;
+  return `- [ID: ${t.id} | ${t.shortId}] "${t.title}" (${status})`;
 };
 
-const isValidDate = (value?: string) => {
-  if (!value) return false;
-  const parsed = new Date(value);
-  return !Number.isNaN(parsed.getTime());
-};
-
-const hasDateRange = (t: Ticket) => isValidDate(t.startDate) && isValidDate(t.dueDate);
-
-const isWithinRange = (t: Ticket, date: Date) => {
-  if (!hasDateRange(t)) return false;
-  const start = new Date(t.startDate!);
-  const end = new Date(t.dueDate!);
-  return start <= date && date <= end;
-};
-
-const overlapsRange = (t: Ticket, start: Date, end: Date) => {
-  if (!hasDateRange(t)) return false;
-  const tStart = new Date(t.startDate!);
-  const tEnd = new Date(t.dueDate!);
-  return tStart <= end && tEnd >= start;
-};
-
-const isUndated = (t: Ticket) => !hasDateRange(t);
-
-const formatTicketLine = (t: Ticket) => `- [ID: ${t.id} | ${t.shortId}] "${t.title}" (${t.status}${t.dueDate ? `, Due: ${t.dueDate}` : ""})`;
-
-const formatTicketList = (label: string, items: Ticket[]) => {
-  const lines = items.map(formatTicketLine).join("\n");
-  return `${label}:\n${lines || "None."}`;
-};
-
-// ------------------------------------------------------------
-// Context builders
-// ------------------------------------------------------------
-export const buildWeeklyContext = (campaign: Campaign, user: User) => {
-  const now = new Date();
-  const { weekStart, weekEnd } = getWeekRange(now);
-  const weekStartStr = isoDate(weekStart);
-  const weekEndStr = isoDate(weekEnd);
-
-  const allTickets = getAllTickets(campaign).filter(t => t.assigneeId === user.id);
-  const hasAnyTickets = allTickets.length > 0;
-
-  const overdue = allTickets.filter(t =>
-    isActiveTicket(t) && hasDateRange(t) && new Date(t.dueDate!) < weekStart
-  );
-
-  const inWeek = allTickets.filter(t =>
-    isActiveTicket(t) && overlapsRange(t, weekStart, weekEnd)
-  );
-
-  const backlog = allTickets.filter(t =>
-    isActiveTicket(t) && t.status === TicketStatus.Backlog && hasDateRange(t)
-  );
-
-  const undated = allTickets.filter(t =>
-    isActiveTicket(t) && isUndated(t)
-  );
-
-  const inWeekByStatus: Record<string, Ticket[]> = {
-    [TicketStatus.Todo]: inWeek.filter(t => t.status === TicketStatus.Todo),
-    [TicketStatus.InProgress]: inWeek.filter(t => t.status === TicketStatus.InProgress),
-    [TicketStatus.Backlog]: inWeek.filter(t => t.status === TicketStatus.Backlog),
-    [TicketStatus.Blocked]: inWeek.filter(t => t.status === TicketStatus.Blocked)
+export const buildCoreContext = (campaign: Campaign, user: User) => {
+  const today = isoDate(new Date());
+  const tasks = getUserTickets(campaign, user);
+  const byStatus = {
+    todo: tasks.filter(t => t.status === TicketStatus.Todo || t.status === TicketStatus.Backlog),
+    doing: tasks.filter(t => t.status === TicketStatus.InProgress),
+    blocked: tasks.filter(t => t.status === TicketStatus.Blocked),
+    done: tasks.filter(t => t.status === TicketStatus.Done)
   };
 
-  const activeProjects = (campaign.projects || []).filter(
-    p => p.status === "On Track" || p.status === "At Risk"
-  );
-
-  const overdueList = overdue.map(t => `- [ID: ${t.id} | ${t.shortId}] "${t.title}" (Due: ${t.dueDate})`).join("\n");
-  const projectList = activeProjects.map(
-    p => `- [ID: ${p.id}] "${p.name}" (${p.description || "No description"})`
-  ).join("\n");
-  const channelList = (campaign.channels || []).map(
-    c => `- [ID: ${c.id}] "${c.name}"`
-  ).join("\n");
+  const list = tasks.map(formatTicketLine).join("\n");
+  const counts = `Todo: ${byStatus.todo.length}, Doing: ${byStatus.doing.length}, Blocked: ${byStatus.blocked.length}, Done: ${byStatus.done.length}`;
 
   return `
-    Current Date: ${now.toLocaleDateString()}
-    Current Week (strict Mon-Sun): ${weekStartStr} to ${weekEndStr}
-    Stride Objective: ${campaign.objective || "Not set"}
-
-    CRITICAL: Your goal is to help the user close the current week (this stride), resolve overdue tickets, and keep in-week work on track.
-
-    OVERDUE TICKETS (Slippage):
-    ${overdueList || (hasAnyTickets ? "None. Great job." : "There aren't any ongoing tasks.")}
-
-    IN-WEEK WORK (Not Done/Canceled):
-    ${hasAnyTickets ? formatTicketList("Todo", inWeekByStatus[TicketStatus.Todo]) : "There aren't any ongoing tasks."}
-    ${hasAnyTickets ? formatTicketList("In Progress", inWeekByStatus[TicketStatus.InProgress]) : ""}
-    ${hasAnyTickets ? formatTicketList("Backlog", inWeekByStatus[TicketStatus.Backlog]) : ""}
-    ${hasAnyTickets ? formatTicketList("Blocked", inWeekByStatus[TicketStatus.Blocked]) : ""}
-
-    BACKLOG (Assigned, Dated):
-    ${backlog.length > 0 ? backlog.map(formatTicketLine).join("\n") : "None."}
-
-    UNDATED (Missing start/end dates):
-    ${undated.length > 0 ? undated.map(formatTicketLine).join("\n") : "None."}
-
-    ACTIVE PROJECTS:
-    ${projectList}
-
-    AVAILABLE CHANNELS:
-    ${channelList}
-
-    NOTE: ${NOTE_SHOW_TASKS}
-  `;
-};
-
-export const buildDailyContext = (campaign: Campaign, user: User) => {
-  const now = new Date();
-  const todayStr = isoDate(now);
-
-  const allTickets = getAllTickets(campaign).filter(t => t.assigneeId === user.id);
-
-  const overdue = allTickets.filter(t =>
-    isActiveTicket(t) && hasDateRange(t) && new Date(t.dueDate!) < now
-  );
-
-  const current = allTickets.filter(t =>
-    isActiveTicket(t) && isWithinRange(t, now)
-  );
-
-  const backlog = allTickets.filter(t =>
-    isActiveTicket(t) && t.status === TicketStatus.Backlog && hasDateRange(t)
-  );
-
-  const undated = allTickets.filter(t =>
-    isActiveTicket(t) && isUndated(t)
-  );
-
-  const currentList = current.map(t => `- [ID: ${t.id} | ${t.shortId}] "${t.title}" (${t.status}${t.startDate ? `, Start: ${t.startDate}` : ""}${t.dueDate ? `, End: ${t.dueDate}` : ""})`).join("\n");
-  const overdueList = overdue.map(t => `- [ID: ${t.id} | ${t.shortId}] "${t.title}" (${t.status}, Due: ${t.dueDate})`).join("\n");
-  const backlogList = backlog.map(t => `- [ID: ${t.id} | ${t.shortId}] "${t.title}" (${t.status}${t.startDate ? `, Start: ${t.startDate}` : ""}${t.dueDate ? `, End: ${t.dueDate}` : ""})`).join("\n");
-  const undatedList = undated.map(t => `- [ID: ${t.id} | ${t.shortId}] "${t.title}" (${t.status})`).join("\n");
-
-  return `
-    Today is: ${now.toLocaleDateString()}
+    Today is: ${today}
     User: ${user.name}
-    Stride Objective: ${campaign.objective || "Not set"}
 
-    GOAL: Run a quick daily standup.
-    1. Ask what they achieved yesterday.
-    2. Review today's plan based on the following assigned tickets.
-    3. Identify blockers.
+    TASK COUNTS:
+    ${counts}
 
-    CURRENT WORK (Within Start/End):
-    ${currentList || "None."}
+    TASK LIST:
+    ${list || "There aren't any ongoing tasks."}
 
-    OVERDUE WORK:
-    ${overdueList || "None."}
+    NOTE: If the user asks to see tasks, you MUST call 'show_tasks' with the relevant ticketIds.
 
-    BACKLOG (Assigned, Dated):
-    ${backlogList || "None."}
-
-    UNDATED (Missing start/end dates):
-    ${undatedList || "None."}
-
-    NOTE: ${NOTE_SHOW_TASKS}
+    ${FORMAT_RULES}
   `;
 };
 
-// ------------------------------------------------------------
-// System instructions
-// ------------------------------------------------------------
-export const WEEKLY_SYSTEM_INSTRUCTION = `
-  You are the GTM Chief of Staff.
-  Your Persona: High-bandwidth, low-ego, execution-focused. You speak concisely. No fluff.
+export const CORE_SYSTEM_INSTRUCTION = `
+  You are a personal task agent. You manage the user's tasks only.
 
-  Workflow:
-  1. THE CLEANSE: Look at the Overdue Tickets. Ask the user what to do with them (Reschedule, Kill, or they are actually Done).
-     - ALWAYS use 'propose_status_change' or 'propose_reschedule' when the user decides.
-     - Do not move to planning until Overdue is empty.
-
-  2. THE WEEK STRIDE: Review IN-WEEK WORK (strict Mon-Sun). For any items due this week, ask for status confirmation on multiple tasks.
-     - If the user confirms a status change, immediately emit 'propose_status_change'.
-     - If the user says a task is in progress, use 'propose_status_change' to set status to Backlog only if they request it; otherwise keep status.
-     - If they want to move work out of the week, use 'propose_reschedule'.
-
-  3. THE PLAN: Look at Active Projects and Channels. Ask if there are key actions for next week.
-     - Suggest tasks based on the Project descriptions if the user is stuck.
-     - Use 'propose_ticket' when the user wants to add a task.
+  Capabilities:
+  - Create a task (title + optional notes).
+  - Update task title, status, or notes.
+  - Delete a task.
+  - Show tasks when asked.
+  - Summarize progress by status.
 
   Rules:
-  - NEVER say "I have updated the ticket". You cannot update the database. You MUST emit a Tool Call (proposal) and wait for the user to approve it.
-  - If the user says "Move X to next week", calculate the date for next Friday and use 'propose_reschedule'.
-  - If the user asks to see tasks, use 'show_tasks' with the relevant ticket IDs.
-  - If the user references tickets, docs, channels, projects, or team members (with or without @), call 'resolve_references' first. If you need details to answer, call 'fetch_reference_context' next.
-  - If the user pastes a long plan or uses /plan, summarize into 'propose_bulk_tasks' only.
-
-  ${FORMAT_RULES}
-`;
-
-export const DAILY_SYSTEM_INSTRUCTION = `
-  You are the Daily Standup Agent.
-  Your goal is to unblock the user and ensure they know what to do today.
-
-  Style: Short, punchy, like a Slack message from a good manager.
-
-  Workflow:
-  1. Provide a Daily Digest in a structured block with bullets under labeled headings:
-     - Snapshot:
-     - Priorities:
-     - Risks/Blockers:
-     - Ask:
-  2. Ask if there are any blockers or new urgent items.
-  3. If they say "I did X", ask if you should mark X as done (if X exists in context).
-  4. If they confirm a ticket status change, immediately use 'update_status'.
-  5. If they say "I need to do Y", use 'create_task'.
-  6. If the user asks to see tasks, use 'show_tasks' with the relevant ticket IDs.
-  7. If the user references tickets, docs, channels, projects, or team members (with or without @), call 'resolve_references' first. If you need details to answer, call 'fetch_reference_context' next.
-  8. If the user pastes a long plan or uses /plan, summarize into 'propose_bulk_tasks' only.
+  - Never claim a task was updated unless you called a tool.
+  - If the user asks to see tasks, call 'show_tasks' with matching IDs.
+  - Keep replies short and action-oriented.
 
   ${FORMAT_RULES}
 `;

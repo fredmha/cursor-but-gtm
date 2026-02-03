@@ -2,6 +2,30 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { Campaign, Channel, Ticket, TicketStatus, Status, User, Priority, RoadmapItem, Project, ProjectUpdate, ChannelLink, ChannelNote, TimelineTag, ChannelPlan, ContextDoc, DocFolder, ViewMode, Role, ChatMessage } from './types';
 
+// --- Constants ---
+
+const STORAGE_KEYS = {
+  campaign: 'gtm-os-campaign',
+  users: 'gtm-os-users'
+} as const;
+
+const ORDER_STEP = 1000;
+const ROOT_KEY = '__root__';
+const RECENT_DOC_LIMIT = 25;
+const DEFAULT_FOLDER_ICON = '\u{1F4C1}';
+
+const USER_COLORS = [
+  'bg-indigo-500',
+  'bg-emerald-500',
+  'bg-purple-500',
+  'bg-pink-500',
+  'bg-orange-500',
+  'bg-blue-500',
+  'bg-cyan-500'
+];
+
+// --- Shared Helpers ---
+
 // Safe ID Generator
 export const generateId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -31,6 +55,56 @@ const generateDocShortId = (existing: Set<string>): string => {
   } while (existing.has(next));
   existing.add(next);
   return next;
+};
+
+// Convert a date string to a sortable timestamp. Missing/invalid dates sort last.
+const getTimestamp = (dateString?: string) => {
+  if (!dateString) return Number.POSITIVE_INFINITY;
+  const timestamp = new Date(dateString).getTime();
+  return Number.isNaN(timestamp) ? Number.POSITIVE_INFINITY : timestamp;
+};
+
+const updateById = <T extends { id: string }>(items: T[], id: string, updates: Partial<T>) =>
+  items.map(item => item.id === id ? { ...item, ...updates } : item);
+
+const removeById = <T extends { id: string }>(items: T[], id: string) =>
+  items.filter(item => item.id !== id);
+
+const normalizeOrdering = <T extends { id: string; order?: number }>(
+  items: T[],
+  getParentId: (item: T) => string | undefined,
+  getTimestampValue: (item: T) => string | undefined
+): T[] => {
+  const cloned = items.map(item => ({ ...item }));
+  const grouped = new Map<string, T[]>();
+
+  cloned.forEach(item => {
+    const key = getParentId(item) || ROOT_KEY;
+    const group = grouped.get(key) || [];
+    group.push(item);
+    grouped.set(key, group);
+  });
+
+  grouped.forEach(group => {
+    group.sort((a, b) => {
+      const ao = a.order ?? Number.POSITIVE_INFINITY;
+      const bo = b.order ?? Number.POSITIVE_INFINITY;
+      if (ao !== bo) return ao - bo;
+      const at = getTimestamp(getTimestampValue(a));
+      const bt = getTimestamp(getTimestampValue(b));
+      return at - bt;
+    });
+
+    let nextOrder = ORDER_STEP;
+    group.forEach(item => {
+      if (item.order === undefined || Number.isNaN(item.order)) {
+        item.order = nextOrder;
+      }
+      nextOrder = (item.order || nextOrder) + ORDER_STEP;
+    });
+  });
+
+  return cloned;
 };
 
 interface StoreState {
@@ -125,14 +199,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const resetGuard = useRef(false);
 
   if (shouldResetOnReload && !resetGuard.current) {
-    localStorage.removeItem('gtm-os-campaign');
-    localStorage.removeItem('gtm-os-users');
+    localStorage.removeItem(STORAGE_KEYS.campaign);
+    localStorage.removeItem(STORAGE_KEYS.users);
     resetGuard.current = true;
   }
 
   const [users, setUsers] = useState<User[]>(() => {
     if (!shouldPersist) return [DEFAULT_USER];
-    const saved = localStorage.getItem('gtm-os-users');
+    const saved = localStorage.getItem(STORAGE_KEYS.users);
     return saved ? JSON.parse(saved) : [DEFAULT_USER];
   });
 
@@ -142,7 +216,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const [campaign, setCampaignState] = useState<Campaign | null>(() => {
     if (!shouldPersist) return null;
-    const saved = localStorage.getItem('gtm-os-campaign');
+    const saved = localStorage.getItem(STORAGE_KEYS.campaign);
     if (!saved) return null;
 
     const data = JSON.parse(saved);
@@ -220,13 +294,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // Ensure icons exist if migrating from old version
       data.docFolders = data.docFolders.map((f: any) => ({
         ...f,
-        icon: f.icon || '📁'
+        icon: f.icon || DEFAULT_FOLDER_ICON
       }));
     }
 
     data.docFolders = (data.docFolders || []).map((f: any) => ({
       ...f,
-      icon: f.icon || '\u{1F4C1}',
+      icon: f.icon || DEFAULT_FOLDER_ICON,
       isArchived: !!f.isArchived,
       isFavorite: !!f.isFavorite
     }));
@@ -265,25 +339,35 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => {
     if (!shouldPersist) return;
     if (campaign) {
-      localStorage.setItem('gtm-os-campaign', JSON.stringify(campaign));
+      localStorage.setItem(STORAGE_KEYS.campaign, JSON.stringify(campaign));
     } else {
-      localStorage.removeItem('gtm-os-campaign');
+      localStorage.removeItem(STORAGE_KEYS.campaign);
     }
   }, [campaign]);
 
   useEffect(() => {
     if (!shouldPersist) return;
-    localStorage.setItem('gtm-os-users', JSON.stringify(users));
+    localStorage.setItem(STORAGE_KEYS.users, JSON.stringify(users));
   }, [users]);
 
-  // User Actions
+  // --- Shared State Helpers ---
+
+  const updateCampaignState = (updater: (prev: Campaign) => Campaign) => {
+    setCampaignState(prev => prev ? updater(prev) : null);
+  };
+
+  const updateRecentDocs = (docId: string, recentDocIds?: string[]) => {
+    const existing = (recentDocIds || []).filter(id => id !== docId);
+    return [docId, ...existing].slice(0, RECENT_DOC_LIMIT);
+  };
+
+  // --- User Actions ---
   const addUser = (name: string, role: Role) => {
-    const colors = ['bg-indigo-500', 'bg-emerald-500', 'bg-purple-500', 'bg-pink-500', 'bg-orange-500', 'bg-blue-500', 'bg-cyan-500'];
     const newUser: User = {
       id: generateId(),
       name,
       initials: name.substring(0, 2).toUpperCase(),
-      color: colors[Math.floor(Math.random() * colors.length)],
+      color: USER_COLORS[Math.floor(Math.random() * USER_COLORS.length)],
       role
     };
     setUsers([...users, newUser]);
@@ -298,7 +382,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const updateUser = (userId: string, updates: Partial<User>) => {
-    setUsers(users.map(u => u.id === userId ? { ...u, ...updates } : u));
+    setUsers(updateById(users, userId, updates));
     if (currentUser.id === userId) {
       setCurrentUser(prev => ({ ...prev, ...updates }));
     }
@@ -308,12 +392,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const updateCampaign = (updates: Partial<Campaign>) => {
     if (!campaign) return;
-    setCampaignState(prev => prev ? ({ ...prev, ...updates }) : null);
+    updateCampaignState(prev => ({ ...prev, ...updates }));
   };
+
+  // --- Channel Actions ---
 
   const addChannel = (channel: Channel) => {
     if (!campaign) return;
-    setCampaignState(prev => prev ? ({
+    updateCampaignState(prev => ({
       ...prev,
       channels: [...prev.channels, {
         ...channel,
@@ -324,23 +410,23 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         notes: [],
         memberIds: []
       }]
-    }) : null);
+    }));
   };
 
   const updateChannel = (channelId: string, updates: Partial<Channel>) => {
     if (!campaign) return;
-    setCampaignState(prev => prev ? ({
+    updateCampaignState(prev => ({
       ...prev,
-      channels: prev.channels.map(c => c.id === channelId ? { ...c, ...updates } : c)
-    }) : null);
+      channels: updateById(prev.channels, channelId, updates)
+    }));
   };
 
   const updateChannelPlan = (channelId: string, plan: ChannelPlan) => {
     if (!campaign) return;
-    setCampaignState(prev => prev ? ({
+    updateCampaignState(prev => ({
       ...prev,
-      channels: prev.channels.map(c => c.id === channelId ? { ...c, plan } : c)
-    }) : null);
+      channels: updateById(prev.channels, channelId, { plan })
+    }));
   };
 
   const deleteChannel = (channelId: string) => {
@@ -348,77 +434,77 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const newChannels = campaign.channels.filter(c => c.id !== channelId);
     const newRoadmapItems = (campaign.roadmapItems || []).filter(i => i.channelId !== channelId);
 
-    setCampaignState(prev => prev ? ({
+    updateCampaignState(prev => ({
       ...prev,
       channels: newChannels,
       roadmapItems: newRoadmapItems
-    }) : null);
+    }));
   };
 
   const addChannelPrinciple = (channelId: string, text: string) => {
     if (!campaign) return;
     const principle = { id: generateId(), text };
-    setCampaignState(prev => prev ? ({
+    updateCampaignState(prev => ({
       ...prev,
       channels: prev.channels.map(c =>
         c.id === channelId ? { ...c, principles: [...(c.principles || []), principle] } : c
       )
-    }) : null);
+    }));
   };
 
   const deleteChannelPrinciple = (channelId: string, principleId: string) => {
     if (!campaign) return;
-    setCampaignState(prev => prev ? ({
+    updateCampaignState(prev => ({
       ...prev,
       channels: prev.channels.map(c =>
         c.id === channelId ? { ...c, principles: (c.principles || []).filter(p => p.id !== principleId) } : c
       )
-    }) : null);
+    }));
   };
 
   const addChannelLink = (channelId: string, link: ChannelLink) => {
     if (!campaign) return;
-    setCampaignState(prev => prev ? ({
+    updateCampaignState(prev => ({
       ...prev,
       channels: prev.channels.map(c =>
         c.id === channelId ? { ...c, links: [...(c.links || []), link] } : c
       )
-    }) : null);
+    }));
   };
 
   const removeChannelLink = (channelId: string, linkId: string) => {
     if (!campaign) return;
-    setCampaignState(prev => prev ? ({
+    updateCampaignState(prev => ({
       ...prev,
       channels: prev.channels.map(c =>
         c.id === channelId ? { ...c, links: (c.links || []).filter(l => l.id !== linkId) } : c
       )
-    }) : null);
+    }));
   };
 
   const addChannelNote = (channelId: string, note: ChannelNote) => {
     if (!campaign) return;
-    setCampaignState(prev => prev ? ({
+    updateCampaignState(prev => ({
       ...prev,
       channels: prev.channels.map(c =>
         c.id === channelId ? { ...c, notes: [note, ...(c.notes || [])] } : c
       )
-    }) : null);
+    }));
   };
 
   const deleteChannelNote = (channelId: string, noteId: string) => {
     if (!campaign) return;
-    setCampaignState(prev => prev ? ({
+    updateCampaignState(prev => ({
       ...prev,
       channels: prev.channels.map(c =>
         c.id === channelId ? { ...c, notes: (c.notes || []).filter(n => n.id !== noteId) } : c
       )
-    }) : null);
+    }));
   };
 
   const addChannelMember = (channelId: string, userId: string) => {
     if (!campaign) return;
-    setCampaignState(prev => prev ? ({
+    updateCampaignState(prev => ({
       ...prev,
       channels: prev.channels.map(c => {
         if (c.id !== channelId) return c;
@@ -426,55 +512,59 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (currentMembers.includes(userId)) return c;
         return { ...c, memberIds: [...currentMembers, userId] };
       })
-    }) : null);
+    }));
   };
 
   const removeChannelMember = (channelId: string, userId: string) => {
     if (!campaign) return;
-    setCampaignState(prev => prev ? ({
+    updateCampaignState(prev => ({
       ...prev,
       channels: prev.channels.map(c => {
         if (c.id !== channelId) return c;
         return { ...c, memberIds: (c.memberIds || []).filter(id => id !== userId) };
       })
-    }) : null);
+    }));
   };
+
+  // --- Project Actions ---
 
   const addProject = (project: Project) => {
     if (!campaign) return;
-    setCampaignState(prev => prev ? ({
+    updateCampaignState(prev => ({
       ...prev,
       projects: [...(prev.projects || []), { ...project, tickets: [] }]
-    }) : null);
+    }));
   };
 
   const updateProject = (projectId: string, updates: Partial<Project>) => {
     if (!campaign) return;
-    setCampaignState(prev => prev ? ({
+    updateCampaignState(prev => ({
       ...prev,
-      projects: (prev.projects || []).map(p => p.id === projectId ? { ...p, ...updates } : p)
-    }) : null);
+      projects: updateById(prev.projects || [], projectId, updates)
+    }));
   };
 
   const deleteProject = (projectId: string) => {
     if (!campaign) return;
-    setCampaignState(prev => prev ? ({
+    updateCampaignState(prev => ({
       ...prev,
-      projects: (prev.projects || []).filter(p => p.id !== projectId),
+      projects: removeById(prev.projects || [], projectId),
       roadmapItems: (prev.roadmapItems || []).filter(i => i.projectId !== projectId)
-    }) : null);
+    }));
   };
 
   const addProjectUpdate = (projectId: string, update: ProjectUpdate) => {
     if (!campaign) return;
-    setCampaignState(prev => prev ? ({
+    updateCampaignState(prev => ({
       ...prev,
       projects: (prev.projects || []).map(p => p.id === projectId ? {
         ...p,
         updates: [update, ...(p.updates || [])]
       } : p)
-    }) : null);
+    }));
   };
+
+  // --- Project Ticket Actions ---
 
   const addProjectTicket = (projectId: string, ticket: Ticket) => {
     if (!campaign) return;
@@ -504,14 +594,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       newRoadmapItems.push(newItem);
     }
 
-    setCampaignState(prev => prev ? ({
+    updateCampaignState(prev => ({
       ...prev,
       roadmapItems: newRoadmapItems,
       projects: prev.projects.map(p => p.id === projectId ? {
         ...p,
         tickets: [...(p.tickets || []), finalTicket]
       } : p)
-    }) : null);
+    }));
   };
 
   const updateProjectTicket = (projectId: string, ticketId: string, updates: Partial<Ticket>) => {
@@ -582,15 +672,17 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const deleteProjectTicket = (projectId: string, ticketId: string) => {
     if (!campaign) return;
-    setCampaignState(prev => prev ? ({
+    updateCampaignState(prev => ({
       ...prev,
       roadmapItems: prev.roadmapItems.filter(i => i.ticketId !== ticketId),
       projects: prev.projects.map(p => p.id === projectId ? {
         ...p,
         tickets: p.tickets.filter(t => t.id !== ticketId)
       } : p)
-    }) : null);
+    }));
   };
+
+  // --- Channel Ticket Actions ---
 
   const addTicket = (channelId: string, ticket: Ticket) => {
     if (!campaign) return;
@@ -621,13 +713,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       newRoadmapItems.push(newItem);
     }
 
-    setCampaignState(prev => prev ? ({
+    updateCampaignState(prev => ({
       ...prev,
       roadmapItems: newRoadmapItems,
       channels: prev.channels.map(c =>
         c.id === channelId ? { ...c, tickets: [...c.tickets, finalTicket] } : c
       )
-    }) : null);
+    }));
   };
 
   const updateTicket = (channelId: string, ticketId: string, updates: Partial<Ticket>) => {
@@ -702,7 +794,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (!campaign) return;
     const newRoadmapItems = (campaign.roadmapItems || []).filter(i => i.ticketId !== ticketId);
 
-    setCampaignState(prev => prev ? ({
+    updateCampaignState(prev => ({
       ...prev,
       roadmapItems: newRoadmapItems,
       channels: prev.channels.map(c =>
@@ -711,8 +803,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           tickets: c.tickets.filter(t => t.id !== ticketId)
         } : c
       )
-    }) : null);
+    }));
   };
+
+  // --- Ticket Linking ---
 
   const linkDocToTicket = (docId: string, ticketId: string, channelId?: string, projectId?: string) => {
     if (channelId) {
@@ -735,6 +829,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
     }
   };
+
+  // --- Roadmap Actions ---
 
   const addRoadmapItem = (item: RoadmapItem) => {
     if (!campaign) return;
@@ -789,21 +885,21 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       };
       newItem.ticketId = ticketId;
 
-      setCampaignState(prev => prev ? ({
+      updateCampaignState(prev => ({
         ...prev,
         roadmapItems: [...(prev.roadmapItems || []), newItem],
         projects: prev.projects.map(p => p.id === newItem.projectId ? {
           ...p,
           tickets: [...(p.tickets || []), ticket]
         } : p)
-      }) : null);
+      }));
       return;
     }
 
-    setCampaignState(prev => prev ? ({
+    updateCampaignState(prev => ({
       ...prev,
       roadmapItems: [...(prev.roadmapItems || []), newItem]
-    }) : null);
+    }));
   };
 
   const updateRoadmapItem = (itemId: string, updates: Partial<RoadmapItem>) => {
@@ -922,33 +1018,33 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
     }
 
-    setCampaignState(prev => prev ? ({
+    updateCampaignState(prev => ({
       ...prev,
       channels: newChannels,
       projects: newProjects,
       roadmapItems: (prev.roadmapItems || []).filter(i => i.id !== itemId)
-    }) : null);
+    }));
   };
+
+  // --- Timeline Actions ---
 
   const addTimelineTag = (tag: TimelineTag) => {
     if (!campaign) return;
-    setCampaignState(prev => prev ? ({
+    updateCampaignState(prev => ({
       ...prev,
       timelineTags: [...(prev.timelineTags || []), tag]
-    }) : null);
+    }));
   };
 
   const deleteTimelineTag = (tagId: string) => {
     if (!campaign) return;
-    setCampaignState(prev => prev ? ({
+    updateCampaignState(prev => ({
       ...prev,
       timelineTags: (prev.timelineTags || []).filter(t => t.id !== tagId)
-    }) : null);
+    }));
   };
 
-  // --- Folder Actions ---
-
-  const ORDER_STEP_VALUE = 1000;
+  // --- Docs & Folder Helpers ---
 
   const sortByOrder = <T extends { order?: number; createdAt?: string; lastUpdated?: string }>(items: T[]): T[] => {
     return [...items].sort((a, b) => {
@@ -963,7 +1059,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const getNextOrder = <T extends { order?: number }>(items: T[]): number => {
     const maxOrder = items.reduce((max, item) => Math.max(max, item.order ?? 0), 0);
-    return maxOrder + ORDER_STEP_VALUE;
+    return maxOrder + ORDER_STEP;
   };
 
   const getSiblingFolders = (allFolders: DocFolder[], parentId: string | undefined, excludeId?: string) => {
@@ -986,12 +1082,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return false;
   };
 
-  const addDocFolder = (name: string, icon: string = '\u{1F4C1}', parentId?: string, order?: number) => {
+  // --- Docs & Folder Actions ---
+
+  const addDocFolder = (name: string, icon: string = DEFAULT_FOLDER_ICON, parentId?: string, order?: number) => {
     if (!campaign) return;
     const now = new Date().toISOString();
 
-    setCampaignState(prev => {
-      if (!prev) return null;
+    updateCampaignState(prev => {
       const siblings = getSiblingFolders(prev.docFolders, parentId);
       const resolvedOrder = order ?? getNextOrder(siblings);
 
@@ -1016,9 +1113,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const moveDocFolder = (folderId: string, parentId: string | undefined, order?: number) => {
     if (!campaign) return;
 
-    setCampaignState(prev => {
-      if (!prev) return null;
-
+    updateCampaignState(prev => {
       if (parentId === folderId || isFolderDescendant(prev.docFolders, parentId, folderId)) {
         console.error('Cannot move a folder into itself or its descendants.');
         return prev;
@@ -1038,16 +1133,15 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const updateDocFolder = (folderId: string, updates: Partial<DocFolder>) => {
     if (!campaign) return;
-    setCampaignState(prev => prev ? ({
+    updateCampaignState(prev => ({
       ...prev,
-      docFolders: prev.docFolders.map(f => f.id === folderId ? { ...f, ...updates } : f)
-    }) : null);
+      docFolders: updateById(prev.docFolders, folderId, updates)
+    }));
   };
 
   const deleteDocFolder = (folderId: string) => {
     if (!campaign) return;
-    setCampaignState(prev => {
-      if (!prev) return null;
+    updateCampaignState(prev => {
       const folder = prev.docFolders.find(f => f.id === folderId);
       const parentId = folder?.parentId;
 
@@ -1072,29 +1166,27 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const toggleDocFavorite = (docId: string, value?: boolean) => {
     if (!campaign) return;
-    setCampaignState(prev => prev ? ({
+    updateCampaignState(prev => ({
       ...prev,
       docs: prev.docs.map(d => d.id === docId ? { ...d, isFavorite: value ?? !d.isFavorite } : d)
-    }) : null);
+    }));
   };
 
   const toggleFolderFavorite = (folderId: string, value?: boolean) => {
     if (!campaign) return;
-    setCampaignState(prev => prev ? ({
+    updateCampaignState(prev => ({
       ...prev,
       docFolders: prev.docFolders.map(f => f.id === folderId ? { ...f, isFavorite: value ?? !f.isFavorite } : f)
-    }) : null);
+    }));
   };
 
   const recordRecentDoc = (docId: string) => {
     if (!campaign) return;
     setCampaignState(prev => {
       if (!prev) return null;
-      const existing = (prev.recentDocIds || []).filter(id => id !== docId);
-      const nextRecent = [docId, ...existing].slice(0, 25);
       return {
         ...prev,
-        recentDocIds: nextRecent
+        recentDocIds: updateRecentDocs(docId, prev.recentDocIds)
       };
     });
   };
@@ -1104,9 +1196,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const addDoc = (doc: ContextDoc) => {
     if (!campaign) return;
 
-    setCampaignState(prev => {
-      if (!prev) return null;
-
+    updateCampaignState(prev => {
       const now = new Date().toISOString();
       const folderId = doc.folderId;
       const siblings = getSiblingDocs(prev.docs, folderId);
@@ -1129,13 +1219,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         lastUpdated: doc.lastUpdated || now
       };
 
-      const existing = (prev.recentDocIds || []).filter(id => id !== docWithMeta.id);
-      const nextRecent = [docWithMeta.id, ...existing].slice(0, 25);
-
       return {
         ...prev,
         docs: [...prev.docs, docWithMeta],
-        recentDocIds: nextRecent
+        recentDocIds: updateRecentDocs(docWithMeta.id, prev.recentDocIds)
       };
     });
   };
@@ -1143,8 +1230,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const updateDoc = (docId: string, updates: Partial<ContextDoc>) => {
     if (!campaign) return;
 
-    setCampaignState(prev => {
-      if (!prev) return null;
+    updateCampaignState(prev => {
       const currentDoc = prev.docs.find(d => d.id === docId);
       if (!currentDoc) return prev;
 
@@ -1176,27 +1262,23 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const deleteDoc = (docId: string) => {
     if (!campaign) return;
-    setCampaignState(prev => prev ? ({
+    updateCampaignState(prev => ({
       ...prev,
-      docs: (prev.docs || []).filter(d => d.id !== docId),
+      docs: removeById(prev.docs || [], docId),
       recentDocIds: (prev.recentDocIds || []).filter(id => id !== docId)
-    }) : null);
+    }));
   };
 
   const moveDoc = (docId: string, folderId: string | undefined, order?: number) => {
     if (!campaign) return;
 
-    setCampaignState(prev => {
-      if (!prev) return null;
+    updateCampaignState(prev => {
       const currentDoc = prev.docs.find(d => d.id === docId);
       if (!currentDoc) return prev;
 
       const siblings = getSiblingDocs(prev.docs, folderId, docId);
       const resolvedOrder = order ?? getNextOrder(siblings);
       const now = new Date().toISOString();
-
-      const existing = (prev.recentDocIds || []).filter(id => id !== docId);
-      const nextRecent = [docId, ...existing].slice(0, 25);
 
       return {
         ...prev,
@@ -1205,18 +1287,22 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             ? { ...d, folderId, order: resolvedOrder, lastUpdated: now, lastEditedBy: currentUser.id }
             : d
         ),
-        recentDocIds: nextRecent
+        recentDocIds: updateRecentDocs(docId, prev.recentDocIds)
       };
     });
   };
 
+  // --- Campaign Tags ---
+
   const addCampaignTag = (tag: string) => {
     if (!campaign || (campaign.availableTags || []).includes(tag)) return;
-    setCampaignState(prev => prev ? ({
+    updateCampaignState(prev => ({
       ...prev,
       availableTags: [...(prev.availableTags || []), tag]
-    }) : null);
+    }));
   };
+
+  // --- AI Import ---
 
   const importAIPlan = (channelsData: any[]) => {
     if (!campaign) return;
@@ -1245,11 +1331,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       c.tickets.forEach(t => t.channelId = c.id);
     });
 
-    setCampaignState(prev => prev ? ({
+    updateCampaignState(prev => ({
       ...prev,
       channels: [...prev.channels, ...newChannels]
-    }) : null);
+    }));
   };
+
+  // --- Sample Data ---
 
   const toggleSampleData = () => {
     if (!campaign) return;
@@ -1546,27 +1634,21 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const updateChatHistory = (mode: 'DAILY' | 'WEEKLY', messages: ChatMessage[]) => {
     if (!campaign) return;
-    setCampaignState(prev => {
-      if (!prev) return null;
-      return {
-        ...prev,
-        dailyChatHistory: mode === 'DAILY' ? messages : prev.dailyChatHistory,
-        weeklyChatHistory: mode === 'WEEKLY' ? messages : prev.weeklyChatHistory
-      };
-    });
+    updateCampaignState(prev => ({
+      ...prev,
+      dailyChatHistory: mode === 'DAILY' ? messages : prev.dailyChatHistory,
+      weeklyChatHistory: mode === 'WEEKLY' ? messages : prev.weeklyChatHistory
+    }));
   };
 
   const completeReviewSession = (mode: 'DAILY' | 'WEEKLY') => {
     if (!campaign) return;
     const now = new Date().toISOString();
-    setCampaignState(prev => {
-      if (!prev) return null;
-      return {
-        ...prev,
-        lastDailyStandup: mode === 'DAILY' ? now : prev.lastDailyStandup,
-        lastWeeklyReview: mode === 'WEEKLY' ? now : prev.lastWeeklyReview
-      };
-    });
+    updateCampaignState(prev => ({
+      ...prev,
+      lastDailyStandup: mode === 'DAILY' ? now : prev.lastDailyStandup,
+      lastWeeklyReview: mode === 'WEEKLY' ? now : prev.lastWeeklyReview
+    }));
   };
 
   const initiateDocCreationForTicket = (ticketId: string) => {

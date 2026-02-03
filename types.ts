@@ -1,4 +1,6 @@
 
+// --- Enums & Unions ---
+
 export enum Status {
   Active = 'Active',
   Paused = 'Paused',
@@ -16,8 +18,17 @@ export enum TicketStatus {
 }
 
 export type Priority = 'Urgent' | 'High' | 'Medium' | 'Low' | 'None';
-
 export type Role = 'Admin' | 'Member';
+export type ProjectHealth = 'On Track' | 'At Risk' | 'Off Track' | 'Completed';
+export type ChannelTag = 'Inbound' | 'Outbound';
+export type ChannelType = '' | 'PROJECT';
+export type RoadmapItemType = 'CONTENT' | 'LAUNCH' | 'THEME' | 'NOTE';
+export type DocType = 'STRATEGY' | 'PERSONA' | 'BRAND' | 'PROCESS';
+export type DocFormat = 'TEXT' | 'CANVAS';
+export type CanvasNodeType = 'RECT' | 'CIRCLE' | 'STICKY' | 'TEXT' | 'IMAGE';
+export type ViewMode = 'ONBOARDING' | 'ROADMAP' | 'EXECUTION' | 'REVIEW' | 'DOCS' | 'SETTINGS';
+
+// --- Core Entities ---
 
 export interface User {
   id: string;
@@ -33,18 +44,16 @@ export interface Ticket {
   title: string;
   description?: string;
   status: TicketStatus;
-  channelId?: string; // Direct Parent
-  projectId?: string; // Direct Parent
+  channelId?: string;
+  projectId?: string;
   roadmapItemId?: string;
   assigneeId?: string;
   priority: Priority;
   dueDate?: string;
   startDate?: string;
   createdAt: string;
-  linkedDocIds?: string[]; // IDs of ContextDocs linked to this ticket
+  linkedDocIds?: string[];
 }
-
-export type ProjectHealth = 'On Track' | 'At Risk' | 'Off Track' | 'Completed';
 
 export interface ProjectUpdate {
   id: string;
@@ -95,16 +104,12 @@ export interface ChannelPlan {
   lastGeneratedAt?: string;
 }
 
-export type ChannelTag = 'Inbound' | 'Outbound';
-
-export type ChannelType = '' | 'PROJECT';
-
 export interface Channel {
   id: string;
   name: string;
   type?: ChannelType;
   campaignId: string;
-  tickets: Ticket[]; // Tickets live directly on Channel
+  tickets: Ticket[];
   principles: ChannelPrinciple[];
   tags: ChannelTag[];
   links?: ChannelLink[];
@@ -120,8 +125,6 @@ export interface OperatingPrinciple {
   category: string;
 }
 
-export type RoadmapItemType = 'CONTENT' | 'LAUNCH' | 'THEME' | 'NOTE';
-
 export interface RoadmapItem {
   id: string;
   channelId?: string;
@@ -132,17 +135,13 @@ export interface RoadmapItem {
   ownerIds?: string[];
   type: RoadmapItemType;
   label?: string;
-
   priority?: Priority;
   attachments?: string[];
   externalLinks?: { title: string; url: string }[];
-
   ticketId?: string;
   projectId?: string;
-
   startDate?: string;
   endDate?: string;
-
   color?: string;
   status?: Status;
 }
@@ -155,24 +154,19 @@ export interface TimelineTag {
   color: string;
 }
 
-// Deprecated conceptually, but kept for migration if needed, though mostly replaced by folders.
-export type DocType = 'STRATEGY' | 'PERSONA' | 'BRAND' | 'PROCESS';
+// --- Docs & Canvas ---
 
 export interface DocFolder {
   id: string;
   name: string;
-  icon?: string; // Emoji
-  parentId?: string; // The parent folder ID for nesting
-  order?: number; // Manual ordering within the same parent
+  icon?: string;
+  parentId?: string;
+  order?: number;
   isRagIndexed?: boolean;
   isArchived?: boolean;
   isFavorite?: boolean;
   createdAt: string;
 }
-
-export type DocFormat = 'TEXT' | 'CANVAS';
-
-export type CanvasNodeType = 'RECT' | 'CIRCLE' | 'STICKY' | 'TEXT' | 'IMAGE';
 
 export interface CanvasNode {
   id: string;
@@ -183,7 +177,7 @@ export interface CanvasNode {
   height: number;
   color: string;
   text?: string;
-  src?: string; // For Images (Base64)
+  src?: string;
 }
 
 export interface CanvasEdge {
@@ -197,26 +191,26 @@ export interface ContextDoc {
   id: string;
   shortId?: string;
   title: string;
-  content: string; // HTML Content OR JSON string for Canvas
-  format?: DocFormat; // Defaults to TEXT
-  type?: DocType; // Kept for legacy/compatibility
-  folderId?: string; // The folder this doc belongs to
-  order?: number; // Manual ordering within the same folder/root
+  content: string;
+  format?: DocFormat;
+  type?: DocType;
+  folderId?: string;
+  order?: number;
   lastUpdated: string;
   isAiGenerated: boolean;
   tags?: string[];
   channelId?: string;
-  icon?: string; // Emoji customization for file
+  icon?: string;
   isRagIndexed?: boolean;
   isArchived?: boolean;
   isFavorite?: boolean;
-  // Collaboration metadata
-  lastEditedBy?: string; // User ID
-  createdBy?: string; // User ID
-  createdAt?: string; // ISO timestamp
+  lastEditedBy?: string;
+  createdBy?: string;
+  createdAt?: string;
 }
 
-// Chat Types
+// --- Chat ---
+
 export interface ChatPart {
   text?: string;
   functionCall?: {
@@ -236,6 +230,8 @@ export interface ChatMessage {
   timestamp: number;
 }
 
+// --- Campaign ---
+
 export interface Campaign {
   id: string;
   name: string;
@@ -248,10 +244,10 @@ export interface Campaign {
   principles: OperatingPrinciple[];
   roadmapItems: RoadmapItem[];
   timelineTags: TimelineTag[];
-  docFolders: DocFolder[]; // New Folders
+  docFolders: DocFolder[];
   docs: ContextDoc[];
-  availableTags?: string[]; // Global tags list
-  recentDocIds?: string[]; // Simple recency tracking for mentions/search
+  availableTags?: string[];
+  recentDocIds?: string[];
   sampleData?: {
     enabled: boolean;
     channelIds: string[];
@@ -260,12 +256,8 @@ export interface Campaign {
     roadmapItemIds: string[];
     timelineTagIds: string[];
   };
-
-  // Agent / Review State
-  lastDailyStandup?: string; // ISO Date
-  lastWeeklyReview?: string; // ISO Date
+  lastDailyStandup?: string;
+  lastWeeklyReview?: string;
   dailyChatHistory?: ChatMessage[];
   weeklyChatHistory?: ChatMessage[];
 }
-
-export type ViewMode = 'ONBOARDING' | 'ROADMAP' | 'EXECUTION' | 'REVIEW' | 'DOCS' | 'SETTINGS';
