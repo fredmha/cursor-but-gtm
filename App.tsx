@@ -32,6 +32,7 @@ const MainLayout: React.FC = () => {
           status: 'Active',
           channels: [],
           projects: [],
+          standaloneTickets: [],
           principles: [],
           roadmapItems: [],
           timelineTags: [],

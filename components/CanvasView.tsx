@@ -27,6 +27,11 @@ type CanvasNodeData = {
   element: CanvasElement;
 };
 
+type ResizeDimensions = {
+  width?: number;
+  height?: number;
+};
+
 type TicketRef = {
   id: string;
   shortId: string;
@@ -36,6 +41,15 @@ type TicketRef = {
 };
 
 const VIEWPORT_COMMIT_MS = 200;
+
+const toFiniteNumber = (value: unknown): number | undefined => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number.parseFloat(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+};
 
 const createDefaultCanvasScene = (): CanvasScene => ({
   version: 2,
@@ -116,9 +130,10 @@ const buildScene = (
   viewport: CanvasScene['viewport']
 ): CanvasScene => {
   const elements = nodes.map(node => {
-    const width = Number((node.style as { width?: number } | undefined)?.width) || node.data.element.width;
-    const height = Number((node.style as { height?: number } | undefined)?.height) || node.data.element.height;
-    const zIndex = Number((node.style as { zIndex?: number } | undefined)?.zIndex) || node.data.element.zIndex;
+    const style = (node.style as { width?: unknown; height?: unknown; zIndex?: unknown } | undefined);
+    const width = toFiniteNumber(node.width) ?? toFiniteNumber(node.measured?.width) ?? toFiniteNumber(style?.width) ?? node.data.element.width;
+    const height = toFiniteNumber(node.height) ?? toFiniteNumber(node.measured?.height) ?? toFiniteNumber(style?.height) ?? node.data.element.height;
+    const zIndex = toFiniteNumber(style?.zIndex) ?? node.data.element.zIndex;
     return { ...node.data.element, id: node.id, x: node.position.x, y: node.position.y, width, height, zIndex };
   });
 
@@ -157,26 +172,43 @@ const getAbsolutePosition = (nodeId: string, nodeMap: Map<string, Node<CanvasNod
   return { x: parent.x + node.position.x, y: parent.y + node.position.y };
 };
 
-const CanvasElementNode: React.FC<NodeProps<CanvasNodeData>> = ({ data, selected }) => {
+type CanvasElementNodeProps = NodeProps<CanvasNodeData> & {
+  onResizeLive: (id: string, dimensions: ResizeDimensions) => void;
+  onResizeDone: (id: string, dimensions: ResizeDimensions) => void;
+};
+
+const CanvasElementNode: React.FC<CanvasElementNodeProps> = ({ id, data, selected, width, height, onResizeLive, onResizeDone }) => {
   const element = data.element;
   const isContainer = element.kind === 'CONTAINER';
+  const frameWidth = toFiniteNumber(width) ?? element.width;
+  const frameHeight = toFiniteNumber(height) ?? element.height;
 
   return (
     <div
-      className={`h-full w-full rounded-lg border shadow-sm overflow-hidden ${selected ? 'ring-2 ring-indigo-400' : ''}`}
+      className={`h-full w-full rounded-lg border shadow-sm overflow-hidden flex ${selected ? 'ring-2 ring-indigo-400' : ''}`}
       style={{
+        width: frameWidth,
+        height: frameHeight,
         background: element.style?.fill || '#ffffff',
         borderColor: element.style?.stroke || '#d4d4d8',
         borderStyle: isContainer ? 'dashed' : 'solid'
       }}
     >
-      <NodeResizer isVisible={selected} minWidth={120} minHeight={80} lineStyle={{ borderColor: '#6366f1' }} handleStyle={{ borderColor: '#6366f1' }} />
+      <NodeResizer
+        isVisible={selected}
+        minWidth={120}
+        minHeight={80}
+        lineStyle={{ borderColor: '#6366f1' }}
+        handleStyle={{ borderColor: '#6366f1' }}
+        onResize={(_, params) => onResizeLive(id, params)}
+        onResizeEnd={(_, params) => onResizeDone(id, params)}
+      />
       <Handle type="target" position={Position.Top} style={{ width: 8, height: 8 }} />
       <Handle type="source" position={Position.Right} style={{ width: 8, height: 8 }} />
       <Handle type="target" position={Position.Bottom} style={{ width: 8, height: 8 }} />
       <Handle type="source" position={Position.Left} style={{ width: 8, height: 8 }} />
 
-      <div className="h-full w-full p-3 flex flex-col">
+      <div className="h-full w-full p-3 flex flex-col min-h-0">
         <span className="text-[10px] uppercase tracking-[0.18em] font-bold text-zinc-500 mb-2">
           {element.kind.replace('_', ' ')}
         </span>
@@ -256,6 +288,38 @@ const CanvasWorkspace: React.FC = () => {
     viewportCommitTimerRef.current = window.setTimeout(() => commitScene(false), VIEWPORT_COMMIT_MS);
   }, [commitScene]);
 
+  const syncNodeDimensions = useCallback((nodeId: string, dimensions: ResizeDimensions) => {
+    const nextWidth = toFiniteNumber(dimensions.width);
+    const nextHeight = toFiniteNumber(dimensions.height);
+    if (nextWidth === undefined && nextHeight === undefined) return;
+
+    setNodes(prev => prev.map(node => {
+      if (node.id !== nodeId) return node;
+      const width = nextWidth ?? toFiniteNumber(node.width) ?? toFiniteNumber(node.measured?.width) ?? toFiniteNumber((node.style as { width?: unknown } | undefined)?.width) ?? node.data.element.width;
+      const height = nextHeight ?? toFiniteNumber(node.height) ?? toFiniteNumber(node.measured?.height) ?? toFiniteNumber((node.style as { height?: unknown } | undefined)?.height) ?? node.data.element.height;
+      return {
+        ...node,
+        width,
+        height,
+        measured: { ...(node.measured || {}), width, height },
+        data: { ...node.data, element: { ...node.data.element, width, height } },
+        style: { ...(node.style || {}), width, height }
+      };
+    }));
+  }, []);
+
+  const flushPendingCommits = useCallback(() => {
+    if (commitTimerRef.current !== null) {
+      window.clearTimeout(commitTimerRef.current);
+      commitTimerRef.current = null;
+    }
+    if (viewportCommitTimerRef.current !== null) {
+      window.clearTimeout(viewportCommitTimerRef.current);
+      viewportCommitTimerRef.current = null;
+    }
+    commitScene(false);
+  }, [commitScene]);
+
   const applyScene = useCallback((scene: CanvasScene, resetHistory: boolean) => {
     const state = mapSceneToState(scene);
     setNodes(state.nodes);
@@ -281,6 +345,21 @@ const CanvasWorkspace: React.FC = () => {
     if (commitTimerRef.current !== null) window.clearTimeout(commitTimerRef.current);
     if (viewportCommitTimerRef.current !== null) window.clearTimeout(viewportCommitTimerRef.current);
   }, []);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') flushPendingCommits();
+    };
+    const handlePageHide = () => flushPendingCommits();
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pagehide', handlePageHide);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pagehide', handlePageHide);
+    };
+  }, [flushPendingCommits]);
 
   const selectedNodes = useMemo(() => nodes.filter(node => node.selected), [nodes]);
   const selectedNode = selectedNodes.length === 1 ? selectedNodes[0] : undefined;
@@ -509,7 +588,34 @@ const CanvasWorkspace: React.FC = () => {
   }, [applyScene, updateCanvasScene]);
 
   const onNodesChange = useCallback((changes: NodeChange<Node<CanvasNodeData>>[]) => {
-    setNodes(prev => applyNodeChanges(changes, prev));
+    setNodes(prev => {
+      const changedDimensions = new Map<string, ResizeDimensions>();
+      changes.forEach(change => {
+        if (change.type !== 'dimensions') return;
+        const dimensions = (change as { id: string; dimensions?: ResizeDimensions }).dimensions;
+        if (!dimensions) return;
+        changedDimensions.set(change.id, dimensions);
+      });
+
+      const next = applyNodeChanges(changes, prev);
+      if (changedDimensions.size === 0) return next;
+
+      return next.map(node => {
+        const dimensions = changedDimensions.get(node.id);
+        if (!dimensions) return node;
+        const width = toFiniteNumber(dimensions.width) ?? toFiniteNumber(node.width) ?? toFiniteNumber(node.measured?.width) ?? toFiniteNumber((node.style as { width?: unknown } | undefined)?.width) ?? node.data.element.width;
+        const height = toFiniteNumber(dimensions.height) ?? toFiniteNumber(node.height) ?? toFiniteNumber(node.measured?.height) ?? toFiniteNumber((node.style as { height?: unknown } | undefined)?.height) ?? node.data.element.height;
+        return {
+          ...node,
+          width,
+          height,
+          measured: { ...(node.measured || {}), width, height },
+          data: { ...node.data, element: { ...node.data.element, width, height } },
+          style: { ...(node.style || {}), width, height }
+        };
+      });
+    });
+
     const shouldCommit = changes.some(change => {
       if (change.type === 'remove') return true;
       if (change.type === 'position') return (change as { dragging?: boolean }).dragging === false;
@@ -540,6 +646,19 @@ const CanvasWorkspace: React.FC = () => {
     const pos = rfInstance ? rfInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY }) : { x: 80, y: 80 };
     createElementFromTool(tool, pos.x, pos.y);
   }, [createElementFromTool, rfInstance, tool]);
+
+  const nodeTypes = useMemo(() => ({
+    canvasElement: (props: NodeProps<CanvasNodeData>) => (
+      <CanvasElementNode
+        {...props}
+        onResizeLive={(nodeId, dimensions) => syncNodeDimensions(nodeId, dimensions)}
+        onResizeDone={(nodeId, dimensions) => {
+          syncNodeDimensions(nodeId, dimensions);
+          scheduleCommit();
+        }}
+      />
+    )
+  }), [scheduleCommit, syncNodeDimensions]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -606,7 +725,7 @@ const CanvasWorkspace: React.FC = () => {
       <ReactFlow
         nodes={nodes}
         edges={edges}
-        nodeTypes={{ canvasElement: CanvasElementNode }}
+        nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}

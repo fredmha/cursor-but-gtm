@@ -30,6 +30,7 @@ export type ViewMode = 'ONBOARDING' | 'ROADMAP' | 'EXECUTION' | 'REVIEW' | 'CANV
 export type CanvasTool = 'SELECT' | 'HAND' | 'EMAIL_CARD' | 'CONTAINER';
 export type CanvasElementKind = 'EMAIL_CARD' | 'CONTAINER';
 export type CanvasRelationType = 'PARENT' | 'TICKET_LINK' | 'EDGE';
+export type ExecutionRowType = 'TASK' | 'TEXT';
 
 // --- Core Entities ---
 
@@ -46,6 +47,8 @@ export interface Ticket {
   shortId: string;
   title: string;
   description?: string;
+  rowType?: ExecutionRowType;
+  executionText?: string;
   status: TicketStatus;
   channelId?: string;
   projectId?: string;
@@ -287,6 +290,7 @@ export interface Campaign {
   status: 'Onboarding' | 'Planning' | 'Active' | 'Closed';
   channels: Channel[];
   projects: Project[];
+  standaloneTickets?: Ticket[];
   principles: OperatingPrinciple[];
   roadmapItems: RoadmapItem[];
   timelineTags: TimelineTag[];

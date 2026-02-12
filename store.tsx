@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
-import { Campaign, Channel, Ticket, TicketStatus, Status, User, Priority, RoadmapItem, Project, ProjectUpdate, ChannelLink, ChannelNote, TimelineTag, ChannelPlan, ContextDoc, DocFolder, ViewMode, Role, ChatMessage, CanvasScene, CanvasElement, CanvasRelation } from './types';
+import { Campaign, Channel, Ticket, TicketStatus, Status, User, Priority, RoadmapItem, Project, ProjectUpdate, ChannelLink, ChannelNote, TimelineTag, ChannelPlan, ContextDoc, DocFolder, ViewMode, Role, ChatMessage, CanvasScene, CanvasElement, CanvasRelation, ExecutionRowType } from './types';
 
 // --- Constants ---
 
@@ -30,6 +30,25 @@ const USER_COLORS = [
   'bg-blue-500',
   'bg-cyan-500'
 ];
+
+const EXECUTION_ALLOWED_STATUSES: TicketStatus[] = [
+  TicketStatus.Todo,
+  TicketStatus.InProgress,
+  TicketStatus.Done
+];
+
+type AddExecutionRowInput = {
+  rowType: ExecutionRowType;
+  title?: string;
+  executionText?: string;
+  description?: string;
+  dueDate?: string;
+  assigneeId?: string;
+  status?: TicketStatus;
+  channelId?: string;
+  projectId?: string;
+  priority?: Priority;
+};
 
 // --- Shared Helpers ---
 
@@ -70,6 +89,17 @@ const getTimestamp = (dateString?: string) => {
   const timestamp = new Date(dateString).getTime();
   return Number.isNaN(timestamp) ? Number.POSITIVE_INFINITY : timestamp;
 };
+
+const getExecutionSafeStatus = (status?: TicketStatus): TicketStatus => {
+  if (!status) return TicketStatus.Todo;
+  return EXECUTION_ALLOWED_STATUSES.includes(status) ? status : TicketStatus.Todo;
+};
+
+const normalizeTicketForExecution = (ticket: Ticket): Ticket => ({
+  ...ticket,
+  rowType: ticket.rowType === 'TEXT' ? 'TEXT' : 'TASK',
+  canvasItemIds: Array.isArray(ticket.canvasItemIds) ? ticket.canvasItemIds : []
+});
 
 const updateById = <T extends { id: string }>(items: T[], id: string, updates: Partial<T>) =>
   items.map(item => item.id === id ? { ...item, ...updates } : item);
@@ -117,14 +147,29 @@ const normalizeOrdering = <T extends { id: string; order?: number }>(
 const normalizeCanvasElement = (element: any): CanvasElement => ({
   id: typeof element?.id === 'string' ? element.id : generateId(),
   kind: element?.kind === 'CONTAINER' ? 'CONTAINER' : 'EMAIL_CARD',
-  x: Number(element?.x) || 0,
-  y: Number(element?.y) || 0,
-  width: Math.max(40, Number(element?.width) || (element?.kind === 'CONTAINER' ? 520 : 320)),
-  height: Math.max(30, Number(element?.height) || (element?.kind === 'CONTAINER' ? 380 : 180)),
-  zIndex: Number(element?.zIndex) || 0,
+  x: parseCanvasNumber(element?.x) ?? 0,
+  y: parseCanvasNumber(element?.y) ?? 0,
+  width: Math.max(
+    40,
+    parseCanvasNumber(element?.width) ?? (element?.kind === 'CONTAINER' ? 520 : 320)
+  ),
+  height: Math.max(
+    30,
+    parseCanvasNumber(element?.height) ?? (element?.kind === 'CONTAINER' ? 380 : 180)
+  ),
+  zIndex: parseCanvasNumber(element?.zIndex) ?? 0,
   text: typeof element?.text === 'string' ? element.text : '',
   style: element?.style && typeof element.style === 'object' ? element.style : undefined
 });
+
+const parseCanvasNumber = (value: unknown): number | undefined => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number.parseFloat(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+};
 
 const normalizeCanvasViewport = (viewport: any): CanvasScene['viewport'] => ({
   x: Number(viewport?.x) || 0,
@@ -261,6 +306,10 @@ interface StoreState {
   addTicket: (channelId: string, ticket: Ticket) => void;
   updateTicket: (channelId: string, ticketId: string, updates: Partial<Ticket>) => void;
   deleteTicket: (channelId: string, ticketId: string) => void;
+  getExecutionRows: () => Ticket[];
+  addExecutionRow: (input: AddExecutionRowInput) => void;
+  updateExecutionRow: (ticketId: string, updates: Partial<Ticket>) => void;
+  deleteExecutionRow: (ticketId: string) => void;
 
   linkDocToTicket: (docId: string, ticketId: string, channelId?: string, projectId?: string) => void;
 
@@ -351,6 +400,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         plan: c.plan || undefined,
         tickets: (c.tickets || []).map((t: any) => ({
           ...t,
+          rowType: t.rowType === 'TEXT' ? 'TEXT' : 'TASK',
           canvasItemIds: Array.isArray(t.canvasItemIds) ? t.canvasItemIds : []
         }))
       }));
@@ -363,10 +413,17 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         ...p,
         tickets: (p.tickets || []).map((t: any) => ({
           ...t,
+          rowType: t.rowType === 'TEXT' ? 'TEXT' : 'TASK',
           canvasItemIds: Array.isArray(t.canvasItemIds) ? t.canvasItemIds : []
         }))
       }));
     }
+
+    data.standaloneTickets = (data.standaloneTickets || []).map((t: any) => ({
+      ...t,
+      rowType: t.rowType === 'TEXT' ? 'TEXT' : 'TASK',
+      canvasItemIds: Array.isArray(t.canvasItemIds) ? t.canvasItemIds : []
+    }));
 
     if (!data.timelineTags) data.timelineTags = [];
     if (!data.docs) data.docs = [];
@@ -695,7 +752,12 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (!campaign) return;
 
     let newRoadmapItems = [...(campaign.roadmapItems || [])];
-    const finalTicket = { ...ticket, projectId, canvasItemIds: ticket.canvasItemIds || [] };
+    const finalTicket = normalizeTicketForExecution({
+      ...ticket,
+      projectId,
+      rowType: ticket.rowType === 'TEXT' ? 'TEXT' : 'TASK',
+      canvasItemIds: ticket.canvasItemIds || []
+    });
 
     if (!finalTicket.roadmapItemId) {
       const newItemId = generateId();
@@ -837,7 +899,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const addTicket = (channelId: string, ticket: Ticket) => {
     if (!campaign) return;
     const shortId = `T-${Math.floor(Math.random() * 1000)}`;
-    const finalTicket = { ...ticket, shortId, channelId, canvasItemIds: ticket.canvasItemIds || [] };
+    const finalTicket = normalizeTicketForExecution({
+      ...ticket,
+      shortId,
+      channelId,
+      rowType: ticket.rowType === 'TEXT' ? 'TEXT' : 'TASK',
+      canvasItemIds: ticket.canvasItemIds || []
+    });
 
     let newRoadmapItems = [...(campaign.roadmapItems || [])];
 
@@ -981,6 +1049,130 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }));
   };
 
+  const getExecutionRows = (): Ticket[] => {
+    if (!campaign) return [];
+    const channelTickets = campaign.channels.flatMap(channel => channel.tickets);
+    const projectTickets = campaign.projects.flatMap(project => project.tickets);
+    const standaloneTickets = campaign.standaloneTickets || [];
+    return [...channelTickets, ...projectTickets, ...standaloneTickets]
+      .map(normalizeTicketForExecution)
+      .sort((a, b) => {
+        const timeDiff = getTimestamp(a.createdAt) - getTimestamp(b.createdAt);
+        if (timeDiff !== 0) return timeDiff;
+        return a.id.localeCompare(b.id);
+      });
+  };
+
+  const addExecutionRow = (input: AddExecutionRowInput) => {
+    if (!campaign) return;
+    const now = new Date().toISOString();
+    const rowType: ExecutionRowType = input.rowType === 'TEXT' ? 'TEXT' : 'TASK';
+    const title = rowType === 'TEXT'
+      ? (input.title?.trim() || 'Note')
+      : (input.title?.trim() || 'Untitled Task');
+    const ticket: Ticket = {
+      id: generateId(),
+      shortId: `T-${Math.floor(1000 + Math.random() * 9000)}`,
+      title,
+      description: rowType === 'TASK' ? input.description : undefined,
+      rowType,
+      executionText: rowType === 'TEXT' ? (input.executionText || '') : undefined,
+      status: rowType === 'TEXT' ? TicketStatus.Todo : getExecutionSafeStatus(input.status),
+      channelId: input.channelId,
+      projectId: input.projectId,
+      assigneeId: rowType === 'TASK' ? input.assigneeId : undefined,
+      priority: input.priority || 'Medium',
+      dueDate: rowType === 'TASK' ? input.dueDate : undefined,
+      createdAt: now,
+      canvasItemIds: []
+    };
+
+    if (ticket.channelId) {
+      addTicket(ticket.channelId, ticket);
+      return;
+    }
+    if (ticket.projectId) {
+      addProjectTicket(ticket.projectId, ticket);
+      return;
+    }
+
+    updateCampaignState(prev => ({
+      ...prev,
+      standaloneTickets: [...(prev.standaloneTickets || []), ticket]
+    }));
+  };
+
+  const updateExecutionRow = (ticketId: string, updates: Partial<Ticket>) => {
+    if (!campaign) return;
+
+    const channel = campaign.channels.find(c => c.tickets.some(t => t.id === ticketId));
+    if (channel) {
+      const nextUpdates: Partial<Ticket> = { ...updates };
+      if (nextUpdates.status) nextUpdates.status = getExecutionSafeStatus(nextUpdates.status);
+      if (nextUpdates.rowType === 'TEXT') nextUpdates.status = TicketStatus.Todo;
+      updateTicket(channel.id, ticketId, nextUpdates);
+    } else {
+      const project = campaign.projects.find(p => p.tickets.some(t => t.id === ticketId));
+      if (project) {
+        const nextUpdates: Partial<Ticket> = { ...updates };
+        if (nextUpdates.status) nextUpdates.status = getExecutionSafeStatus(nextUpdates.status);
+        if (nextUpdates.rowType === 'TEXT') nextUpdates.status = TicketStatus.Todo;
+        updateProjectTicket(project.id, ticketId, nextUpdates);
+      } else {
+        updateCampaignState(prev => ({
+          ...prev,
+          standaloneTickets: (prev.standaloneTickets || []).map(ticket => {
+            if (ticket.id !== ticketId) return ticket;
+            const nextTicket: Ticket = { ...ticket, ...updates };
+            if (nextTicket.status) nextTicket.status = getExecutionSafeStatus(nextTicket.status);
+            if (nextTicket.rowType === 'TEXT') nextTicket.status = TicketStatus.Todo;
+            return normalizeTicketForExecution(nextTicket);
+          })
+        }));
+      }
+    }
+
+    if (updates.canvasItemIds && campaign.canvasScene) {
+      const allowedElementIds = new Set(campaign.canvasScene.elements.map(element => element.id));
+      const nextElementIds = updates.canvasItemIds.filter(id => allowedElementIds.has(id));
+      const nonTicketRelations = campaign.canvasScene.relations.filter(
+        relation => !(relation.type === 'TICKET_LINK' && relation.toId === ticketId)
+      );
+      const nextLinks = nextElementIds.map(elementId => ({
+        id: generateId(),
+        type: 'TICKET_LINK' as const,
+        fromId: elementId,
+        toId: ticketId
+      }));
+      updateCanvasScene({
+        ...campaign.canvasScene,
+        relations: [...nonTicketRelations, ...nextLinks]
+      });
+    }
+  };
+
+  const deleteExecutionRow = (ticketId: string) => {
+    if (!campaign) return;
+
+    const channel = campaign.channels.find(c => c.tickets.some(t => t.id === ticketId));
+    if (channel) {
+      deleteTicket(channel.id, ticketId);
+      return;
+    }
+
+    const project = campaign.projects.find(p => p.tickets.some(t => t.id === ticketId));
+    if (project) {
+      deleteProjectTicket(project.id, ticketId);
+      return;
+    }
+
+    updateCampaignState(prev => ({
+      ...prev,
+      canvasScene: prev.canvasScene ? removeTicketLinksFromScene(prev.canvasScene, ticketId) : prev.canvasScene,
+      standaloneTickets: (prev.standaloneTickets || []).filter(ticket => ticket.id !== ticketId)
+    }));
+  };
+
   // --- Ticket Linking ---
 
   const linkDocToTicket = (docId: string, ticketId: string, channelId?: string, projectId?: string) => {
@@ -1019,6 +1211,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         shortId: `T-${Math.floor(Math.random() * 10000)}`,
         title: newItem.title,
         description: newItem.description,
+        rowType: 'TASK',
         status: TicketStatus.Todo,
         channelId: newItem.channelId,
         projectId: newItem.projectId,
@@ -1052,6 +1245,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         shortId: `T-${Math.floor(Math.random() * 10000)}`,
         title: newItem.title,
         description: newItem.description,
+        rowType: 'TASK',
         status: TicketStatus.Todo,
         projectId: newItem.projectId,
         roadmapItemId: newItem.id,
@@ -1479,6 +1673,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const validTicketIds = new Set<string>();
       prev.channels.forEach(channel => channel.tickets.forEach(ticket => validTicketIds.add(ticket.id)));
       prev.projects.forEach(project => project.tickets.forEach(ticket => validTicketIds.add(ticket.id)));
+      (prev.standaloneTickets || []).forEach(ticket => validTicketIds.add(ticket.id));
 
       const relations = normalizedScene.relations.filter(relation => {
         if (relation.type === 'TICKET_LINK') {
@@ -1511,6 +1706,11 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }))
       }));
 
+      const nextStandaloneTickets = (prev.standaloneTickets || []).map(ticket => ({
+        ...ticket,
+        canvasItemIds: ticketToElements.get(ticket.id) || []
+      }));
+
       return {
         ...prev,
         canvasScene: {
@@ -1518,7 +1718,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           relations
         },
         channels: nextChannels,
-        projects: nextProjects
+        projects: nextProjects,
+        standaloneTickets: nextStandaloneTickets
       };
     });
   };
@@ -1570,6 +1771,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         shortId: `T-${Math.floor(Math.random() * 1000)}`,
         title: t.title,
         description: t.description,
+        rowType: 'TASK',
         status: TicketStatus.Todo,
         channelId: '', // Set in loop below
         priority: 'Medium',
@@ -1953,6 +2155,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       addTicket,
       updateTicket,
       deleteTicket,
+      getExecutionRows,
+      addExecutionRow,
+      updateExecutionRow,
+      deleteExecutionRow,
       linkDocToTicket,
       addRoadmapItem,
       updateRoadmapItem,
