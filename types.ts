@@ -26,7 +26,10 @@ export type RoadmapItemType = 'CONTENT' | 'LAUNCH' | 'THEME' | 'NOTE';
 export type DocType = 'STRATEGY' | 'PERSONA' | 'BRAND' | 'PROCESS';
 export type DocFormat = 'TEXT' | 'CANVAS';
 export type CanvasNodeType = 'RECT' | 'CIRCLE' | 'STICKY' | 'TEXT' | 'IMAGE';
-export type ViewMode = 'ONBOARDING' | 'ROADMAP' | 'EXECUTION' | 'REVIEW' | 'DOCS' | 'SETTINGS';
+export type ViewMode = 'ONBOARDING' | 'ROADMAP' | 'EXECUTION' | 'REVIEW' | 'CANVAS' | 'DOCS' | 'SETTINGS';
+export type CanvasTool = 'SELECT' | 'HAND' | 'EMAIL_CARD' | 'CONTAINER';
+export type CanvasElementKind = 'EMAIL_CARD' | 'CONTAINER';
+export type CanvasRelationType = 'PARENT' | 'TICKET_LINK' | 'EDGE';
 
 // --- Core Entities ---
 
@@ -53,6 +56,7 @@ export interface Ticket {
   startDate?: string;
   createdAt: string;
   linkedDocIds?: string[];
+  canvasItemIds?: string[];
 }
 
 export interface ProjectUpdate {
@@ -187,6 +191,48 @@ export interface CanvasEdge {
   color?: string;
 }
 
+export interface CanvasElementStyle {
+  fill?: string;
+  stroke?: string;
+  fontSize?: number;
+  fontFamily?: string;
+}
+
+export interface CanvasElement {
+  id: string;
+  kind: CanvasElementKind;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  zIndex: number;
+  text?: string;
+  style?: CanvasElementStyle;
+}
+
+export interface CanvasRelation {
+  id: string;
+  type: CanvasRelationType;
+  fromId: string;
+  toId: string;
+  meta?: Record<string, unknown>;
+}
+
+export interface CanvasViewport {
+  x: number;
+  y: number;
+  zoom: number;
+}
+
+export interface CanvasDocumentV2 {
+  version: 2;
+  elements: CanvasElement[];
+  relations: CanvasRelation[];
+  viewport: CanvasViewport;
+}
+
+export type CanvasScene = CanvasDocumentV2;
+
 export interface ContextDoc {
   id: string;
   shortId?: string;
@@ -260,4 +306,5 @@ export interface Campaign {
   lastWeeklyReview?: string;
   dailyChatHistory?: ChatMessage[];
   weeklyChatHistory?: ChatMessage[];
+  canvasScene?: CanvasScene;
 }

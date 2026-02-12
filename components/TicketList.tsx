@@ -269,6 +269,11 @@ export const TicketList: React.FC<TicketListProps> = ({
                         {dueDate ? dueDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '--'}
                     </span>
                 </td>
+                <td className="px-4 py-3 text-xs">
+                    <span className={`${(ticket.canvasItemIds?.length || 0) > 0 ? 'text-indigo-600 font-semibold' : 'text-zinc-400'}`}>
+                        {(ticket.canvasItemIds?.length || 0) > 0 ? `${ticket.canvasItemIds?.length} linked` : '--'}
+                    </span>
+                </td>
                 <td className="px-4 py-3 rounded-r-lg text-right">
                     {assignee && (
                         <div className={`w-6 h-6 rounded-full ${assignee.color} text-[8px] text-white flex items-center justify-center font-bold inline-block ring-2 ring-white shadow-sm`}>
@@ -290,6 +295,7 @@ export const TicketList: React.FC<TicketListProps> = ({
                         <th className="px-4 py-3 w-32">Status</th>
                         <th className="px-4 py-3 w-24">Priority</th>
                         <th className="px-4 py-3 w-20">Due</th>
+                        <th className="px-4 py-3 w-24">Canvas</th>
                         <th className="px-4 py-3 w-16 text-right">Assignee</th>
                     </tr>
                 </thead>
@@ -299,7 +305,7 @@ export const TicketList: React.FC<TicketListProps> = ({
                             const isOverdueGroup = row.label === 'Overdue';
                             return (
                                 <tr key={row.id} className="bg-white">
-                                    <td colSpan={6} className="px-4 pt-6 pb-2">
+                                    <td colSpan={7} className="px-4 pt-6 pb-2">
                                         <div className={`flex items-center justify-between px-4 py-3 border border-zinc-100 rounded-lg ${isOverdueGroup ? 'bg-red-50/60' : 'bg-zinc-50/80'}`}>
                                             <div className="flex items-center gap-3">
                                                 <div className={`w-1.5 h-6 ${isOverdueGroup ? 'bg-red-400' : 'bg-zinc-300'}`} />
@@ -315,7 +321,7 @@ export const TicketList: React.FC<TicketListProps> = ({
                             const isOverdueGroup = row.label === 'Overdue';
                             return (
                                 <tr key={row.id} className="bg-white">
-                                    <td colSpan={6} className="px-4 pt-3 pb-2">
+                                    <td colSpan={7} className="px-4 pt-3 pb-2">
                                         <div className="flex items-center justify-between ml-4 pl-6 pr-3 py-2 border-l-2 border-zinc-100">
                                             <div className="flex items-center gap-3">
                                                 <div className={`w-4 h-4 rounded-full border ${isOverdueGroup ? 'border-red-200 bg-red-100' : 'border-zinc-200 bg-white'}`} />

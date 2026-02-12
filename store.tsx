@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
-import { Campaign, Channel, Ticket, TicketStatus, Status, User, Priority, RoadmapItem, Project, ProjectUpdate, ChannelLink, ChannelNote, TimelineTag, ChannelPlan, ContextDoc, DocFolder, ViewMode, Role, ChatMessage } from './types';
+import { Campaign, Channel, Ticket, TicketStatus, Status, User, Priority, RoadmapItem, Project, ProjectUpdate, ChannelLink, ChannelNote, TimelineTag, ChannelPlan, ContextDoc, DocFolder, ViewMode, Role, ChatMessage, CanvasScene, CanvasElement, CanvasRelation } from './types';
 
 // --- Constants ---
 
@@ -13,6 +13,13 @@ const ORDER_STEP = 1000;
 const ROOT_KEY = '__root__';
 const RECENT_DOC_LIMIT = 25;
 const DEFAULT_FOLDER_ICON = '\u{1F4C1}';
+
+const createDefaultCanvasScene = (): CanvasScene => ({
+  version: 2,
+  elements: [],
+  relations: [],
+  viewport: { x: 0, y: 0, zoom: 1 }
+});
 
 const USER_COLORS = [
   'bg-indigo-500',
@@ -107,6 +114,112 @@ const normalizeOrdering = <T extends { id: string; order?: number }>(
   return cloned;
 };
 
+const normalizeCanvasElement = (element: any): CanvasElement => ({
+  id: typeof element?.id === 'string' ? element.id : generateId(),
+  kind: element?.kind === 'CONTAINER' ? 'CONTAINER' : 'EMAIL_CARD',
+  x: Number(element?.x) || 0,
+  y: Number(element?.y) || 0,
+  width: Math.max(40, Number(element?.width) || (element?.kind === 'CONTAINER' ? 520 : 320)),
+  height: Math.max(30, Number(element?.height) || (element?.kind === 'CONTAINER' ? 380 : 180)),
+  zIndex: Number(element?.zIndex) || 0,
+  text: typeof element?.text === 'string' ? element.text : '',
+  style: element?.style && typeof element.style === 'object' ? element.style : undefined
+});
+
+const normalizeCanvasViewport = (viewport: any): CanvasScene['viewport'] => ({
+  x: Number(viewport?.x) || 0,
+  y: Number(viewport?.y) || 0,
+  zoom: Number(viewport?.zoom) || 1
+});
+
+const normalizeCanvasRelation = (relation: any): CanvasRelation | null => {
+  if (!relation || typeof relation !== 'object') return null;
+  if (relation.type !== 'PARENT' && relation.type !== 'TICKET_LINK' && relation.type !== 'EDGE') return null;
+  const fromId = typeof relation.fromId === 'string' ? relation.fromId : '';
+  const toId = typeof relation.toId === 'string' ? relation.toId : '';
+  if (!fromId || !toId) return null;
+  return {
+    id: typeof relation.id === 'string' ? relation.id : generateId(),
+    type: relation.type,
+    fromId,
+    toId,
+    meta: relation.meta && typeof relation.meta === 'object' ? relation.meta : undefined
+  };
+};
+
+const migrateCanvasScene = (rawScene: any): CanvasScene => {
+  if (!rawScene || typeof rawScene !== 'object') return createDefaultCanvasScene();
+
+  const viewport = normalizeCanvasViewport(rawScene.viewport);
+
+  if (rawScene.version === 2 && Array.isArray(rawScene.elements) && Array.isArray(rawScene.relations)) {
+    const elements = rawScene.elements.map(normalizeCanvasElement);
+    const validElementIds = new Set(elements.map(element => element.id));
+    const relations = rawScene.relations
+      .map(normalizeCanvasRelation)
+      .filter((relation): relation is CanvasRelation => relation !== null)
+      .filter(relation =>
+        relation.type === 'TICKET_LINK'
+          ? validElementIds.has(relation.fromId)
+          : validElementIds.has(relation.fromId) && validElementIds.has(relation.toId)
+      );
+    return { version: 2, elements, relations, viewport };
+  }
+
+  // Legacy v1 migration: items + parentId/ticketIds -> elements + relations
+  const legacyItems = Array.isArray(rawScene.items) ? rawScene.items : [];
+  const normalized = legacyItems.map((item: any) => {
+    const element = normalizeCanvasElement(item);
+    return {
+      element,
+      legacyParentId: typeof item?.parentId === 'string' ? item.parentId : undefined,
+      legacyTicketIds: Array.isArray(item?.ticketIds) ? item.ticketIds.filter((id: unknown) => typeof id === 'string') as string[] : []
+    };
+  });
+
+  const idMap = new Map<string, string>();
+  normalized.forEach(({ element }, index) => {
+    const legacyId = typeof legacyItems[index]?.id === 'string' ? legacyItems[index].id : element.id;
+    idMap.set(legacyId, element.id);
+  });
+
+  const relations: CanvasRelation[] = [];
+  normalized.forEach(({ element, legacyParentId, legacyTicketIds }) => {
+    if (legacyParentId) {
+      const mappedParentId = idMap.get(legacyParentId);
+      if (mappedParentId && mappedParentId !== element.id) {
+        relations.push({
+          id: generateId(),
+          type: 'PARENT',
+          fromId: element.id,
+          toId: mappedParentId
+        });
+      }
+    }
+
+    legacyTicketIds.forEach(ticketId => {
+      relations.push({
+        id: generateId(),
+        type: 'TICKET_LINK',
+        fromId: element.id,
+        toId: ticketId
+      });
+    });
+  });
+
+  return {
+    version: 2,
+    elements: normalized.map(entry => entry.element),
+    relations,
+    viewport
+  };
+};
+
+const removeTicketLinksFromScene = (scene: CanvasScene, ticketId: string): CanvasScene => ({
+  ...scene,
+  relations: scene.relations.filter(relation => !(relation.type === 'TICKET_LINK' && relation.toId === ticketId))
+});
+
 interface StoreState {
   currentView: ViewMode;
   setCurrentView: (view: ViewMode) => void;
@@ -174,6 +287,11 @@ interface StoreState {
   deleteDoc: (docId: string) => void;
   moveDoc: (docId: string, folderId: string | undefined, order?: number) => void;
 
+  updateCanvasScene: (scene: CanvasScene) => void;
+  getCanvasChildren: (containerId: string) => CanvasElement[];
+  getCanvasTicketLinks: (elementId: string) => string[];
+  getCanvasElementsLinkedToTicket: (ticketId: string) => string[];
+
   addCampaignTag: (tag: string) => void;
 
   importAIPlan: (channelsData: any[]) => void;
@@ -231,7 +349,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         notes: c.notes || [],
         memberIds: c.memberIds || [],
         plan: c.plan || undefined,
-        tickets: c.tickets || []
+        tickets: (c.tickets || []).map((t: any) => ({
+          ...t,
+          canvasItemIds: Array.isArray(t.canvasItemIds) ? t.canvasItemIds : []
+        }))
       }));
     }
 
@@ -240,7 +361,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } else {
       data.projects = data.projects.map((p: any) => ({
         ...p,
-        tickets: p.tickets || []
+        tickets: (p.tickets || []).map((t: any) => ({
+          ...t,
+          canvasItemIds: Array.isArray(t.canvasItemIds) ? t.canvasItemIds : []
+        }))
       }));
     }
 
@@ -332,6 +456,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (!data.availableTags) {
       data.availableTags = [];
     }
+    data.canvasScene = migrateCanvasScene(data.canvasScene);
 
     return data;
   });
@@ -570,7 +695,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (!campaign) return;
 
     let newRoadmapItems = [...(campaign.roadmapItems || [])];
-    const finalTicket = { ...ticket, projectId };
+    const finalTicket = { ...ticket, projectId, canvasItemIds: ticket.canvasItemIds || [] };
 
     if (!finalTicket.roadmapItemId) {
       const newItemId = generateId();
@@ -589,8 +714,24 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         status: ticket.status === TicketStatus.Done ? Status.Completed : Status.Active,
         ownerIds: ticket.assigneeId ? [ticket.assigneeId] : [],
         priority: ticket.priority,
-        label: 'Task'
+        label: 'Task',
+        startDate: ticket.startDate,
+        endDate: ticket.dueDate
       };
+      if (ticket.startDate && campaign.startDate) {
+        const start = new Date(ticket.startDate);
+        const campStart = new Date(campaign.startDate);
+        if (!Number.isNaN(start.getTime()) && !Number.isNaN(campStart.getTime())) {
+          newItem.weekIndex = Math.floor((start.getTime() - campStart.getTime()) / (1000 * 60 * 60 * 24 * 7));
+        }
+      }
+      if (ticket.startDate && ticket.dueDate) {
+        const start = new Date(ticket.startDate);
+        const end = new Date(ticket.dueDate);
+        if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())) {
+          newItem.durationWeeks = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24 * 7)));
+        }
+      }
       newRoadmapItems.push(newItem);
     }
 
@@ -637,21 +778,27 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
 
         // Sync Dates
-        if (updates.startDate) {
+        if (Object.prototype.hasOwnProperty.call(updates, 'startDate')) {
           updatedRItem.startDate = updates.startDate;
-          if (prev.startDate) {
+          if (updates.startDate && prev.startDate) {
             const start = new Date(updates.startDate);
             const campStart = new Date(prev.startDate);
-            updatedRItem.weekIndex = Math.floor((start.getTime() - campStart.getTime()) / (1000 * 60 * 60 * 24 * 7));
+            if (!Number.isNaN(start.getTime()) && !Number.isNaN(campStart.getTime())) {
+              updatedRItem.weekIndex = Math.floor((start.getTime() - campStart.getTime()) / (1000 * 60 * 60 * 24 * 7));
+            }
+          } else if (!updates.startDate) {
+            updatedRItem.weekIndex = -1;
           }
           changed = true;
         }
-        if (updates.dueDate) {
+        if (Object.prototype.hasOwnProperty.call(updates, 'dueDate')) {
           updatedRItem.endDate = updates.dueDate;
-          if (updatedRItem.startDate) {
+          if (updatedRItem.startDate && updates.dueDate) {
             const start = new Date(updatedRItem.startDate);
             const end = new Date(updates.dueDate);
-            updatedRItem.durationWeeks = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24 * 7)));
+            if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())) {
+              updatedRItem.durationWeeks = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24 * 7)));
+            }
           }
           changed = true;
         }
@@ -674,6 +821,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (!campaign) return;
     updateCampaignState(prev => ({
       ...prev,
+      canvasScene: prev.canvasScene
+        ? removeTicketLinksFromScene(prev.canvasScene, ticketId)
+        : prev.canvasScene,
       roadmapItems: prev.roadmapItems.filter(i => i.ticketId !== ticketId),
       projects: prev.projects.map(p => p.id === projectId ? {
         ...p,
@@ -687,7 +837,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const addTicket = (channelId: string, ticket: Ticket) => {
     if (!campaign) return;
     const shortId = `T-${Math.floor(Math.random() * 1000)}`;
-    const finalTicket = { ...ticket, shortId, channelId };
+    const finalTicket = { ...ticket, shortId, channelId, canvasItemIds: ticket.canvasItemIds || [] };
 
     let newRoadmapItems = [...(campaign.roadmapItems || [])];
 
@@ -708,8 +858,24 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         status: ticket.status === TicketStatus.Done ? Status.Completed : Status.Active,
         ownerIds: ticket.assigneeId ? [ticket.assigneeId] : [],
         priority: ticket.priority,
-        label: 'Task'
+        label: 'Task',
+        startDate: ticket.startDate,
+        endDate: ticket.dueDate
       };
+      if (ticket.startDate && campaign.startDate) {
+        const start = new Date(ticket.startDate);
+        const campStart = new Date(campaign.startDate);
+        if (!Number.isNaN(start.getTime()) && !Number.isNaN(campStart.getTime())) {
+          newItem.weekIndex = Math.floor((start.getTime() - campStart.getTime()) / (1000 * 60 * 60 * 24 * 7));
+        }
+      }
+      if (ticket.startDate && ticket.dueDate) {
+        const start = new Date(ticket.startDate);
+        const end = new Date(ticket.dueDate);
+        if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())) {
+          newItem.durationWeeks = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24 * 7)));
+        }
+      }
       newRoadmapItems.push(newItem);
     }
 
@@ -755,21 +921,27 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
 
         // Sync Dates
-        if (updates.startDate) {
+        if (Object.prototype.hasOwnProperty.call(updates, 'startDate')) {
           updatedRItem.startDate = updates.startDate;
-          if (prev.startDate) {
+          if (updates.startDate && prev.startDate) {
             const start = new Date(updates.startDate);
             const campStart = new Date(prev.startDate);
-            updatedRItem.weekIndex = Math.floor((start.getTime() - campStart.getTime()) / (1000 * 60 * 60 * 24 * 7));
+            if (!Number.isNaN(start.getTime()) && !Number.isNaN(campStart.getTime())) {
+              updatedRItem.weekIndex = Math.floor((start.getTime() - campStart.getTime()) / (1000 * 60 * 60 * 24 * 7));
+            }
+          } else if (!updates.startDate) {
+            updatedRItem.weekIndex = -1;
           }
           changed = true;
         }
-        if (updates.dueDate) {
+        if (Object.prototype.hasOwnProperty.call(updates, 'dueDate')) {
           updatedRItem.endDate = updates.dueDate;
-          if (updatedRItem.startDate) {
+          if (updatedRItem.startDate && updates.dueDate) {
             const start = new Date(updatedRItem.startDate);
             const end = new Date(updates.dueDate);
-            updatedRItem.durationWeeks = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24 * 7)));
+            if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())) {
+              updatedRItem.durationWeeks = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24 * 7)));
+            }
           }
           changed = true;
         }
@@ -796,6 +968,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     updateCampaignState(prev => ({
       ...prev,
+      canvasScene: prev.canvasScene
+        ? removeTicketLinksFromScene(prev.canvasScene, ticketId)
+        : prev.canvasScene,
       roadmapItems: newRoadmapItems,
       channels: prev.channels.map(c =>
         c.id === channelId ? {
@@ -850,7 +1025,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         roadmapItemId: newItem.id,
         assigneeId: newItem.ownerIds?.[0],
         priority: newItem.priority || 'Medium',
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        canvasItemIds: []
       };
 
       newItem.ticketId = ticketId;
@@ -881,7 +1057,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         roadmapItemId: newItem.id,
         assigneeId: newItem.ownerIds?.[0],
         priority: newItem.priority || 'Medium',
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        canvasItemIds: []
       };
       newItem.ticketId = ticketId;
 
@@ -1292,6 +1469,84 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     });
   };
 
+  // --- Canvas Actions ---
+
+  const updateCanvasScene = (scene: CanvasScene) => {
+    if (!campaign) return;
+    updateCampaignState(prev => {
+      const normalizedScene = migrateCanvasScene(scene);
+      const validElementIds = new Set(normalizedScene.elements.map(element => element.id));
+      const validTicketIds = new Set<string>();
+      prev.channels.forEach(channel => channel.tickets.forEach(ticket => validTicketIds.add(ticket.id)));
+      prev.projects.forEach(project => project.tickets.forEach(ticket => validTicketIds.add(ticket.id)));
+
+      const relations = normalizedScene.relations.filter(relation => {
+        if (relation.type === 'TICKET_LINK') {
+          return validElementIds.has(relation.fromId) && validTicketIds.has(relation.toId);
+        }
+        return validElementIds.has(relation.fromId) && validElementIds.has(relation.toId);
+      });
+
+      const ticketToElements = new Map<string, string[]>();
+      relations.forEach(relation => {
+        if (relation.type !== 'TICKET_LINK') return;
+        const existing = ticketToElements.get(relation.toId) || [];
+        if (!existing.includes(relation.fromId)) existing.push(relation.fromId);
+        ticketToElements.set(relation.toId, existing);
+      });
+
+      const nextChannels = prev.channels.map(channel => ({
+        ...channel,
+        tickets: channel.tickets.map(ticket => ({
+          ...ticket,
+          canvasItemIds: ticketToElements.get(ticket.id) || []
+        }))
+      }));
+
+      const nextProjects = prev.projects.map(project => ({
+        ...project,
+        tickets: project.tickets.map(ticket => ({
+          ...ticket,
+          canvasItemIds: ticketToElements.get(ticket.id) || []
+        }))
+      }));
+
+      return {
+        ...prev,
+        canvasScene: {
+          ...normalizedScene,
+          relations
+        },
+        channels: nextChannels,
+        projects: nextProjects
+      };
+    });
+  };
+
+  const getCanvasChildren = (containerId: string): CanvasElement[] => {
+    if (!campaign?.canvasScene) return [];
+    const childIds = new Set(
+      campaign.canvasScene.relations
+        .filter(relation => relation.type === 'PARENT' && relation.toId === containerId)
+        .map(relation => relation.fromId)
+    );
+    return campaign.canvasScene.elements.filter(element => childIds.has(element.id));
+  };
+
+  const getCanvasTicketLinks = (elementId: string): string[] => {
+    if (!campaign?.canvasScene) return [];
+    return campaign.canvasScene.relations
+      .filter(relation => relation.type === 'TICKET_LINK' && relation.fromId === elementId)
+      .map(relation => relation.toId);
+  };
+
+  const getCanvasElementsLinkedToTicket = (ticketId: string): string[] => {
+    if (!campaign?.canvasScene) return [];
+    return campaign.canvasScene.relations
+      .filter(relation => relation.type === 'TICKET_LINK' && relation.toId === ticketId)
+      .map(relation => relation.fromId);
+  };
+
   // --- Campaign Tags ---
 
   const addCampaignTag = (tag: string) => {
@@ -1318,7 +1573,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         status: TicketStatus.Todo,
         channelId: '', // Set in loop below
         priority: 'Medium',
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        canvasItemIds: []
       })),
       principles: [],
       tags: [],
@@ -1717,6 +1973,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       updateDoc,
       deleteDoc,
       moveDoc,
+      updateCanvasScene,
+      getCanvasChildren,
+      getCanvasTicketLinks,
+      getCanvasElementsLinkedToTicket,
       addCampaignTag,
       importAIPlan,
       switchUser,

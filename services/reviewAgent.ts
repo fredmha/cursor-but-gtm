@@ -30,7 +30,12 @@ const CREATE_TASK_TOOL = {
     type: Type.OBJECT,
     properties: {
       title: { type: Type.STRING },
-      notes: { type: Type.STRING }
+      notes: { type: Type.STRING },
+      startDate: { type: Type.STRING },
+      dueDate: { type: Type.STRING },
+      channelId: { type: Type.STRING },
+      projectId: { type: Type.STRING },
+      priority: { type: Type.STRING, enum: ["Low", "Medium", "High"] }
     },
     required: ["title"]
   }
@@ -45,7 +50,10 @@ const UPDATE_TASK_TOOL = {
       ticketId: { type: Type.STRING },
       title: { type: Type.STRING },
       status: { type: Type.STRING, enum: ["Todo", "In Progress", "Blocked", "Done"] },
-      notes: { type: Type.STRING }
+      notes: { type: Type.STRING },
+      startDate: { type: Type.STRING },
+      dueDate: { type: Type.STRING },
+      priority: { type: Type.STRING, enum: ["Low", "Medium", "High"] }
     },
     required: ["ticketId"]
   }
@@ -120,8 +128,8 @@ export const CORE_SYSTEM_INSTRUCTION = `
   You are a personal task agent. You manage the user's tasks only.
 
   Capabilities:
-  - Create a task (title + optional notes).
-  - Update task title, status, or notes.
+  - Create a task (title, notes, optional start date, optional due date, optional context).
+  - Update task title, status, notes, schedule, or priority.
   - Delete a task.
   - Show tasks when asked.
   - Summarize progress by status.
@@ -129,6 +137,9 @@ export const CORE_SYSTEM_INSTRUCTION = `
   Rules:
   - Never claim a task was updated unless you called a tool.
   - If the user asks to see tasks, call 'show_tasks' with matching IDs.
+  - If details are missing or ambiguous, ask a follow-up question before calling create/update tools.
+  - Use semantic best-guess context when channel/project is not explicit, but keep the user in control.
+  - If the user mentions schedule details, pass them via startDate and dueDate in tool args.
   - Keep replies short and action-oriented.
 
   ${FORMAT_RULES}

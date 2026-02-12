@@ -28,6 +28,10 @@ export const TicketBoard: React.FC<TicketBoardProps> = ({
   groupByChannel = false,
   groupByUser = false
 }) => {
+  const uniqueTickets = useMemo(
+    () => Array.from(new Map(tickets.map(ticket => [ticket.id, ticket])).values()),
+    [tickets]
+  );
 
   const hasDateRange = (ticket: Ticket) => {
     if (!ticket.startDate || !ticket.dueDate) return false;
@@ -36,8 +40,8 @@ export const TicketBoard: React.FC<TicketBoardProps> = ({
     return !Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime());
   };
 
-  const datedTickets = tickets.filter(hasDateRange);
-  const undatedTickets = tickets.filter(t => !hasDateRange(t));
+  const datedTickets = uniqueTickets.filter(hasDateRange);
+  const undatedTickets = uniqueTickets.filter(t => !hasDateRange(t));
 
   const handleDragStart = (e: React.DragEvent, ticketId: string) => {
     e.dataTransfer.setData('ticketId', ticketId);
@@ -58,6 +62,7 @@ export const TicketBoard: React.FC<TicketBoardProps> = ({
 
   const renderCard = (ticket: Ticket) => {
     const assignee = users.find(u => u.id === ticket.assigneeId);
+    const canvasCount = ticket.canvasItemIds?.length || 0;
     return (
       <div
         key={ticket.id}
@@ -88,11 +93,19 @@ export const TicketBoard: React.FC<TicketBoardProps> = ({
             )}
             <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-400">{assignee?.name.split(' ')[0]}</span>
           </div>
-          {ticket.dueDate && (
-            <span className={`text-[9px] font-bold tabular-nums tracking-widest ${new Date(ticket.dueDate) < new Date() ? 'text-red-500/80' : 'text-zinc-400'}`}>
-              {new Date(ticket.dueDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }).toUpperCase()}
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            {canvasCount > 0 && (
+              <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-widest text-indigo-500">
+                <Icons.Layout className="w-3 h-3" />
+                {canvasCount}
+              </span>
+            )}
+            {ticket.dueDate && (
+              <span className={`text-[9px] font-bold tabular-nums tracking-widest ${new Date(ticket.dueDate) < new Date() ? 'text-red-500/80' : 'text-zinc-400'}`}>
+                {new Date(ticket.dueDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }).toUpperCase()}
+              </span>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -100,6 +113,7 @@ export const TicketBoard: React.FC<TicketBoardProps> = ({
 
   const renderUndatedCard = (ticket: Ticket) => {
     const assignee = users.find(u => u.id === ticket.assigneeId);
+    const canvasCount = ticket.canvasItemIds?.length || 0;
     return (
       <div
         key={ticket.id}
@@ -122,7 +136,15 @@ export const TicketBoard: React.FC<TicketBoardProps> = ({
             )}
             <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-400">{assignee?.name.split(' ')[0]}</span>
           </div>
-          <span className="text-[9px] font-bold tabular-nums tracking-widest text-zinc-300">ADD DATES</span>
+          <div className="flex items-center gap-2">
+            {canvasCount > 0 && (
+              <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-widest text-indigo-500">
+                <Icons.Layout className="w-3 h-3" />
+                {canvasCount}
+              </span>
+            )}
+            <span className="text-[9px] font-bold tabular-nums tracking-widest text-zinc-300">ADD DATES</span>
+          </div>
         </div>
       </div>
     );

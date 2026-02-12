@@ -2,14 +2,33 @@ import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { GoogleGenAI, Content } from "@google/genai";
 import { useStore, generateId } from '../store';
 import { CORE_SYSTEM_INSTRUCTION, CORE_TOOLS, buildCoreContext } from '../services/reviewAgent';
-import { ChatMessage, Ticket, TicketStatus } from '../types';
+import { ChatMessage, Priority, Ticket, TicketStatus } from '../types';
 import { ChatKanbanCallout } from './ChatKanbanCallout';
-import { TicketModal } from './TicketModal';
 
 type TicketTarget = {
     ticket: Ticket;
     parentId: string;
     type: 'CHANNEL' | 'PROJECT';
+};
+
+type TaskModalDraft = {
+    id?: string;
+    title?: string;
+    description?: string;
+    priority?: Priority;
+    assigneeId?: string;
+    channelId?: string;
+    projectId?: string;
+    startDate?: string;
+    endDate?: string;
+    linkedDocIds?: string[];
+};
+
+type TaskModalState = {
+    mode: 'create' | 'update';
+    draft: TaskModalDraft;
+    target?: TicketTarget;
+    pendingStatus?: TicketStatus;
 };
 
 const formatError = (error: unknown) => {
@@ -21,10 +40,96 @@ const formatError = (error: unknown) => {
     }
 };
 
+const parseToolArgs = (rawArgs: unknown): Record<string, unknown> => {
+    if (!rawArgs) return {};
+    if (typeof rawArgs === 'string') {
+        try {
+            const parsed = JSON.parse(rawArgs);
+            return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {};
+        } catch {
+            return {};
+        }
+    }
+    if (typeof rawArgs === 'object') {
+        return rawArgs as Record<string, unknown>;
+    }
+    return {};
+};
+
+const normalizeDateInput = (value: unknown): string | undefined => {
+    if (typeof value !== 'string') return undefined;
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+
+    const dateOnlyMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (dateOnlyMatch) {
+        const dateOnly = new Date(`${trimmed}T00:00:00.000Z`);
+        return Number.isNaN(dateOnly.getTime()) ? undefined : dateOnly.toISOString();
+    }
+
+    const parsed = new Date(trimmed);
+    if (Number.isNaN(parsed.getTime())) return undefined;
+    return parsed.toISOString();
+};
+
+const toDateInputValue = (value?: string): string => {
+    if (!value) return '';
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) {
+        return parsed.toISOString().slice(0, 10);
+    }
+    const dateOnlyMatch = value.match(/^(\d{4}-\d{2}-\d{2})/);
+    return dateOnlyMatch ? dateOnlyMatch[1] : '';
+};
+
+const normalizePriority = (value: unknown): Priority | undefined => {
+    if (typeof value !== 'string') return undefined;
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'urgent') return 'Urgent';
+    if (normalized === 'high') return 'High';
+    if (normalized === 'medium') return 'Medium';
+    if (normalized === 'low') return 'Low';
+    if (normalized === 'none') return 'None';
+    return undefined;
+};
+
+const normalizeStatus = (value: unknown): TicketStatus | undefined => {
+    if (typeof value !== 'string') return undefined;
+    const normalized = value.toLowerCase();
+    if (normalized.includes('todo')) return TicketStatus.Todo;
+    if (normalized.includes('progress')) return TicketStatus.InProgress;
+    if (normalized.includes('blocked')) return TicketStatus.Blocked;
+    if (normalized.includes('done')) return TicketStatus.Done;
+    return undefined;
+};
+
+const getDateArg = (args: Record<string, unknown>, key: 'startDate' | 'dueDate') => {
+    if (key === 'dueDate') {
+        return args.dueDate ?? args.endDate;
+    }
+    return args.startDate;
+};
+
+const tokenize = (value: string) =>
+    value
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter(token => token.length > 2);
+
+const scoreSemanticMatch = (tokens: string[], targetText: string) => {
+    if (tokens.length === 0) return 0;
+    const haystack = targetText.toLowerCase();
+    return tokens.reduce((score, token) => {
+        if (!haystack.includes(token)) return score;
+        return score + (token.length >= 6 ? 2 : 1);
+    }, 0);
+};
+
 export const ReviewMode: React.FC = () => {
     const {
         campaign,
         currentUser,
+        users,
         updateChatHistory,
         updateTicket,
         updateProjectTicket,
@@ -37,8 +142,8 @@ export const ReviewMode: React.FC = () => {
     const [input, setInput] = useState('');
     const [isTyping, setIsTyping] = useState(false);
     const [clientError, setClientError] = useState<string | null>(null);
-    const [editingTicket, setEditingTicket] = useState<Ticket | null>(null);
-    const [showTicketModal, setShowTicketModal] = useState(false);
+    const [taskModalState, setTaskModalState] = useState<TaskModalState | null>(null);
+    const [taskDraftError, setTaskDraftError] = useState<string | null>(null);
 
     const inputRef = useRef<HTMLInputElement>(null);
     const chatRef = useRef<any>(null);
@@ -177,9 +282,119 @@ export const ReviewMode: React.FC = () => {
         return map;
     }, [ticketTargets]);
 
+    const guessSemanticScope = (title: string, notes: string) => {
+        if (!campaign) return { channelId: undefined as string | undefined, projectId: undefined as string | undefined };
+        const channels = campaign.channels || [];
+        const projects = campaign.projects || [];
+        const queryTokens = tokenize(`${title} ${notes}`);
+        if (queryTokens.length === 0) {
+            return { channelId: channels[0]?.id, projectId: undefined };
+        }
+
+        const bestChannel = channels.reduce<{ id?: string; score: number }>(
+            (best, channel) => {
+                const targetText = `${channel.name} ${(channel.tags || []).join(' ')}`;
+                const score = scoreSemanticMatch(queryTokens, targetText);
+                if (score > best.score) return { id: channel.id, score };
+                return best;
+            },
+            { score: 0 }
+        );
+
+        const bestProject = projects.reduce<{ id?: string; score: number }>(
+            (best, project) => {
+                const targetText = `${project.name} ${project.description || ''}`;
+                const score = scoreSemanticMatch(queryTokens, targetText);
+                if (score > best.score) return { id: project.id, score };
+                return best;
+            },
+            { score: 0 }
+        );
+
+        if (bestProject.score > bestChannel.score && bestProject.id) {
+            return { channelId: undefined, projectId: bestProject.id };
+        }
+        if (bestChannel.id) {
+            return { channelId: bestChannel.id, projectId: undefined };
+        }
+        return { channelId: channels[0]?.id, projectId: undefined };
+    };
+
+    const buildDraftFromTicket = (ticket: Ticket, target?: TicketTarget): TaskModalDraft => ({
+        id: ticket.id,
+        title: ticket.title,
+        description: ticket.description || '',
+        priority: ticket.priority,
+        assigneeId: ticket.assigneeId || currentUser.id,
+        channelId: target?.type === 'CHANNEL' ? target.parentId : ticket.channelId,
+        projectId: target?.type === 'PROJECT' ? target.parentId : ticket.projectId,
+        startDate: toDateInputValue(ticket.startDate),
+        endDate: toDateInputValue(ticket.dueDate),
+        linkedDocIds: ticket.linkedDocIds || []
+    });
+
+    const buildCreateDraftFromArgs = (args: Record<string, unknown>): TaskModalDraft => {
+        const title = typeof args.title === 'string' ? args.title.trim() : '';
+        const notes = typeof args.notes === 'string' ? args.notes : '';
+        const explicitChannelId = typeof args.channelId === 'string' ? args.channelId : undefined;
+        const explicitProjectId = typeof args.projectId === 'string' ? args.projectId : undefined;
+
+        const validChannelId = explicitChannelId && (campaign?.channels || []).some(c => c.id === explicitChannelId)
+            ? explicitChannelId
+            : undefined;
+        const validProjectId = explicitProjectId && (campaign?.projects || []).some(p => p.id === explicitProjectId)
+            ? explicitProjectId
+            : undefined;
+
+        const semantic = !validChannelId && !validProjectId
+            ? guessSemanticScope(title, notes)
+            : { channelId: undefined as string | undefined, projectId: undefined as string | undefined };
+
+        return {
+            title,
+            description: notes,
+            priority: normalizePriority(args.priority) || 'Medium',
+            assigneeId: undefined,
+            channelId: validChannelId || semantic.channelId,
+            projectId: validProjectId || semantic.projectId,
+            startDate: toDateInputValue(normalizeDateInput(getDateArg(args, 'startDate'))),
+            endDate: toDateInputValue(normalizeDateInput(getDateArg(args, 'dueDate'))),
+            linkedDocIds: []
+        };
+    };
+
+    const buildUpdateDraftFromArgs = (target: TicketTarget, args: Record<string, unknown>): TaskModalDraft => {
+        const ticket = target.ticket;
+        const titleArg = typeof args.title === 'string' ? args.title.trim() : '';
+        const hasNotes = Object.prototype.hasOwnProperty.call(args, 'notes');
+        const notesArg = hasNotes && typeof args.notes === 'string' ? args.notes : undefined;
+        const startArg = normalizeDateInput(getDateArg(args, 'startDate'));
+        const dueArg = normalizeDateInput(getDateArg(args, 'dueDate'));
+        const priorityArg = normalizePriority(args.priority);
+
+        return {
+            id: ticket.id,
+            title: titleArg || ticket.title,
+            description: notesArg !== undefined ? notesArg : (ticket.description || ''),
+            priority: priorityArg || ticket.priority,
+            assigneeId: ticket.assigneeId || currentUser.id,
+            channelId: target.type === 'CHANNEL' ? target.parentId : ticket.channelId,
+            projectId: target.type === 'PROJECT' ? target.parentId : ticket.projectId,
+            startDate: toDateInputValue(startArg || ticket.startDate),
+            endDate: toDateInputValue(dueArg || ticket.dueDate),
+            linkedDocIds: ticket.linkedDocIds || []
+        };
+    };
+
     const handleTicketClick = (ticket: Ticket) => {
-        setEditingTicket(ticket);
-        setShowTicketModal(true);
+        const target = ticketIndex.get(ticket.id);
+        if (!target) return;
+        setTaskDraftError(null);
+        setTaskModalState({
+            mode: 'update',
+            target,
+            draft: buildDraftFromTicket(ticket, target)
+        });
     };
 
     const handleStatusChange = (ticketId: string, newStatus: TicketStatus) => {
@@ -192,42 +407,121 @@ export const ReviewMode: React.FC = () => {
         }
     };
 
-    const closeTicketModal = () => {
-        setEditingTicket(null);
-        setShowTicketModal(false);
+    const closeTaskModal = () => {
+        setTaskDraftError(null);
+        setTaskModalState(null);
     };
 
-    const handleSaveEditedTicket = (data: any) => {
-        if (!editingTicket) return;
-        const target = ticketIndex.get(editingTicket.id);
-        if (!target) return;
+    const updateTaskDraftField = <K extends keyof TaskModalDraft>(key: K, value: TaskModalDraft[K]) => {
+        setTaskDraftError(null);
+        setTaskModalState(prev => {
+            if (!prev) return prev;
+            return {
+                ...prev,
+                draft: {
+                    ...prev.draft,
+                    [key]: value
+                }
+            };
+        });
+    };
 
-        const updates: Partial<Ticket> = {};
-        if (data.title !== editingTicket.title) updates.title = data.title;
-        if ((data.description ?? '') !== (editingTicket.description ?? '')) updates.description = data.description;
-
-        if (Object.keys(updates).length === 0) {
-            closeTicketModal();
+    const handleSaveTaskModal = () => {
+        if (!taskModalState || !campaign) {
+            setTaskModalState(null);
             return;
         }
 
-        if (target.type === 'CHANNEL') {
-            updateTicket(target.parentId, editingTicket.id, updates);
-        } else {
-            updateProjectTicket(target.parentId, editingTicket.id, updates);
+        const draft = taskModalState.draft;
+        const title = (draft.title || '').trim();
+        if (!title) {
+            setTaskDraftError("Task title is required before approval.");
+            return;
         }
-        closeTicketModal();
+        const description = draft.description || '';
+        const priority = draft.priority || 'Medium';
+        const assigneeId = (draft.assigneeId || '').trim();
+        if (!assigneeId) {
+            setTaskDraftError("Assign an owner before submitting.");
+            return;
+        }
+        const startDate = normalizeDateInput(draft.startDate);
+        const dueDate = normalizeDateInput(draft.endDate);
+        const channelId = (draft.channelId || '').trim() || undefined;
+        const projectId = (draft.projectId || '').trim() || undefined;
+        const linkedDocIds = draft.linkedDocIds || [];
+
+        if (taskModalState.mode === 'create') {
+            if ((campaign.channels || []).length === 0) {
+                setTaskDraftError("Create at least one channel before approving this task.");
+                return;
+            }
+            if (!channelId) {
+                setTaskDraftError("Select a channel before approving this task.");
+                return;
+            }
+            const newTicket: Ticket = {
+                id: generateId(),
+                shortId: '',
+                title,
+                description,
+                status: TicketStatus.Todo,
+                priority,
+                createdAt: new Date().toISOString(),
+                assigneeId,
+                channelId,
+                projectId,
+                startDate,
+                dueDate,
+                linkedDocIds
+            };
+            addTicket(channelId, newTicket);
+            setTaskDraftError(null);
+            setTaskModalState(null);
+            return;
+        }
+
+        const target = taskModalState.target;
+        if (!target) {
+            setTaskModalState(null);
+            return;
+        }
+
+        const updates: Partial<Ticket> = {};
+        const current = target.ticket;
+        if (title !== current.title) updates.title = title;
+        if (description !== (current.description || '')) updates.description = description;
+        if (priority !== current.priority) updates.priority = priority;
+        if (assigneeId !== (current.assigneeId || '')) updates.assigneeId = assigneeId;
+        if (startDate && startDate !== current.startDate) updates.startDate = startDate;
+        if (dueDate && dueDate !== current.dueDate) updates.dueDate = dueDate;
+        if (taskModalState.pendingStatus && taskModalState.pendingStatus !== current.status) {
+            updates.status = taskModalState.pendingStatus;
+        }
+        if (linkedDocIds.length > 0 || (current.linkedDocIds || []).length > 0) {
+            updates.linkedDocIds = linkedDocIds;
+        }
+
+        if (Object.keys(updates).length > 0) {
+            if (target.type === 'CHANNEL') {
+                updateTicket(target.parentId, current.id, updates);
+            } else {
+                updateProjectTicket(target.parentId, current.id, updates);
+            }
+        }
+        setTaskDraftError(null);
+        setTaskModalState(null);
     };
 
-    const handleDeleteEditedTicket = (ticketId: string) => {
-        const target = ticketIndex.get(ticketId);
+    const handleDeleteTaskFromModal = (ticketId: string) => {
+        const target = taskModalState?.target || ticketIndex.get(ticketId);
         if (!target) return;
         if (target.type === 'CHANNEL') {
             deleteTicket(target.parentId, ticketId);
         } else {
             deleteProjectTicket(target.parentId, ticketId);
         }
-        closeTicketModal();
+        setTaskModalState(null);
     };
 
     const initChat = async (existingMessages: ChatMessage[]) => {
@@ -283,7 +577,7 @@ export const ReviewMode: React.FC = () => {
 
     const handleToolCall = async (call: any) => {
         const name = call.functionCall?.name;
-        const args = call.functionCall?.args || {};
+        const args = parseToolArgs(call.functionCall?.args);
         if (!name) return;
 
         if (name === 'show_tasks') {
@@ -296,35 +590,23 @@ export const ReviewMode: React.FC = () => {
                 await sendToolResponse(call, { result: "No campaign available." });
                 return;
             }
+            if ((campaign.channels || []).length === 0) {
+                appendModelMessage("No channels exist yet. Create a channel before creating tasks.");
+                await sendToolResponse(call, { result: "No channel available." });
+                return;
+            }
             const title = typeof args.title === 'string' ? args.title.trim() : '';
-            const notes = typeof args.notes === 'string' ? args.notes.trim() : '';
             if (!title) {
                 await sendToolResponse(call, { result: "Missing task title." });
                 return;
             }
-            const channelId = campaign.channels?.[0]?.id;
-            if (!channelId) {
-                appendModelMessage("No task log exists—create a channel first.");
-                await sendToolResponse(call, { result: "No channel available." });
-                return;
-            }
-            const newTicket: Ticket = {
-                id: generateId(),
-                shortId: '',
-                title,
-                description: notes,
-                status: TicketStatus.Todo,
-                priority: 'Medium',
-                createdAt: new Date().toISOString(),
-                assigneeId: currentUser.id,
-                channelId,
-                projectId: undefined,
-                startDate: undefined,
-                dueDate: undefined,
-                linkedDocIds: []
-            };
-            addTicket(channelId, newTicket);
-            await sendToolResponse(call, { result: "Task created." });
+            const draft = buildCreateDraftFromArgs(args);
+            setTaskDraftError(null);
+            setTaskModalState({
+                mode: 'create',
+                draft
+            });
+            await sendToolResponse(call, { result: "Create task inline draft opened for approval." });
             return;
         }
 
@@ -335,26 +617,14 @@ export const ReviewMode: React.FC = () => {
                 await sendToolResponse(call, { result: "Task not found." });
                 return;
             }
-            const updates: Partial<Ticket> = {};
-            if (typeof args.title === 'string' && args.title.trim()) updates.title = args.title.trim();
-            if (typeof args.notes === 'string') updates.description = args.notes;
-            if (typeof args.status === 'string') {
-                const normalized = args.status.toLowerCase();
-                if (normalized.includes('todo')) updates.status = TicketStatus.Todo;
-                if (normalized.includes('progress')) updates.status = TicketStatus.InProgress;
-                if (normalized.includes('blocked')) updates.status = TicketStatus.Blocked;
-                if (normalized.includes('done')) updates.status = TicketStatus.Done;
-            }
-            if (Object.keys(updates).length === 0) {
-                await sendToolResponse(call, { result: "No updates applied." });
-                return;
-            }
-            if (target.type === 'CHANNEL') {
-                updateTicket(target.parentId, ticketId, updates);
-            } else {
-                updateProjectTicket(target.parentId, ticketId, updates);
-            }
-            await sendToolResponse(call, { result: "Task updated." });
+            setTaskDraftError(null);
+            setTaskModalState({
+                mode: 'update',
+                target,
+                draft: buildUpdateDraftFromArgs(target, args),
+                pendingStatus: normalizeStatus(args.status)
+            });
+            await sendToolResponse(call, { result: "Update task inline draft opened for approval." });
             return;
         }
 
@@ -454,8 +724,8 @@ export const ReviewMode: React.FC = () => {
                                             <ChatKanbanCallout
                                                 title={title}
                                                 tickets={tickets}
-                                                channels={[]}
-                                                users={[currentUser]}
+                                                channels={campaign?.channels || []}
+                                                users={users}
                                                 onTicketClick={handleTicketClick}
                                                 onStatusChange={handleStatusChange}
                                             />
@@ -482,6 +752,152 @@ export const ReviewMode: React.FC = () => {
                             })}
                         </div>
                     ))}
+
+                    {taskModalState && (
+                        <div className="mb-6 flex justify-start">
+                            <div className="w-full max-w-2xl rounded-xl border border-zinc-200 bg-zinc-50/70 p-4 shadow-sm">
+                                <div className="mb-3 flex items-center justify-between">
+                                    <span className="text-xs font-bold uppercase tracking-wider text-zinc-500">
+                                        {taskModalState.mode === 'create' ? 'Create Task Draft' : 'Update Task Draft'}
+                                    </span>
+                                    {taskModalState.pendingStatus && (
+                                        <span className="rounded border border-zinc-300 bg-white px-2 py-0.5 text-[11px] text-zinc-600">
+                                            Status: {taskModalState.pendingStatus}
+                                        </span>
+                                    )}
+                                </div>
+
+                                <div className="space-y-3">
+                                    <input
+                                        className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-indigo-500 focus:outline-none"
+                                        value={taskModalState.draft.title || ''}
+                                        placeholder="Task title"
+                                        onChange={(e) => updateTaskDraftField('title', e.target.value)}
+                                    />
+                                    <textarea
+                                        className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 focus:border-indigo-500 focus:outline-none"
+                                        value={taskModalState.draft.description || ''}
+                                        placeholder="Description"
+                                        rows={3}
+                                        onChange={(e) => updateTaskDraftField('description', e.target.value)}
+                                    />
+
+                                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                                        <div>
+                                            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Owner *</label>
+                                            <select
+                                                className="w-full rounded-lg border border-zinc-200 bg-white px-2 py-2 text-sm text-zinc-800 focus:border-indigo-500 focus:outline-none"
+                                                value={taskModalState.draft.assigneeId || ''}
+                                                onChange={(e) => updateTaskDraftField('assigneeId', e.target.value || undefined)}
+                                            >
+                                                <option value="">Select owner</option>
+                                                {users.map(user => (
+                                                    <option key={user.id} value={user.id}>{user.name}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Priority</label>
+                                            <select
+                                                className="w-full rounded-lg border border-zinc-200 bg-white px-2 py-2 text-sm text-zinc-800 focus:border-indigo-500 focus:outline-none"
+                                                value={taskModalState.draft.priority || 'Medium'}
+                                                onChange={(e) => updateTaskDraftField('priority', normalizePriority(e.target.value) || 'Medium')}
+                                            >
+                                                <option value="Low">Low</option>
+                                                <option value="Medium">Medium</option>
+                                                <option value="High">High</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                                        <div>
+                                            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Start Date</label>
+                                            <input
+                                                type="date"
+                                                className="w-full rounded-lg border border-zinc-200 bg-white px-2 py-2 text-sm text-zinc-800 focus:border-indigo-500 focus:outline-none"
+                                                value={taskModalState.draft.startDate || ''}
+                                                onChange={(e) => updateTaskDraftField('startDate', e.target.value || undefined)}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500">End Date</label>
+                                            <input
+                                                type="date"
+                                                className="w-full rounded-lg border border-zinc-200 bg-white px-2 py-2 text-sm text-zinc-800 focus:border-indigo-500 focus:outline-none"
+                                                value={taskModalState.draft.endDate || ''}
+                                                onChange={(e) => updateTaskDraftField('endDate', e.target.value || undefined)}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                                        <div>
+                                            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Channel</label>
+                                            <select
+                                                className="w-full rounded-lg border border-zinc-200 bg-white px-2 py-2 text-sm text-zinc-800 focus:border-indigo-500 focus:outline-none disabled:bg-zinc-100"
+                                                value={taskModalState.draft.channelId || ''}
+                                                disabled={taskModalState.mode === 'update'}
+                                                onChange={(e) => updateTaskDraftField('channelId', e.target.value || undefined)}
+                                            >
+                                                <option value="">Select channel</option>
+                                                {(campaign?.channels || []).map(channel => (
+                                                    <option key={channel.id} value={channel.id}>{channel.name}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Project</label>
+                                            <select
+                                                className="w-full rounded-lg border border-zinc-200 bg-white px-2 py-2 text-sm text-zinc-800 focus:border-indigo-500 focus:outline-none disabled:bg-zinc-100"
+                                                value={taskModalState.draft.projectId || ''}
+                                                disabled={taskModalState.mode === 'update'}
+                                                onChange={(e) => updateTaskDraftField('projectId', e.target.value || undefined)}
+                                            >
+                                                <option value="">No project</option>
+                                                {(campaign?.projects || []).map(project => (
+                                                    <option key={project.id} value={project.id}>{project.name}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    {taskDraftError && (
+                                        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                                            {taskDraftError}
+                                        </div>
+                                    )}
+
+                                    <div className="flex items-center justify-between">
+                                        {taskModalState.mode === 'update' ? (
+                                            <button
+                                                onClick={() => taskModalState.draft.id && handleDeleteTaskFromModal(taskModalState.draft.id)}
+                                                className="rounded-md px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
+                                            >
+                                                Delete Task
+                                            </button>
+                                        ) : (
+                                            <span />
+                                        )}
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                onClick={closeTaskModal}
+                                                className="rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-100"
+                                            >
+                                                Cancel
+                                            </button>
+                                            <button
+                                                onClick={handleSaveTaskModal}
+                                                className="rounded-md bg-zinc-900 px-4 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800"
+                                            >
+                                                Approve Draft
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     {isTyping && (
                         <div className="flex justify-start mb-6">
@@ -514,30 +930,10 @@ export const ReviewMode: React.FC = () => {
                         className="absolute right-2 top-2 p-1.5 bg-zinc-900 text-white rounded-lg hover:bg-zinc-700 disabled:opacity-0 transition-all"
                     >
                         <span className="sr-only">Send</span>
-                        →
+                        {'->'}
                     </button>
                 </div>
             </div>
-
-            {showTicketModal && editingTicket && (
-                <TicketModal
-                    variant="core"
-                    initialData={{
-                        id: editingTicket.id,
-                        title: editingTicket.title,
-                        description: editingTicket.description
-                    }}
-                    context={{
-                        channels: [],
-                        projects: [],
-                        users: [currentUser],
-                        docs: []
-                    }}
-                    onClose={closeTicketModal}
-                    onSave={handleSaveEditedTicket}
-                    onDelete={(id) => handleDeleteEditedTicket(id)}
-                />
-            )}
         </div>
     );
 };
