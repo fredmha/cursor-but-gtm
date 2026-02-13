@@ -31,7 +31,7 @@ export type CanvasTool = 'SELECT' | 'HAND' | 'EMAIL_CARD' | 'CONTAINER';
 export type CanvasElementKind = 'EMAIL_CARD' | 'CONTAINER';
 export type CanvasRelationType = 'PARENT' | 'TICKET_LINK' | 'EDGE';
 export type ExecutionRowType = 'TASK' | 'TEXT';
-export type EmailBlockType = 'H1' | 'H2' | 'BODY' | 'IMAGE';
+export type EmailBlockType = 'H1' | 'H2' | 'H3' | 'BODY' | 'IMAGE';
 export type EmailBlockAlign = 'left' | 'center' | 'right';
 
 // --- Core Entities ---
@@ -205,6 +205,7 @@ export interface CanvasElementStyle {
 
 export interface CanvasEmailBlock {
   id: string;
+  order: number;
   type: EmailBlockType;
   align: EmailBlockAlign;
   text?: string;

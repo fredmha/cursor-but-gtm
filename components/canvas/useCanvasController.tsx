@@ -15,7 +15,6 @@ import { CanvasElement, CanvasEmailBlock, CanvasEmailTemplate, CanvasRelation, C
 import { generateId, useStore } from '../../store';
 import { CanvasElementNode } from './CanvasElementNode';
 import {
-  BlockDragState,
   BlockResizeState,
   buildScene,
   CanvasNodeData,
@@ -35,8 +34,8 @@ import {
   getAbsolutePosition,
   makeDefaultElement,
   mapSceneToState,
-  moveBlock,
-  moveBlockToIndex,
+  moveBlockById,
+  normalizeEmailBlockOrder,
   normalizeBlockMetrics,
   pushSceneHistory,
   ResizeDimensions,
@@ -80,7 +79,6 @@ export const useCanvasController = () => {
   const [historyVersion, setHistoryVersion] = useState(0);
   const [editingCardId, setEditingCardId] = useState<string | null>(null);
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
-  const [dragState, setDragState] = useState<BlockDragState | null>(null);
   const [resizeState, setResizeState] = useState<BlockResizeState | null>(null);
 
   // Refs for commit/historical state
@@ -221,7 +219,6 @@ export const useCanvasController = () => {
     if (!selectedNode || selectedNode.data.element.kind !== 'EMAIL_CARD') {
       setEditingCardId(null);
       setActiveBlockId(null);
-      setDragState(null);
       setResizeState(null);
       return;
     }
@@ -335,11 +332,15 @@ export const useCanvasController = () => {
 
       const baseTemplate = ensureEmailTemplate(element.emailTemplate);
       const nextTemplate = updater(baseTemplate);
-      const nextLabel = deriveEmailCardLabel(nextTemplate);
+      const normalizedTemplate: CanvasEmailTemplate = {
+        ...nextTemplate,
+        blocks: normalizeEmailBlockOrder(nextTemplate.blocks)
+      };
+      const nextLabel = deriveEmailCardLabel(normalizedTemplate);
 
       return {
         ...element,
-        emailTemplate: nextTemplate,
+        emailTemplate: normalizedTemplate,
         text: nextLabel
       };
     });
@@ -348,7 +349,7 @@ export const useCanvasController = () => {
   const addEmailBlock = useCallback((type: EmailBlockType) => {
     updateSelectedEmailTemplate(template => ({
       ...template,
-      blocks: [...template.blocks, createEmailBlock(type, generateId)]
+      blocks: [...template.blocks, createEmailBlock(type, generateId, template.blocks.length)]
     }));
   }, [updateSelectedEmailTemplate]);
 
@@ -624,61 +625,17 @@ export const useCanvasController = () => {
   const onEmailCardSurfaceSelect = useCallback((cardId: string) => {
     setEditingCardId(cardId);
     setActiveBlockId(null);
-    setDragState(null);
   }, []);
 
-  const onEmailBlockDragStart = useCallback((cardId: string, blockId: string) => {
-    if (selectedNode?.id !== cardId) return;
-    setEditingCardId(cardId);
-    setActiveBlockId(blockId);
-    setDragState({ sourceId: blockId, targetId: blockId, position: 'after' });
-  }, [selectedNode?.id]);
+  const onEmailBlockReorder = useCallback((cardId: string, sourceBlockId: string, targetBlockId: string) => {
+    if (selectedNode?.id !== cardId || sourceBlockId === targetBlockId) return;
 
-  const onEmailBlockDragOver = useCallback((cardId: string, blockId: string, position: 'before' | 'after') => {
-    if (selectedNode?.id !== cardId) return;
-
-    setDragState(previousState => {
-      if (!previousState) return previousState;
-      if (previousState.targetId === blockId && previousState.position === position) return previousState;
-      return { ...previousState, targetId: blockId, position };
-    });
-  }, [selectedNode?.id]);
-
-  const onEmailBlockDrop = useCallback((cardId: string, blockId: string, position: 'before' | 'after') => {
-    if (selectedNode?.id !== cardId || !dragState) {
-      setDragState(null);
-      return;
-    }
-
-    const sourceId = dragState.sourceId;
     updateSelectedEmailTemplate(template => ({
       ...template,
-      blocks: moveBlock(template.blocks, sourceId, blockId, position)
+      blocks: moveBlockById(template.blocks, sourceBlockId, targetBlockId)
     }));
-
-    setActiveBlockId(sourceId);
-    setDragState(null);
-  }, [dragState, selectedNode?.id, updateSelectedEmailTemplate]);
-
-  const onEmailBlockDropAt = useCallback((cardId: string, insertIndex: number) => {
-    if (selectedNode?.id !== cardId || !dragState) {
-      setDragState(null);
-      return;
-    }
-
-    const sourceId = dragState.sourceId;
-    updateSelectedEmailTemplate(template => ({
-      ...template,
-      blocks: moveBlockToIndex(template.blocks, sourceId, insertIndex)
-    }));
-
-    setActiveBlockId(sourceId);
-    setDragState(null);
-  }, [dragState, selectedNode?.id, updateSelectedEmailTemplate]);
-
-  const onEmailBlockDragEnd = useCallback(() => {
-    setDragState(null);
-  }, []);
+    setActiveBlockId(sourceBlockId);
+  }, [selectedNode?.id, updateSelectedEmailTemplate]);
 
   const onEmailBlockResizeStart = useCallback((cardId: string, blockId: string, clientY: number) => {
     if (selectedNode?.id !== cardId || selectedNode.data.element.kind !== 'EMAIL_CARD') return;
@@ -746,14 +703,9 @@ export const useCanvasController = () => {
         }}
         editingCardId={editingCardId}
         activeBlockId={activeBlockId}
-        dragState={dragState}
         resizingBlockId={resizeState?.blockId || null}
         onEmailBlockSelect={onEmailBlockSelect}
-        onEmailBlockDragStart={onEmailBlockDragStart}
-        onEmailBlockDragOver={onEmailBlockDragOver}
-        onEmailBlockDrop={onEmailBlockDrop}
-        onEmailBlockDropAt={onEmailBlockDropAt}
-        onEmailBlockDragEnd={onEmailBlockDragEnd}
+        onEmailBlockReorder={onEmailBlockReorder}
         onEmailBlockResizeStart={onEmailBlockResizeStart}
         onEmailCardSurfaceSelect={onEmailCardSurfaceSelect}
         onEmailBlockTextChange={onEmailBlockTextChange}
@@ -761,13 +713,8 @@ export const useCanvasController = () => {
     )
   }), [
     activeBlockId,
-    dragState,
     editingCardId,
-    onEmailBlockDragEnd,
-    onEmailBlockDragOver,
-    onEmailBlockDragStart,
-    onEmailBlockDrop,
-    onEmailBlockDropAt,
+    onEmailBlockReorder,
     onEmailBlockResizeStart,
     onEmailBlockSelect,
     onEmailCardSurfaceSelect,
@@ -831,10 +778,7 @@ export const useCanvasController = () => {
   const selectedElement = selectedNode?.data.element;
   const selectedIsEmailCard = selectedElement?.kind === 'EMAIL_CARD';
   const selectedEmailBlocks = selectedIsEmailCard ? ensureEmailTemplate(selectedElement.emailTemplate).blocks : [];
-
-  const panelEmailBlocks = selectedIsEmailCard && dragState
-    ? moveBlock(selectedEmailBlocks, dragState.sourceId, dragState.targetId, dragState.position)
-    : selectedEmailBlocks;
+  const panelEmailBlocks = selectedEmailBlocks;
 
   const activeSelectedBlock = selectedEmailBlocks.find(block => block.id === activeBlockId);
   const activeSelectedBlockMetrics = activeSelectedBlock ? normalizeBlockMetrics(activeSelectedBlock) : null;

@@ -27,12 +27,6 @@ export type BlockResizeState = {
   startHeight: number;
 };
 
-export type BlockDragState = {
-  sourceId: string;
-  targetId: string;
-  position: 'before' | 'after';
-};
-
 export type TicketRef = {
   id: string;
   shortId: string;
@@ -50,7 +44,7 @@ export type EmailBlockMetrics = Required<Pick<
 
 export const VIEWPORT_COMMIT_MS = 200;
 
-export const EMAIL_BLOCK_TYPES: EmailBlockType[] = ['H1', 'H2', 'BODY', 'IMAGE'];
+export const EMAIL_BLOCK_TYPES: EmailBlockType[] = ['H1', 'H2', 'H3', 'BODY', 'IMAGE'];
 
 export const EMAIL_BLOCK_ALIGNMENTS: EmailBlockAlign[] = ['left', 'center', 'right'];
 
@@ -110,6 +104,7 @@ export const clampNumber = (value: number, minimum: number, maximum: number): nu
 export const getDefaultBlockMetrics = (blockType: EmailBlockType): EmailBlockMetrics => {
   if (blockType === 'H1') return { heightPx: 56, fontSizePx: 30, paddingY: 8, paddingX: 10, marginBottomPx: 8 };
   if (blockType === 'H2') return { heightPx: 46, fontSizePx: 24, paddingY: 8, paddingX: 10, marginBottomPx: 8 };
+  if (blockType === 'H3') return { heightPx: 40, fontSizePx: 20, paddingY: 8, paddingX: 10, marginBottomPx: 8 };
   if (blockType === 'IMAGE') return { heightPx: 140, fontSizePx: 14, paddingY: 6, paddingX: 6, marginBottomPx: 10 };
   return { heightPx: 84, fontSizePx: 16, paddingY: 8, paddingX: 10, marginBottomPx: 8 };
 };
@@ -139,7 +134,7 @@ export const normalizeBlockMetrics = (block: CanvasEmailBlock): EmailBlockMetric
  */
 export const ensureEmailTemplate = (template?: CanvasEmailTemplate): CanvasEmailTemplate => ({
   version: 1,
-  blocks: template?.blocks || []
+  blocks: normalizeEmailBlockOrder(template?.blocks || [])
 });
 
 /**
@@ -148,8 +143,9 @@ export const ensureEmailTemplate = (template?: CanvasEmailTemplate): CanvasEmail
  * Output: new block.
  * Invariant: id comes from supplied factory.
  */
-export const createEmailBlock = (blockType: EmailBlockType, createId: () => string): CanvasEmailBlock => ({
+export const createEmailBlock = (blockType: EmailBlockType, createId: () => string, order: number): CanvasEmailBlock => ({
   id: createId(),
+  order,
   type: blockType,
   align: 'left',
   text: blockType === 'IMAGE' ? '' : (blockType === 'BODY' ? 'Body copy...' : `${blockType} text`),
@@ -175,46 +171,56 @@ export const deriveEmailCardLabel = (template?: CanvasEmailTemplate): string => 
   return 'Email Card';
 };
 
-/**
- * Move source block relative to target block.
- * Inputs: blocks, source id, target id, insert side.
- * Output: reordered blocks.
- * Invariant: invalid move returns original array.
- */
-export const moveBlock = (
-  blocks: CanvasEmailBlock[],
-  sourceId: string,
-  targetId: string,
-  position: 'before' | 'after'
-): CanvasEmailBlock[] => {
-  const sourceIndex = blocks.findIndex(block => block.id === sourceId);
-  const targetIndex = blocks.findIndex(block => block.id === targetId);
-  if (sourceIndex < 0 || targetIndex < 0 || sourceId === targetId) return blocks;
+const getSafeBlockOrder = (block: CanvasEmailBlock, fallbackOrder: number): number =>
+  toFiniteNumber((block as Partial<CanvasEmailBlock>).order) ?? fallbackOrder;
 
-  const reorderedBlocks = [...blocks];
+/**
+ * Normalize block order into deterministic array order with contiguous indexes.
+ * Inputs: blocks.
+ * Output: sorted/reindexed blocks.
+ * Invariant: output block.order always matches array index.
+ */
+export const normalizeEmailBlockOrder = (blocks: CanvasEmailBlock[]): CanvasEmailBlock[] => (
+  [...blocks]
+    .sort((leftBlock, rightBlock) => {
+      const leftOrder = getSafeBlockOrder(leftBlock, Number.POSITIVE_INFINITY);
+      const rightOrder = getSafeBlockOrder(rightBlock, Number.POSITIVE_INFINITY);
+      if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+      return leftBlock.id.localeCompare(rightBlock.id);
+    })
+    .map((block, index) => ({ ...block, order: index }))
+);
+
+/**
+ * Move a block from one index to another and reindex.
+ * Inputs: blocks, source index, destination index.
+ * Output: reordered/reindexed blocks.
+ * Invariant: invalid index input returns normalized original ordering.
+ */
+export const moveBlockByIndex = (blocks: CanvasEmailBlock[], sourceIndex: number, destinationIndex: number): CanvasEmailBlock[] => {
+  if (sourceIndex === destinationIndex) return normalizeEmailBlockOrder(blocks);
+  if (sourceIndex < 0 || sourceIndex >= blocks.length) return normalizeEmailBlockOrder(blocks);
+  if (destinationIndex < 0 || destinationIndex >= blocks.length) return normalizeEmailBlockOrder(blocks);
+
+  const orderedBlocks = normalizeEmailBlockOrder(blocks);
+  const reorderedBlocks = [...orderedBlocks];
   const [movedBlock] = reorderedBlocks.splice(sourceIndex, 1);
-  const adjustedTargetIndex = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex;
-  const insertIndex = position === 'before' ? adjustedTargetIndex : adjustedTargetIndex + 1;
-  reorderedBlocks.splice(insertIndex, 0, movedBlock);
-  return reorderedBlocks;
+  reorderedBlocks.splice(destinationIndex, 0, movedBlock);
+  return reorderedBlocks.map((block, index) => ({ ...block, order: index }));
 };
 
 /**
- * Move source block to explicit insertion index.
- * Inputs: blocks, source id, target index.
- * Output: reordered blocks.
- * Invariant: index is clamped into valid range.
+ * Move source block over target block id and reindex.
+ * Inputs: blocks, source id, target id.
+ * Output: reordered/reindexed blocks.
+ * Invariant: unknown ids return normalized original ordering.
  */
-export const moveBlockToIndex = (blocks: CanvasEmailBlock[], sourceId: string, insertIndex: number): CanvasEmailBlock[] => {
-  const sourceIndex = blocks.findIndex(block => block.id === sourceId);
-  if (sourceIndex < 0) return blocks;
-
-  const boundedIndex = clampNumber(insertIndex, 0, blocks.length);
-  const reorderedBlocks = [...blocks];
-  const [movedBlock] = reorderedBlocks.splice(sourceIndex, 1);
-  const adjustedInsertIndex = sourceIndex < boundedIndex ? boundedIndex - 1 : boundedIndex;
-  reorderedBlocks.splice(clampNumber(adjustedInsertIndex, 0, reorderedBlocks.length), 0, movedBlock);
-  return reorderedBlocks;
+export const moveBlockById = (blocks: CanvasEmailBlock[], sourceId: string, targetId: string): CanvasEmailBlock[] => {
+  const orderedBlocks = normalizeEmailBlockOrder(blocks);
+  const sourceIndex = orderedBlocks.findIndex(block => block.id === sourceId);
+  const targetIndex = orderedBlocks.findIndex(block => block.id === targetId);
+  if (sourceIndex < 0 || targetIndex < 0) return orderedBlocks;
+  return moveBlockByIndex(orderedBlocks, sourceIndex, targetIndex);
 };
 
 // Scene mapping helpers

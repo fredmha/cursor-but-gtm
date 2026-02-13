@@ -175,17 +175,18 @@ const parseCanvasNumber = (value: unknown): number | undefined => {
 const clampNumber = (value: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, value));
 
-const EMAIL_BLOCK_TYPES: EmailBlockType[] = ['H1', 'H2', 'BODY', 'IMAGE'];
+const EMAIL_BLOCK_TYPES: EmailBlockType[] = ['H1', 'H2', 'H3', 'BODY', 'IMAGE'];
 const EMAIL_BLOCK_ALIGNMENTS: EmailBlockAlign[] = ['left', 'center', 'right'];
 
 const getDefaultBlockLayout = (type: EmailBlockType): Required<Pick<CanvasEmailBlock, 'heightPx' | 'fontSizePx' | 'paddingY' | 'paddingX' | 'marginBottomPx'>> => {
   if (type === 'H1') return { heightPx: 56, fontSizePx: 30, paddingY: 8, paddingX: 10, marginBottomPx: 8 };
   if (type === 'H2') return { heightPx: 46, fontSizePx: 24, paddingY: 8, paddingX: 10, marginBottomPx: 8 };
+  if (type === 'H3') return { heightPx: 40, fontSizePx: 20, paddingY: 8, paddingX: 10, marginBottomPx: 8 };
   if (type === 'IMAGE') return { heightPx: 140, fontSizePx: 14, paddingY: 6, paddingX: 6, marginBottomPx: 10 };
   return { heightPx: 84, fontSizePx: 16, paddingY: 8, paddingX: 10, marginBottomPx: 8 };
 };
 
-const normalizeEmailBlock = (rawBlock: unknown): CanvasEmailBlock | null => {
+const normalizeEmailBlock = (rawBlock: unknown, fallbackOrder: number): CanvasEmailBlock | null => {
   if (!rawBlock || typeof rawBlock !== 'object') return null;
   const block = rawBlock as Record<string, unknown>;
   const type = typeof block.type === 'string' && EMAIL_BLOCK_TYPES.includes(block.type as EmailBlockType)
@@ -202,9 +203,11 @@ const normalizeEmailBlock = (rawBlock: unknown): CanvasEmailBlock | null => {
   const paddingY = clampNumber(parseCanvasNumber(block.paddingY) ?? defaults.paddingY, 0, 24);
   const paddingX = clampNumber(parseCanvasNumber(block.paddingX) ?? defaults.paddingX, 0, 24);
   const marginBottomPx = clampNumber(parseCanvasNumber(block.marginBottomPx) ?? defaults.marginBottomPx, 0, 48);
+  const order = parseCanvasNumber(block.order) ?? fallbackOrder;
 
   return {
     id: typeof block.id === 'string' ? block.id : generateId(),
+    order,
     type,
     align,
     text: typeof block.text === 'string' ? block.text : '',
@@ -222,12 +225,18 @@ const normalizeEmailTemplate = (rawTemplate: unknown): CanvasEmailTemplate | und
   const template = rawTemplate as Record<string, unknown>;
   const rawBlocks = Array.isArray(template.blocks) ? template.blocks : [];
   const blocks = rawBlocks
-    .map(normalizeEmailBlock)
+    .map((rawBlock, index) => normalizeEmailBlock(rawBlock, index))
     .filter((block): block is CanvasEmailBlock => block !== null);
   if (blocks.length === 0) return undefined;
+  const orderedBlocks = [...blocks]
+    .sort((leftBlock, rightBlock) => {
+      if (leftBlock.order !== rightBlock.order) return leftBlock.order - rightBlock.order;
+      return leftBlock.id.localeCompare(rightBlock.id);
+    })
+    .map((block, index) => ({ ...block, order: index }));
   return {
     version: 1,
-    blocks
+    blocks: orderedBlocks
   };
 };
 

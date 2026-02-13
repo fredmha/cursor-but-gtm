@@ -252,7 +252,7 @@ export const CanvasInspectorPanel: React.FC<CanvasInspectorPanelProps> = ({
                 onClick={() => onSelectPanelBlock(block.id)}
                 className={`w-full rounded border px-2 py-1.5 text-left text-xs ${activeBlockId === block.id ? 'border-indigo-300 bg-indigo-50/40' : 'border-zinc-200 hover:bg-zinc-50'}`}
               >
-                <span className="text-[10px] uppercase tracking-[0.18em] font-bold text-zinc-500">{block.type}</span>
+                <span className="text-[10px] uppercase tracking-[0.18em] font-bold text-zinc-500">{block.type} #{block.order + 1}</span>
                 <div className="truncate text-zinc-600 mt-1">
                   {block.type === 'IMAGE'
                     ? (block.imageUrl ? 'Image block' : 'Image placeholder')
