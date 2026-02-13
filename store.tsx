@@ -1111,6 +1111,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const getExecutionRows = (): Ticket[] => {
     if (!campaign) return [];
+    // Execution view aggregates all ticket containers into one flat working set.
+    // Ordering invariant: stable oldest-first by createdAt, then id for deterministic rendering.
     const channelTickets = campaign.channels.flatMap(channel => channel.tickets);
     const projectTickets = campaign.projects.flatMap(project => project.tickets);
     const standaloneTickets = campaign.standaloneTickets || [];
@@ -1148,14 +1150,17 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
 
     if (ticket.channelId) {
+      // Resolution order: channel-scoped destination wins when channelId exists.
       addTicket(ticket.channelId, ticket);
       return;
     }
     if (ticket.projectId) {
+      // Next resolution path: project-scoped destination.
       addProjectTicket(ticket.projectId, ticket);
       return;
     }
 
+    // Final fallback path: execution-only standalone ticket container.
     updateCampaignState(prev => ({
       ...prev,
       standaloneTickets: [...(prev.standaloneTickets || []), ticket]
@@ -1164,18 +1169,23 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const updateExecutionRow = (ticketId: string, updates: Partial<Ticket>) => {
     if (!campaign) return;
+    // Status sanitization is intentionally conditional.
+    // Non-status edits must not remap legacy statuses (Backlog/Canceled) implicitly.
+    const hasStatusUpdate = Object.prototype.hasOwnProperty.call(updates, 'status');
 
+    // Entity resolution order is deterministic:
+    // 1) channel tickets -> 2) project tickets -> 3) standalone tickets.
     const channel = campaign.channels.find(c => c.tickets.some(t => t.id === ticketId));
     if (channel) {
       const nextUpdates: Partial<Ticket> = { ...updates };
-      if (nextUpdates.status) nextUpdates.status = getExecutionSafeStatus(nextUpdates.status);
+      if (hasStatusUpdate && nextUpdates.status) nextUpdates.status = getExecutionSafeStatus(nextUpdates.status);
       if (nextUpdates.rowType === 'TEXT') nextUpdates.status = TicketStatus.Todo;
       updateTicket(channel.id, ticketId, nextUpdates);
     } else {
       const project = campaign.projects.find(p => p.tickets.some(t => t.id === ticketId));
       if (project) {
         const nextUpdates: Partial<Ticket> = { ...updates };
-        if (nextUpdates.status) nextUpdates.status = getExecutionSafeStatus(nextUpdates.status);
+        if (hasStatusUpdate && nextUpdates.status) nextUpdates.status = getExecutionSafeStatus(nextUpdates.status);
         if (nextUpdates.rowType === 'TEXT') nextUpdates.status = TicketStatus.Todo;
         updateProjectTicket(project.id, ticketId, nextUpdates);
       } else {
@@ -1184,7 +1194,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           standaloneTickets: (prev.standaloneTickets || []).map(ticket => {
             if (ticket.id !== ticketId) return ticket;
             const nextTicket: Ticket = { ...ticket, ...updates };
-            if (nextTicket.status) nextTicket.status = getExecutionSafeStatus(nextTicket.status);
+            if (hasStatusUpdate && nextTicket.status) nextTicket.status = getExecutionSafeStatus(nextTicket.status);
             if (nextTicket.rowType === 'TEXT') nextTicket.status = TicketStatus.Todo;
             return normalizeTicketForExecution(nextTicket);
           })
@@ -1193,6 +1203,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
 
     if (updates.canvasItemIds && campaign.canvasScene) {
+      // Canvas link sync path:
+      // - Remove previous ticket links for this ticket id.
+      // - Rebuild with validated element ids only.
       const allowedElementIds = new Set(campaign.canvasScene.elements.map(element => element.id));
       const nextElementIds = updates.canvasItemIds.filter(id => allowedElementIds.has(id));
       const nonTicketRelations = campaign.canvasScene.relations.filter(
