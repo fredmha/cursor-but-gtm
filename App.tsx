@@ -19,7 +19,7 @@ const createDefaultCanvasScene = (): CanvasScene => ({
 
 const MainLayout: React.FC = () => {
   const { campaign, setCampaign, users, currentUser, switchUser, reset, currentView, setCurrentView } = useStore();
-  const isCanvasView = currentView === 'CANVAS';
+  const isCompactSidebarView = currentView === 'CANVAS' || currentView === 'EXECUTION';
 
   const handleInitialize = () => {
       const campaignId = generateId();
@@ -77,15 +77,15 @@ const MainLayout: React.FC = () => {
     <div className="h-screen w-full flex bg-background text-primary font-sans">
       
       {/* LEFT SIDEBAR NAVIGATION */}
-      <nav className={`${isCanvasView ? 'w-16' : 'w-64'} border-r border-border bg-surface flex flex-col shrink-0 transition-all duration-200`}>
+      <nav className={`${isCompactSidebarView ? 'w-16' : 'w-64'} border-r border-border bg-surface flex flex-col shrink-0 transition-all duration-200`}>
          
          {/* Workspace Header */}
-         <div className={`h-14 ${isCanvasView ? 'px-2' : 'px-4'} flex items-center mb-2`}>
-             <div className={`flex items-center ${isCanvasView ? 'justify-center' : 'gap-3'} p-2 rounded-lg hover:bg-zinc-100 transition-colors cursor-pointer w-full`}>
+         <div className={`h-14 ${isCompactSidebarView ? 'px-2' : 'px-4'} flex items-center mb-2`}>
+             <div className={`flex items-center ${isCompactSidebarView ? 'justify-center' : 'gap-3'} p-2 rounded-lg hover:bg-zinc-100 transition-colors cursor-pointer w-full`}>
                  <div className="w-6 h-6 bg-zinc-900 rounded-md flex items-center justify-center shadow-sm">
                      <Icons.Target className="w-3.5 h-3.5 text-white" />
                  </div>
-                 {!isCanvasView && (
+                 {!isCompactSidebarView && (
                     <>
                         <div className="flex flex-col overflow-hidden">
                             <span className="font-semibold text-xs text-zinc-900 leading-none truncate">GTM OS</span>
@@ -98,7 +98,7 @@ const MainLayout: React.FC = () => {
          </div>
 
          {/* Navigation Links */}
-         <div className={`flex-1 ${isCanvasView ? 'px-2' : 'px-3'} space-y-0.5`}>
+         <div className={`flex-1 ${isCompactSidebarView ? 'px-2' : 'px-3'} space-y-0.5`}>
              {(['ROADMAP', 'EXECUTION', 'DOCS', 'REVIEW', 'CANVAS'] as ViewMode[]).map((v) => {
                  const isActive = currentView === v;
                  const icons: Record<ViewMode, React.FC<any>> = {
@@ -117,50 +117,50 @@ const MainLayout: React.FC = () => {
                         key={v}
                         onClick={() => setCurrentView(v)}
                         title={v.charAt(0) + v.slice(1).toLowerCase()}
-                        className={`w-full flex items-center ${isCanvasView ? 'justify-center' : 'gap-3'} px-3 py-1.5 rounded-md text-sm transition-all group ${
+                        className={`w-full flex items-center ${isCompactSidebarView ? 'justify-center' : 'gap-3'} px-3 py-1.5 rounded-md text-sm transition-all group ${
                             isActive 
                             ? 'bg-white text-zinc-900 shadow-sm ring-1 ring-zinc-200/50' 
                             : 'text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100'
                         }`}
                      >
                          <Icon className={`w-4 h-4 ${isActive ? 'text-zinc-800' : 'text-zinc-400 group-hover:text-zinc-600'}`} />
-                         {!isCanvasView && (v.charAt(0) + v.slice(1).toLowerCase())}
+                         {!isCompactSidebarView && (v.charAt(0) + v.slice(1).toLowerCase())}
                      </button>
                  );
              })}
          </div>
 
          {/* User Profile / Footer */}
-         <div className={`${isCanvasView ? 'p-2' : 'p-3'} border-t border-border mt-auto`}>
+         <div className={`${isCompactSidebarView ? 'p-2' : 'p-3'} border-t border-border mt-auto`}>
              
              {/* Settings Link */}
              <button
                 onClick={() => setCurrentView('SETTINGS')}
                 title="Settings"
-                className={`w-full flex items-center ${isCanvasView ? 'justify-center' : 'gap-3'} px-3 py-2 mb-2 rounded-md text-sm transition-all group ${
+                className={`w-full flex items-center ${isCompactSidebarView ? 'justify-center' : 'gap-3'} px-3 py-2 mb-2 rounded-md text-sm transition-all group ${
                     currentView === 'SETTINGS'
                     ? 'bg-white text-zinc-900 shadow-sm ring-1 ring-zinc-200/50' 
                     : 'text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100'
                 }`}
              >
                  <Icons.Settings className={`w-4 h-4 ${currentView === 'SETTINGS' ? 'text-zinc-800' : 'text-zinc-400 group-hover:text-zinc-600'}`} />
-                 {!isCanvasView && 'Settings'}
+                 {!isCompactSidebarView && 'Settings'}
              </button>
 
-             <div className={`flex items-center ${isCanvasView ? 'justify-center' : 'justify-between'} p-2 rounded-lg hover:bg-zinc-100 transition-colors cursor-pointer group`}>
+             <div className={`flex items-center ${isCompactSidebarView ? 'justify-center' : 'justify-between'} p-2 rounded-lg hover:bg-zinc-100 transition-colors cursor-pointer group`}>
                  <div className="flex items-center gap-2">
                      <div className={`w-6 h-6 rounded-full ${currentUser.color} text-white flex items-center justify-center text-[9px] font-bold shadow-sm`}>
                          {currentUser.initials}
                      </div>
-                     {!isCanvasView && <span className="text-xs font-medium text-zinc-700">{currentUser.name}</span>}
+                     {!isCompactSidebarView && <span className="text-xs font-medium text-zinc-700">{currentUser.name}</span>}
                  </div>
-                 {!isCanvasView && (
+                 {!isCompactSidebarView && (
                     <button onClick={reset} className="text-[10px] text-zinc-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-all">Reset</button>
                  )}
              </div>
              
              {/* Simple User Switcher Row */}
-             {!isCanvasView && (
+             {!isCompactSidebarView && (
              <div className="flex gap-1 px-2 mt-2">
                  {users.filter(u => u.id !== currentUser.id).map(u => (
                      <button 

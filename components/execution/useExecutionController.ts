@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ColumnDef } from '@tanstack/react-table';
 import { useStore } from '../../store';
-import { ExecutionRowType, Ticket, TicketStatus } from '../../types';
+import { Ticket, TicketStatus } from '../../types';
 import { buildExecutionColumns } from './execution-columns';
 import { getTaskLabel } from './execution-core';
 import { useExecutionCellEditor } from './useExecutionCellEditor';
@@ -31,7 +31,6 @@ export const useExecutionController = () => {
 
   const rows = useMemo(() => getExecutionRows(), [campaign, getExecutionRows]);
 
-  const [showAddMenu, setShowAddMenu] = useState(false);
   const [componentsEditorRowId, setComponentsEditorRowId] = useState<string | null>(null);
   const [pendingRowFocus, setPendingRowFocus] = useState(false);
 
@@ -70,13 +69,8 @@ export const useExecutionController = () => {
     [componentsEditorRowId, rows]
   );
 
-  const handleAddRow = (rowType: ExecutionRowType) => {
-    if (rowType === 'TEXT') {
-      addExecutionRow({ rowType: 'TEXT', executionText: 'New text row', title: 'Note' });
-    } else {
-      addExecutionRow({ rowType: 'TASK', title: 'New Task', status: TicketStatus.Todo });
-    }
-    setShowAddMenu(false);
+  const handleAddRow = () => {
+    addExecutionRow({ rowType: 'TASK', title: 'New Task', status: TicketStatus.Todo });
     setPendingRowFocus(true);
   };
 
@@ -125,8 +119,6 @@ export const useExecutionController = () => {
   return {
     rows,
     columns,
-    showAddMenu,
-    setShowAddMenu,
     handleAddRow,
     canvasElementOptions,
     componentsEditorTicket,

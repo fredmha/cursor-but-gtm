@@ -1118,6 +1118,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const standaloneTickets = campaign.standaloneTickets || [];
     return [...channelTickets, ...projectTickets, ...standaloneTickets]
       .map(normalizeTicketForExecution)
+      .filter(ticket => ticket.rowType === 'TASK')
       .sort((a, b) => {
         const timeDiff = getTimestamp(a.createdAt) - getTimestamp(b.createdAt);
         if (timeDiff !== 0) return timeDiff;

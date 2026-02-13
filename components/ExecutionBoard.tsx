@@ -17,8 +17,6 @@ export const ExecutionBoard: React.FC = () => {
   const {
     rows,
     columns,
-    showAddMenu,
-    setShowAddMenu,
     handleAddRow,
     canvasElementOptions,
     componentsEditorTicket,
@@ -34,7 +32,7 @@ export const ExecutionBoard: React.FC = () => {
 
   return (
     <div className="h-full flex flex-col bg-white text-zinc-900">
-      <div className="h-14 border-b border-zinc-100 px-6 flex items-center justify-between">
+      <div className="h-14 border-b border-zinc-100 px-4 lg:px-5 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Icons.Database className="w-4 h-4 text-zinc-500" />
           <h2 className="text-sm font-bold">Execution Table</h2>
@@ -42,14 +40,14 @@ export const ExecutionBoard: React.FC = () => {
         <span className="text-xs text-zinc-500">{rows.length} rows</span>
       </div>
 
-      <div className="flex-1 overflow-auto p-6">
-        <div className="border border-zinc-200 rounded-xl overflow-hidden">
-          <table className="w-full border-collapse">
+      <div className="flex-1 overflow-auto p-3 lg:p-4">
+        <div className="w-full border border-zinc-200 rounded-xl overflow-x-auto overflow-y-hidden">
+          <table className="w-full min-w-[820px] border-collapse">
             <thead>
               {table.getHeaderGroups().map(headerGroup => (
                 <tr key={headerGroup.id} className="bg-zinc-50 border-b border-zinc-200">
                   {headerGroup.headers.map(header => (
-                    <th key={header.id} className="text-left text-[11px] uppercase tracking-wider text-zinc-500 px-3 py-2 font-semibold">
+                    <th key={header.id} className="text-left text-[11px] uppercase tracking-wider text-zinc-500 px-2.5 py-2 font-semibold">
                       {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
                     </th>
                   ))}
@@ -60,7 +58,7 @@ export const ExecutionBoard: React.FC = () => {
               {table.getRowModel().rows.map(row => (
                 <tr key={row.id} className="border-b border-zinc-100 hover:bg-zinc-50/50">
                   {row.getVisibleCells().map(cell => (
-                    <td key={cell.id} className="px-3 py-2 align-top text-sm">
+                    <td key={cell.id} className="px-2.5 py-2 align-top text-sm">
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </td>
                   ))}
@@ -69,30 +67,14 @@ export const ExecutionBoard: React.FC = () => {
             </tbody>
           </table>
 
-          <div className="px-3 py-2 bg-zinc-50 border-t border-zinc-200 relative">
+          <div className="px-2.5 py-2 bg-zinc-50 border-t border-zinc-200 relative">
             <button
-              onClick={() => setShowAddMenu(value => !value)}
+              onClick={handleAddRow}
               className="inline-flex items-center gap-2 px-2 py-1 rounded text-sm text-zinc-600 hover:bg-zinc-100"
             >
               <Icons.Plus className="w-4 h-4" />
-              Add row
+              Add task row
             </button>
-            {showAddMenu && (
-              <div className="absolute left-3 bottom-11 z-10 w-44 bg-white border border-zinc-200 rounded-lg shadow-lg p-1">
-                <button
-                  onClick={() => handleAddRow('TASK')}
-                  className="w-full text-left px-2 py-1.5 rounded text-sm hover:bg-zinc-100"
-                >
-                  Task row
-                </button>
-                <button
-                  onClick={() => handleAddRow('TEXT')}
-                  className="w-full text-left px-2 py-1.5 rounded text-sm hover:bg-zinc-100"
-                >
-                  Text row
-                </button>
-              </div>
-            )}
           </div>
         </div>
       </div>
