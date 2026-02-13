@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
-import { Campaign, Channel, Ticket, TicketStatus, Status, User, Priority, RoadmapItem, Project, ProjectUpdate, ChannelLink, ChannelNote, TimelineTag, ChannelPlan, ContextDoc, DocFolder, ViewMode, Role, ChatMessage, CanvasScene, CanvasElement, CanvasRelation, ExecutionRowType } from './types';
+import { Campaign, Channel, Ticket, TicketStatus, Status, User, Priority, RoadmapItem, Project, ProjectUpdate, ChannelLink, ChannelNote, TimelineTag, ChannelPlan, ContextDoc, DocFolder, ViewMode, Role, ChatMessage, CanvasScene, CanvasElement, CanvasRelation, ExecutionRowType, CanvasEmailTemplate, CanvasEmailBlock, EmailBlockType, EmailBlockAlign } from './types';
 
 // --- Constants ---
 
@@ -159,7 +159,8 @@ const normalizeCanvasElement = (element: any): CanvasElement => ({
   ),
   zIndex: parseCanvasNumber(element?.zIndex) ?? 0,
   text: typeof element?.text === 'string' ? element.text : '',
-  style: element?.style && typeof element.style === 'object' ? element.style : undefined
+  style: element?.style && typeof element.style === 'object' ? element.style : undefined,
+  emailTemplate: normalizeEmailTemplate(element?.emailTemplate)
 });
 
 const parseCanvasNumber = (value: unknown): number | undefined => {
@@ -169,6 +170,65 @@ const parseCanvasNumber = (value: unknown): number | undefined => {
     if (Number.isFinite(parsed)) return parsed;
   }
   return undefined;
+};
+
+const clampNumber = (value: number, min: number, max: number): number =>
+  Math.min(max, Math.max(min, value));
+
+const EMAIL_BLOCK_TYPES: EmailBlockType[] = ['H1', 'H2', 'BODY', 'IMAGE'];
+const EMAIL_BLOCK_ALIGNMENTS: EmailBlockAlign[] = ['left', 'center', 'right'];
+
+const getDefaultBlockLayout = (type: EmailBlockType): Required<Pick<CanvasEmailBlock, 'heightPx' | 'fontSizePx' | 'paddingY' | 'paddingX' | 'marginBottomPx'>> => {
+  if (type === 'H1') return { heightPx: 56, fontSizePx: 30, paddingY: 8, paddingX: 10, marginBottomPx: 8 };
+  if (type === 'H2') return { heightPx: 46, fontSizePx: 24, paddingY: 8, paddingX: 10, marginBottomPx: 8 };
+  if (type === 'IMAGE') return { heightPx: 140, fontSizePx: 14, paddingY: 6, paddingX: 6, marginBottomPx: 10 };
+  return { heightPx: 84, fontSizePx: 16, paddingY: 8, paddingX: 10, marginBottomPx: 8 };
+};
+
+const normalizeEmailBlock = (rawBlock: unknown): CanvasEmailBlock | null => {
+  if (!rawBlock || typeof rawBlock !== 'object') return null;
+  const block = rawBlock as Record<string, unknown>;
+  const type = typeof block.type === 'string' && EMAIL_BLOCK_TYPES.includes(block.type as EmailBlockType)
+    ? block.type as EmailBlockType
+    : null;
+  if (!type) return null;
+
+  const align = typeof block.align === 'string' && EMAIL_BLOCK_ALIGNMENTS.includes(block.align as EmailBlockAlign)
+    ? block.align as EmailBlockAlign
+    : 'left';
+  const defaults = getDefaultBlockLayout(type);
+  const heightPx = clampNumber(parseCanvasNumber(block.heightPx) ?? defaults.heightPx, 32, 420);
+  const fontSizePx = clampNumber(parseCanvasNumber(block.fontSizePx) ?? defaults.fontSizePx, 10, 48);
+  const paddingY = clampNumber(parseCanvasNumber(block.paddingY) ?? defaults.paddingY, 0, 24);
+  const paddingX = clampNumber(parseCanvasNumber(block.paddingX) ?? defaults.paddingX, 0, 24);
+  const marginBottomPx = clampNumber(parseCanvasNumber(block.marginBottomPx) ?? defaults.marginBottomPx, 0, 48);
+
+  return {
+    id: typeof block.id === 'string' ? block.id : generateId(),
+    type,
+    align,
+    text: typeof block.text === 'string' ? block.text : '',
+    imageUrl: typeof block.imageUrl === 'string' ? block.imageUrl : '',
+    heightPx,
+    fontSizePx,
+    paddingY,
+    paddingX,
+    marginBottomPx
+  };
+};
+
+const normalizeEmailTemplate = (rawTemplate: unknown): CanvasEmailTemplate | undefined => {
+  if (!rawTemplate || typeof rawTemplate !== 'object') return undefined;
+  const template = rawTemplate as Record<string, unknown>;
+  const rawBlocks = Array.isArray(template.blocks) ? template.blocks : [];
+  const blocks = rawBlocks
+    .map(normalizeEmailBlock)
+    .filter((block): block is CanvasEmailBlock => block !== null);
+  if (blocks.length === 0) return undefined;
+  return {
+    version: 1,
+    blocks
+  };
 };
 
 const normalizeCanvasViewport = (viewport: any): CanvasScene['viewport'] => ({
