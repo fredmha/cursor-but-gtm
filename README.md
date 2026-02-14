@@ -1,115 +1,139 @@
 
-# GTM OS (Go-To-Market Operating System)
+# GTM OS
 
-> A unified strategy-to-execution platform for high-velocity SaaS teams.
+A local-first GTM coordination workspace with two core surfaces:
 
-GTM OS replaces the fragmented stack of Google Docs, Jira, and Miro with a single, coherent operating system. It enforces a strict hierarchy where every unit of work (Ticket) is directly linked to a strategic container (Project or Channel) and a specific timeframe.
+- `Execution`: a structured ticket table for delivery tracking.
+- `Canvas`: a visual whiteboard for modeling artifacts (email cards, containers) and linking them to execution tickets.
 
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Status](https://img.shields.io/badge/status-stable-green)
+The product model is simple: create on canvas, track in execution, and keep links between both in sync.
 
----
+## Current Scope
 
-## 🌟 Core Philosophy
+This repo currently focuses on:
 
-1.  **One Source of Truth**: Planning and execution happen in the same database. Tickets are the shared execution primitive.
-2.  **Context Over Control**: Every task links to a "Why" (Strategy Doc, Principle, or KPI).
-3.  **Finite vs. Infinite**: Work is split into **Projects** (Finite, time-bound initiatives) and **Channels** (Infinite, ongoing operational lanes).
+- Execution table (`TASK` and `TEXT` row types).
+- Canvas workspace (`EMAIL_CARD` and `CONTAINER` elements).
+- Bidirectional bridge between canvas elements and ticket rows.
 
-## 🚀 Key Features
+It does **not** currently include the older docs/review/AI surfaces referenced in legacy docs.
 
-### 1. Execution Board ("Linear-Style")
-*   **Team Pulse**: A manager's view of the entire team's velocity and workload distribution.
-*   **My Focus**: An IC (Individual Contributor) view filtering out noise.
-*   **Project Command**: Dedicated dashboards for specific initiatives with embedded Kanban boards.
-*   **Strict Hierarchy**: Tickets cannot exist in a vacuum; they must belong to a Channel or Project.
+## Key Features
 
-### 2. Knowledge Base ("Notion-Lite")
-*   **Rich Text & Canvas**: Integrated WYSIWYG editor and infinite Canvas/Whiteboard.
-*   **Direct Linkage**: Documents can be "pinned" to specific Tickets to provide immediate context (PRDs, designs, briefs).
-*   **Folder Organization**: Dynamic folder structures for Strategy, Personas, Brand, etc.
+- Execution table with inline editing, add/delete rows, assignee/priority/status fields.
+- Canvas workspace with pan/zoom, connectable nodes, parent-child containers, and element selection.
+- Email card builder on canvas with block-based composition (`H1`, `H2`, `H3`, `BODY`, `IMAGE`).
+- Drag-and-drop block reorder and per-block editing (text, alignment, spacing, dimensions, image URL/upload).
+- Ticket-to-canvas linking via modal pickers in both views.
+- Local persistence to browser storage with schema normalization/migration for canvas scene data.
 
-### 3. Strategy Lab (AI)
-*   **Conversational Architect**: A Gemini-powered agent that interviews you to generate full GTM strategies.
-*   **Review Agent**: A Daily/Weekly AI companion that runs standups, identifies slippage, and proposes schedule adjustments.
+## Architecture Overview
 
----
+### App Shell
 
-## 🛠 Tech Stack
+- `App.tsx` mounts `StoreProvider` and renders either `ExecutionBoard` or `CanvasView`.
+- Sidebar controls active view and user switching.
 
-*   **Framework**: React 18 (ESM)
-*   **Styling**: Tailwind CSS (Custom "Harvey" Light Theme)
-*   **Icons**: Hand-coded SVGs (Lucide-style) for zero-dependency weight.
-*   **State Management**: React Context + LocalStorage (Local-first architecture).
-*   **AI**: Google Gemini API (`@google/genai`).
+### State and Persistence
 
----
+- `store.tsx` is the central state layer (React Context).
+- Campaign/users persist in localStorage (`gtm-os-campaign`, `gtm-os-users`).
+- In dev mode, storage resets on reload (`import.meta.env.DEV`).
+- Canvas scene is persisted as `CanvasScene` (`version: 2`) and normalized on load.
 
-## 🚦 Getting Started
+### Canvas Runtime
+
+- `components/CanvasView.tsx` hosts React Flow and inspector/tooling UI.
+- `components/canvas/useCanvasController.tsx` owns canvas runtime state, undo/redo history, and commit scheduling.
+- `components/canvas/CanvasElementNode.tsx` renders the visual card UI, including email block rows.
+- `components/canvas/canvas-core.ts` contains scene mapping helpers and email block/template utilities.
+
+### Execution Runtime
+
+- `components/ExecutionBoard.tsx` is the table shell.
+- `components/execution/useExecutionController.ts` coordinates row actions and editing state.
+- `components/execution/execution-columns.tsx` defines table columns and cell behavior.
+
+## Data Model Notes
+
+- Core types live in `types.ts`.
+- `CanvasEmailTemplate` is currently block-based:
+  - `version: 1`
+  - `blocks: CanvasEmailBlock[]`
+- There is no HTML/MJML export pipeline in this repo; canvas email cards are rendered directly from block data.
+
+## Tech Stack
+
+- React 19 + TypeScript
+- Vite 6
+- React Context + localStorage (local-first state)
+- `@xyflow/react` (canvas graph/editor runtime)
+- `@tanstack/react-table` (execution table)
+- `@dnd-kit/*` (email block DnD)
+- Vitest + Testing Library (`jsdom`) for tests
+
+## Getting Started
 
 ### Prerequisites
-*   Node.js (v18+)
-*   A Google Gemini API Key (Paid tier recommended for Veo/Imagen features, though standard text models work on free tier).
 
-### Installation
+- Node.js 18+
+- npm
 
-1.  **Clone & Install**
-    ```bash
-    npm install
-    ```
+### Install
 
-2.  **Environment Setup**
-    Create a `.env` file in the root:
-    ```env
-    API_KEY=your_google_gemini_api_key
-    ```
+```bash
+npm install
+```
 
-3.  **Run Development Server**
-    ```bash
-    npm start
-    ```
+### Environment
 
-4.  **Reset / Initialize**
-    Upon first load, click **"Initialize Workspace"** to seed the local database with a blank campaign structure.
+Create `.env` in project root:
 
----
+```env
+GEMINI_API_KEY=your_key_here
+```
 
-## 📂 Project Structure
+`vite.config.ts` exposes `GEMINI_API_KEY` to both `process.env.GEMINI_API_KEY` and `process.env.API_KEY`.
+
+### Run
+
+```bash
+npm run dev
+```
+
+Open the app, then click **Initialize Workspace** on first load.
+
+## Scripts
+
+- `npm run dev` - start dev server
+- `npm run build` - production build
+- `npm run preview` - preview production build
+- `npm run test` - run tests once
+- `npm run test:watch` - run tests in watch mode
+
+## Project Map
 
 ```text
 /
+├── App.tsx
+├── store.tsx
+├── types.ts
 ├── components/
-│   ├── ExecutionBoard.tsx    # Main issue tracking & Team Pulse
-│   ├── DocsView.tsx          # Knowledge base & Editors
-│   ├── ReviewMode.tsx        # AI Agent chat interface
-│   ├── ProjectDashboard.tsx  # "God Mode" view for Projects
-│   └── ...
-├── services/
-│   ├── geminiService.ts      # AI Logic for Strategy Generation
-│   └── reviewAgent.ts        # AI Logic for Core Task Agent
-├── store.tsx                 # Central State (Context + LocalStorage)
-├── types.ts                  # TypeScript Definitions (The Source of Truth)
-└── constants.tsx             # Icons & Static Configs
+│   ├── CanvasView.tsx
+│   ├── ExecutionBoard.tsx
+│   ├── canvas/
+│   │   ├── useCanvasController.tsx
+│   │   ├── CanvasElementNode.tsx
+│   │   ├── CanvasInspectorPanel.tsx
+│   │   └── canvas-core.ts
+│   └── execution/
+│       ├── useExecutionController.ts
+│       ├── execution-columns.tsx
+│       └── execution-core.ts
+└── components/canvas/canvas-core.test.ts
 ```
 
-## 🎨 Visual Design System ("Harvey")
+## Testing
 
-The application uses a **Strict Light Mode** aesthetic designed for focus.
-
-*   **Surface**: `zinc-50` / `#fafafa` (Sidebar, Backgrounds)
-*   **Card**: `white` / `#ffffff` (Active elements)
-*   **Border**: `zinc-100` / `#f4f4f5` (Subtle separation)
-*   **Text**: `zinc-900` (Headings), `zinc-500` (Meta)
-*   **Accents**: Pastel backgrounds with saturated text (e.g., `bg-indigo-50 text-indigo-600`).
-
----
-
-## 🤝 Contributing
-
-1.  **Read `RULES.md`**: Strictly adhere to the architectural constraints.
-2.  **No Business Logic in UI**: Move complex state mutations to `store.tsx`.
-3.  **Preserve the Hierarchy**: Ensure `Project > Ticket` or `Channel > Ticket` relationships are never broken.
-
----
-
-*Built with ❤️ for the GTM Engineers.*
+- Current focused test coverage is in `components/canvas/canvas-core.test.ts`.
+- Run tests with `npm run test`.
