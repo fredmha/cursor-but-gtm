@@ -22,10 +22,7 @@ export type Role = 'Admin' | 'Member';
 export type ProjectHealth = 'On Track' | 'At Risk' | 'Off Track' | 'Completed';
 export type ChannelTag = 'Inbound' | 'Outbound';
 export type ChannelType = '' | 'PROJECT';
-export type DocType = 'STRATEGY' | 'PERSONA' | 'BRAND' | 'PROCESS';
-export type DocFormat = 'TEXT' | 'CANVAS';
-export type CanvasNodeType = 'RECT' | 'CIRCLE' | 'STICKY' | 'TEXT' | 'IMAGE';
-export type ViewMode = 'ONBOARDING' | 'EXECUTION' | 'REVIEW' | 'CANVAS' | 'DOCS' | 'SETTINGS';
+export type ViewMode = 'EXECUTION' | 'CANVAS';
 export type CanvasTool = 'SELECT' | 'HAND' | 'EMAIL_CARD' | 'CONTAINER';
 export type CanvasElementKind = 'EMAIL_CARD' | 'CONTAINER';
 export type CanvasRelationType = 'PARENT' | 'TICKET_LINK' | 'EDGE';
@@ -132,38 +129,7 @@ export interface OperatingPrinciple {
   category: string;
 }
 
-// --- Docs & Canvas ---
-
-export interface DocFolder {
-  id: string;
-  name: string;
-  icon?: string;
-  parentId?: string;
-  order?: number;
-  isRagIndexed?: boolean;
-  isArchived?: boolean;
-  isFavorite?: boolean;
-  createdAt: string;
-}
-
-export interface CanvasNode {
-  id: string;
-  type: CanvasNodeType;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  color: string;
-  text?: string;
-  src?: string;
-}
-
-export interface CanvasEdge {
-  id: string;
-  fromNode: string;
-  toNode: string;
-  color?: string;
-}
+// --- Canvas ---
 
 export interface CanvasElementStyle {
   fill?: string;
@@ -227,49 +193,6 @@ export interface CanvasDocumentV2 {
 
 export type CanvasScene = CanvasDocumentV2;
 
-export interface ContextDoc {
-  id: string;
-  shortId?: string;
-  title: string;
-  content: string;
-  format?: DocFormat;
-  type?: DocType;
-  folderId?: string;
-  order?: number;
-  lastUpdated: string;
-  isAiGenerated: boolean;
-  tags?: string[];
-  channelId?: string;
-  icon?: string;
-  isRagIndexed?: boolean;
-  isArchived?: boolean;
-  isFavorite?: boolean;
-  lastEditedBy?: string;
-  createdBy?: string;
-  createdAt?: string;
-}
-
-// --- Chat ---
-
-export interface ChatPart {
-  text?: string;
-  functionCall?: {
-    name: string;
-    args: any;
-  };
-  functionResponse?: {
-    name: string;
-    response: any;
-  };
-}
-
-export interface ChatMessage {
-  id: string;
-  role: 'user' | 'model';
-  parts: ChatPart[];
-  timestamp: number;
-}
-
 // --- Campaign ---
 
 export interface Campaign {
@@ -283,19 +206,11 @@ export interface Campaign {
   projects: Project[];
   standaloneTickets?: Ticket[];
   principles: OperatingPrinciple[];
-  docFolders: DocFolder[];
-  docs: ContextDoc[];
-  availableTags?: string[];
-  recentDocIds?: string[];
   sampleData?: {
     enabled: boolean;
     channelIds: string[];
     projectIds: string[];
     ticketIds: string[];
   };
-  lastDailyStandup?: string;
-  lastWeeklyReview?: string;
-  dailyChatHistory?: ChatMessage[];
-  weeklyChatHistory?: ChatMessage[];
   canvasScene?: CanvasScene;
 }

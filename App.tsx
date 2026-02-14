@@ -1,11 +1,8 @@
 
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { StoreProvider, useStore, generateId } from './store';
 import { ExecutionBoard } from './components/ExecutionBoard';
-import { ReviewMode } from './components/ReviewMode';
 import { CanvasView } from './components/CanvasView';
-import { DocsView } from './components/DocsView';
-import { SettingsView } from './components/SettingsView';
 import { ViewMode, Campaign, CanvasScene } from './types';
 import { Icons } from './constants';
 
@@ -33,10 +30,6 @@ const MainLayout: React.FC = () => {
           projects: [],
           standaloneTickets: [],
           principles: [],
-          docFolders: [],
-          docs: [],
-          recentDocIds: [],
-          availableTags: [],
           canvasScene: createDefaultCanvasScene()
       };
       setCampaign(newCampaign);
@@ -96,17 +89,13 @@ const MainLayout: React.FC = () => {
 
          {/* Navigation Links */}
          <div className={`flex-1 ${isCompactSidebarView ? 'px-2' : 'px-3'} space-y-0.5`}>
-             {(['EXECUTION', 'DOCS', 'REVIEW', 'CANVAS'] as ViewMode[]).map((v) => {
-                 const isActive = currentView === v;
-                 const icons: Record<ViewMode, React.FC<any>> = {
-                     'EXECUTION': Icons.Zap,
-                     'DOCS': Icons.FileText,
-                     'REVIEW': Icons.Target,
-                     'CANVAS': Icons.Layout,
-                     'ONBOARDING': Icons.Sparkles,
-                     'SETTINGS': Icons.Settings
-                 };
-                 const Icon = icons[v];
+             {(['EXECUTION', 'CANVAS'] as ViewMode[]).map((v) => {
+                  const isActive = currentView === v;
+                  const icons: Record<ViewMode, React.FC<any>> = {
+                      'EXECUTION': Icons.Zap,
+                      'CANVAS': Icons.Layout
+                  };
+                  const Icon = icons[v];
                  
                  return (
                      <button
@@ -129,21 +118,7 @@ const MainLayout: React.FC = () => {
          {/* User Profile / Footer */}
          <div className={`${isCompactSidebarView ? 'p-2' : 'p-3'} border-t border-border mt-auto`}>
              
-             {/* Settings Link */}
-             <button
-                onClick={() => setCurrentView('SETTINGS')}
-                title="Settings"
-                className={`w-full flex items-center ${isCompactSidebarView ? 'justify-center' : 'gap-3'} px-3 py-2 mb-2 rounded-md text-sm transition-all group ${
-                    currentView === 'SETTINGS'
-                    ? 'bg-white text-zinc-900 shadow-sm ring-1 ring-zinc-200/50' 
-                    : 'text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100'
-                }`}
-             >
-                 <Icons.Settings className={`w-4 h-4 ${currentView === 'SETTINGS' ? 'text-zinc-800' : 'text-zinc-400 group-hover:text-zinc-600'}`} />
-                 {!isCompactSidebarView && 'Settings'}
-             </button>
-
-             <div className={`flex items-center ${isCompactSidebarView ? 'justify-center' : 'justify-between'} p-2 rounded-lg hover:bg-zinc-100 transition-colors cursor-pointer group`}>
+              <div className={`flex items-center ${isCompactSidebarView ? 'justify-center' : 'justify-between'} p-2 rounded-lg hover:bg-zinc-100 transition-colors cursor-pointer group`}>
                  <div className="flex items-center gap-2">
                      <div className={`w-6 h-6 rounded-full ${currentUser.color} text-white flex items-center justify-center text-[9px] font-bold shadow-sm`}>
                          {currentUser.initials}
@@ -171,14 +146,11 @@ const MainLayout: React.FC = () => {
          </div>
       </nav>
 
-      {/* MAIN CONTENT AREA */}
-      <main className="flex-1 overflow-hidden bg-background relative">
-          {currentView === 'EXECUTION' && <ExecutionBoard />}
-          {currentView === 'REVIEW' && <ReviewMode />}
-          {currentView === 'CANVAS' && <CanvasView />}
-          {currentView === 'DOCS' && <DocsView />}
-          {currentView === 'SETTINGS' && <SettingsView />}
-      </main>
+       {/* MAIN CONTENT AREA */}
+       <main className="flex-1 overflow-hidden bg-background relative">
+           {currentView === 'EXECUTION' && <ExecutionBoard />}
+           {currentView === 'CANVAS' && <CanvasView />}
+       </main>
 
     </div>
   );

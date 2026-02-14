@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
-import { Campaign, Channel, Ticket, TicketStatus, User, Priority, Project, ProjectUpdate, ChannelLink, ChannelNote, ChannelPlan, ContextDoc, DocFolder, ViewMode, Role, ChatMessage, CanvasScene, CanvasElement, CanvasRelation, ExecutionRowType, CanvasEmailTemplate, CanvasEmailBlock, EmailBlockType, EmailBlockAlign } from './types';
+import { Campaign, Channel, Ticket, TicketStatus, User, Priority, Project, ProjectUpdate, ChannelLink, ChannelNote, ChannelPlan, ViewMode, Role, CanvasScene, CanvasElement, CanvasRelation, ExecutionRowType, CanvasEmailTemplate, CanvasEmailBlock, EmailBlockType, EmailBlockAlign } from './types';
 
 // --- Constants ---
 
@@ -8,11 +8,6 @@ const STORAGE_KEYS = {
   campaign: 'gtm-os-campaign',
   users: 'gtm-os-users'
 } as const;
-
-const ORDER_STEP = 1000;
-const ROOT_KEY = '__root__';
-const RECENT_DOC_LIMIT = 25;
-const DEFAULT_FOLDER_ICON = '\u{1F4C1}';
 
 const createDefaultCanvasScene = (): CanvasScene => ({
   version: 2,
@@ -72,17 +67,6 @@ export const DEFAULT_USER: User = {
   role: 'Admin'
 };
 
-const DOC_SHORT_ID_PREFIX = 'D-';
-
-const generateDocShortId = (existing: Set<string>): string => {
-  let next = '';
-  do {
-    next = `${DOC_SHORT_ID_PREFIX}${Math.floor(1000 + Math.random() * 9000)}`;
-  } while (existing.has(next));
-  existing.add(next);
-  return next;
-};
-
 // Convert a date string to a sortable timestamp. Missing/invalid dates sort last.
 const getTimestamp = (dateString?: string) => {
   if (!dateString) return Number.POSITIVE_INFINITY;
@@ -107,42 +91,6 @@ const updateById = <T extends { id: string }>(items: T[], id: string, updates: P
 const removeById = <T extends { id: string }>(items: T[], id: string) =>
   items.filter(item => item.id !== id);
 
-const normalizeOrdering = <T extends { id: string; order?: number }>(
-  items: T[],
-  getParentId: (item: T) => string | undefined,
-  getTimestampValue: (item: T) => string | undefined
-): T[] => {
-  const cloned = items.map(item => ({ ...item }));
-  const grouped = new Map<string, T[]>();
-
-  cloned.forEach(item => {
-    const key = getParentId(item) || ROOT_KEY;
-    const group = grouped.get(key) || [];
-    group.push(item);
-    grouped.set(key, group);
-  });
-
-  grouped.forEach(group => {
-    group.sort((a, b) => {
-      const ao = a.order ?? Number.POSITIVE_INFINITY;
-      const bo = b.order ?? Number.POSITIVE_INFINITY;
-      if (ao !== bo) return ao - bo;
-      const at = getTimestamp(getTimestampValue(a));
-      const bt = getTimestamp(getTimestampValue(b));
-      return at - bt;
-    });
-
-    let nextOrder = ORDER_STEP;
-    group.forEach(item => {
-      if (item.order === undefined || Number.isNaN(item.order)) {
-        item.order = nextOrder;
-      }
-      nextOrder = (item.order || nextOrder) + ORDER_STEP;
-    });
-  });
-
-  return cloned;
-};
 
 const normalizeCanvasElement = (element: any): CanvasElement => ({
   id: typeof element?.id === 'string' ? element.id : generateId(),
@@ -380,43 +328,15 @@ interface StoreState {
   updateExecutionRow: (ticketId: string, updates: Partial<Ticket>) => void;
   deleteExecutionRow: (ticketId: string) => void;
 
-  linkDocToTicket: (docId: string, ticketId: string, channelId?: string, projectId?: string) => void;
-
-  addDocFolder: (name: string, icon?: string, parentId?: string, order?: number) => void;
-  updateDocFolder: (folderId: string, updates: Partial<DocFolder>) => void;
-  renameDocFolder: (folderId: string, name: string) => void;
-  moveDocFolder: (folderId: string, parentId: string | undefined, order?: number) => void;
-  deleteDocFolder: (folderId: string) => void;
-  toggleRagIndexing: (type: 'DOC' | 'FOLDER', id: string, isIndexed: boolean) => void;
-  toggleDocFavorite: (docId: string, value?: boolean) => void;
-  toggleFolderFavorite: (folderId: string, value?: boolean) => void;
-  recordRecentDoc: (docId: string) => void;
-
-  addDoc: (doc: ContextDoc) => void;
-  updateDoc: (docId: string, updates: Partial<ContextDoc>) => void;
-  deleteDoc: (docId: string) => void;
-  moveDoc: (docId: string, folderId: string | undefined, order?: number) => void;
-
   updateCanvasScene: (scene: CanvasScene) => void;
   getCanvasChildren: (containerId: string) => CanvasElement[];
   getCanvasTicketLinks: (elementId: string) => string[];
   getCanvasElementsLinkedToTicket: (ticketId: string) => string[];
 
-  addCampaignTag: (tag: string) => void;
-
   importAIPlan: (channelsData: any[]) => void;
   switchUser: (userId: string) => void;
   reset: () => void;
   toggleSampleData: () => void;
-
-  // Agent / Review Actions
-  updateChatHistory: (mode: 'DAILY' | 'WEEKLY', messages: ChatMessage[]) => void;
-  completeReviewSession: (mode: 'DAILY' | 'WEEKLY') => void;
-
-  // Flow State
-  pendingTicketLink: string | null;
-  initiateDocCreationForTicket: (ticketId: string) => void;
-  clearPendingTicketLink: () => void;
 }
 
 const StoreContext = createContext<StoreState | undefined>(undefined);
@@ -440,7 +360,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const [currentUser, setCurrentUser] = useState<User>(users[0] || DEFAULT_USER);
   const [currentView, setCurrentView] = useState<ViewMode>('CANVAS');
-  const [pendingTicketLink, setPendingTicketLink] = useState<string | null>(null);
 
   const [campaign, setCampaignState] = useState<Campaign | null>(() => {
     if (!shouldPersist) return null;
@@ -504,93 +423,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       delete data.sampleData.roadmapItemIds;
       delete data.sampleData.timelineTagIds;
     }
-    if (!data.docs) data.docs = [];
-
-    const ORDER_STEP = 1000;
-    const ROOT_KEY = '__root__';
-
-    const normalizeOrdering = <T extends { id: string; order?: number }>(
-      items: T[],
-      getParentId: (item: T) => string | undefined,
-      getTimestamp: (item: T) => string | undefined
-    ): T[] => {
-      const cloned = items.map(item => ({ ...item }));
-      const grouped = new Map<string, T[]>();
-
-      cloned.forEach(item => {
-        const key = getParentId(item) || ROOT_KEY;
-        const group = grouped.get(key) || [];
-        group.push(item);
-        grouped.set(key, group);
-      });
-
-      grouped.forEach(group => {
-        group.sort((a, b) => {
-          const ao = a.order ?? Number.POSITIVE_INFINITY;
-          const bo = b.order ?? Number.POSITIVE_INFINITY;
-          if (ao !== bo) return ao - bo;
-          const at = new Date(getTimestamp(a) || 0).getTime();
-          const bt = new Date(getTimestamp(b) || 0).getTime();
-          return at - bt;
-        });
-
-        let nextOrder = ORDER_STEP;
-        group.forEach(item => {
-          if (item.order === undefined || Number.isNaN(item.order)) {
-            item.order = nextOrder;
-          }
-          nextOrder = (item.order || nextOrder) + ORDER_STEP;
-        });
-      });
-
-      return cloned;
-    };
-
-    // Folder Migration
-    if (!data.docFolders) {
-      data.docFolders = [];
-    } else {
-      // Ensure icons exist if migrating from old version
-      data.docFolders = data.docFolders.map((f: any) => ({
-        ...f,
-        icon: f.icon || DEFAULT_FOLDER_ICON
-      }));
-    }
-
-    data.docFolders = (data.docFolders || []).map((f: any) => ({
-      ...f,
-      icon: f.icon || DEFAULT_FOLDER_ICON,
-      isArchived: !!f.isArchived,
-      isFavorite: !!f.isFavorite
-    }));
-
-    const docShortIds = new Set<string>();
-    data.docs = (data.docs || []).map((d: any) => {
-      const candidate = typeof d.shortId === 'string' ? d.shortId : '';
-      let shortId = candidate;
-      if (!shortId || docShortIds.has(shortId)) {
-        shortId = generateDocShortId(docShortIds);
-      } else {
-        docShortIds.add(shortId);
-      }
-
-      return {
-        ...d,
-        shortId,
-        isArchived: !!d.isArchived,
-        isFavorite: !!d.isFavorite
-      };
-    });
-
-    data.docFolders = normalizeOrdering(data.docFolders, f => f.parentId, f => f.createdAt);
-    data.docs = normalizeOrdering(data.docs, d => d.folderId, d => d.createdAt || d.lastUpdated);
-
-    if (!data.recentDocIds) {
-      data.recentDocIds = [];
-    }
-    if (!data.availableTags) {
-      data.availableTags = [];
-    }
     data.canvasScene = migrateCanvasScene(data.canvasScene);
 
     return data;
@@ -614,11 +446,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const updateCampaignState = (updater: (prev: Campaign) => Campaign) => {
     setCampaignState(prev => prev ? updater(prev) : null);
-  };
-
-  const updateRecentDocs = (docId: string, recentDocIds?: string[]) => {
-    const existing = (recentDocIds || []).filter(id => id !== docId);
-    return [docId, ...existing].slice(0, RECENT_DOC_LIMIT);
   };
 
   // --- User Actions ---
@@ -1052,278 +879,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }));
   };
 
-  // --- Ticket Linking ---
-
-  const linkDocToTicket = (docId: string, ticketId: string, channelId?: string, projectId?: string) => {
-    if (channelId) {
-      const channel = campaign?.channels.find(c => c.id === channelId);
-      const ticket = channel?.tickets.find(t => t.id === ticketId);
-      if (ticket) {
-        const currentDocs = ticket.linkedDocIds || [];
-        if (!currentDocs.includes(docId)) {
-          updateTicket(channelId, ticketId, { linkedDocIds: [...currentDocs, docId] });
-        }
-      }
-    } else if (projectId) {
-      const project = campaign?.projects.find(p => p.id === projectId);
-      const ticket = project?.tickets.find(t => t.id === ticketId);
-      if (ticket) {
-        const currentDocs = ticket.linkedDocIds || [];
-        if (!currentDocs.includes(docId)) {
-          updateProjectTicket(projectId, ticketId, { linkedDocIds: [...currentDocs, docId] });
-        }
-      }
-    }
-  };
-
-  // --- Docs & Folder Helpers ---
-
-  const sortByOrder = <T extends { order?: number; createdAt?: string; lastUpdated?: string }>(items: T[]): T[] => {
-    return [...items].sort((a, b) => {
-      const ao = a.order ?? Number.POSITIVE_INFINITY;
-      const bo = b.order ?? Number.POSITIVE_INFINITY;
-      if (ao !== bo) return ao - bo;
-      const at = new Date(a.createdAt || a.lastUpdated || 0).getTime();
-      const bt = new Date(b.createdAt || b.lastUpdated || 0).getTime();
-      return at - bt;
-    });
-  };
-
-  const getNextOrder = <T extends { order?: number }>(items: T[]): number => {
-    const maxOrder = items.reduce((max, item) => Math.max(max, item.order ?? 0), 0);
-    return maxOrder + ORDER_STEP;
-  };
-
-  const getSiblingFolders = (allFolders: DocFolder[], parentId: string | undefined, excludeId?: string) => {
-    const siblings = allFolders.filter(f => f.parentId === parentId && !f.isArchived && f.id !== excludeId);
-    return sortByOrder(siblings);
-  };
-
-  const getSiblingDocs = (allDocs: ContextDoc[], folderId: string | undefined, excludeId?: string) => {
-    const siblings = allDocs.filter(d => d.folderId === folderId && !d.isArchived && d.id !== excludeId);
-    return sortByOrder(siblings);
-  };
-
-  const isFolderDescendant = (folders: DocFolder[], startId: string | undefined, searchId: string): boolean => {
-    if (!startId) return false;
-    let current = folders.find(f => f.id === startId);
-    while (current?.parentId) {
-      if (current.parentId === searchId) return true;
-      current = folders.find(f => f.id === current?.parentId);
-    }
-    return false;
-  };
-
-  // --- Docs & Folder Actions ---
-
-  const addDocFolder = (name: string, icon: string = DEFAULT_FOLDER_ICON, parentId?: string, order?: number) => {
-    if (!campaign) return;
-    const now = new Date().toISOString();
-
-    updateCampaignState(prev => {
-      const siblings = getSiblingFolders(prev.docFolders, parentId);
-      const resolvedOrder = order ?? getNextOrder(siblings);
-
-      const folder: DocFolder = {
-        id: generateId(),
-        name,
-        icon,
-        parentId,
-        order: resolvedOrder,
-        isArchived: false,
-        isFavorite: false,
-        createdAt: now
-      };
-
-      return {
-        ...prev,
-        docFolders: [...prev.docFolders, folder]
-      };
-    });
-  };
-
-  const moveDocFolder = (folderId: string, parentId: string | undefined, order?: number) => {
-    if (!campaign) return;
-
-    updateCampaignState(prev => {
-      if (parentId === folderId || isFolderDescendant(prev.docFolders, parentId, folderId)) {
-        console.error('Cannot move a folder into itself or its descendants.');
-        return prev;
-      }
-
-      const siblings = getSiblingFolders(prev.docFolders, parentId, folderId);
-      const resolvedOrder = order ?? getNextOrder(siblings);
-
-      return {
-        ...prev,
-        docFolders: prev.docFolders.map(f =>
-          f.id === folderId ? { ...f, parentId, order: resolvedOrder } : f
-        )
-      };
-    });
-  };
-
-  const updateDocFolder = (folderId: string, updates: Partial<DocFolder>) => {
-    if (!campaign) return;
-    updateCampaignState(prev => ({
-      ...prev,
-      docFolders: updateById(prev.docFolders, folderId, updates)
-    }));
-  };
-
-  const deleteDocFolder = (folderId: string) => {
-    if (!campaign) return;
-    updateCampaignState(prev => {
-      const folder = prev.docFolders.find(f => f.id === folderId);
-      const parentId = folder?.parentId;
-
-      return {
-        ...prev,
-        docFolders: prev.docFolders.filter(f => f.id !== folderId).map(f =>
-          f.parentId === folderId ? { ...f, parentId } : f
-        ),
-        docs: prev.docs.map(d => d.folderId === folderId ? { ...d, folderId: parentId } : d)
-      };
-    });
-  };
-
-  const toggleRagIndexing = (type: 'DOC' | 'FOLDER', id: string, isIndexed: boolean) => {
-    if (!campaign) return;
-    if (type === 'DOC') {
-      updateDoc(id, { isRagIndexed: isIndexed });
-    } else {
-      updateDocFolder(id, { isRagIndexed: isIndexed });
-    }
-  };
-
-  const toggleDocFavorite = (docId: string, value?: boolean) => {
-    if (!campaign) return;
-    updateCampaignState(prev => ({
-      ...prev,
-      docs: prev.docs.map(d => d.id === docId ? { ...d, isFavorite: value ?? !d.isFavorite } : d)
-    }));
-  };
-
-  const toggleFolderFavorite = (folderId: string, value?: boolean) => {
-    if (!campaign) return;
-    updateCampaignState(prev => ({
-      ...prev,
-      docFolders: prev.docFolders.map(f => f.id === folderId ? { ...f, isFavorite: value ?? !f.isFavorite } : f)
-    }));
-  };
-
-  const recordRecentDoc = (docId: string) => {
-    if (!campaign) return;
-    setCampaignState(prev => {
-      if (!prev) return null;
-      return {
-        ...prev,
-        recentDocIds: updateRecentDocs(docId, prev.recentDocIds)
-      };
-    });
-  };
-
-  // --- Doc Actions ---
-
-  const addDoc = (doc: ContextDoc) => {
-    if (!campaign) return;
-
-    updateCampaignState(prev => {
-      const now = new Date().toISOString();
-      const folderId = doc.folderId;
-      const siblings = getSiblingDocs(prev.docs, folderId);
-      const resolvedOrder = doc.order ?? getNextOrder(siblings);
-      const existingShortIds = new Set(prev.docs.map(d => d.shortId).filter((id): id is string => !!id));
-      let shortId = doc.shortId;
-      if (!shortId || existingShortIds.has(shortId)) {
-        shortId = generateDocShortId(existingShortIds);
-      }
-
-      const docWithMeta: ContextDoc = {
-        ...doc,
-        shortId,
-        order: resolvedOrder,
-        isArchived: doc.isArchived ?? false,
-        isFavorite: doc.isFavorite ?? false,
-        createdBy: doc.createdBy || currentUser.id,
-        createdAt: doc.createdAt || now,
-        lastEditedBy: currentUser.id,
-        lastUpdated: doc.lastUpdated || now
-      };
-
-      return {
-        ...prev,
-        docs: [...prev.docs, docWithMeta],
-        recentDocIds: updateRecentDocs(docWithMeta.id, prev.recentDocIds)
-      };
-    });
-  };
-
-  const updateDoc = (docId: string, updates: Partial<ContextDoc>) => {
-    if (!campaign) return;
-
-    updateCampaignState(prev => {
-      const currentDoc = prev.docs.find(d => d.id === docId);
-      if (!currentDoc) return prev;
-
-      const now = new Date().toISOString();
-      const nextFolderId = updates.folderId !== undefined ? updates.folderId : currentDoc.folderId;
-      const folderChanged = updates.folderId !== undefined && updates.folderId !== currentDoc.folderId;
-
-      let nextOrder = updates.order;
-      if ((folderChanged && nextOrder === undefined) || (nextOrder === undefined && currentDoc.order === undefined)) {
-        const siblings = getSiblingDocs(prev.docs, nextFolderId, docId);
-        nextOrder = getNextOrder(siblings);
-      }
-
-      const updatesWithMeta: Partial<ContextDoc> = {
-        ...updates,
-        lastUpdated: now,
-        lastEditedBy: currentUser.id
-      };
-      if (nextOrder !== undefined) {
-        updatesWithMeta.order = nextOrder;
-      }
-
-      return {
-        ...prev,
-        docs: prev.docs.map(d => d.id === docId ? { ...d, ...updatesWithMeta, folderId: nextFolderId } : d)
-      };
-    });
-  };
-
-  const deleteDoc = (docId: string) => {
-    if (!campaign) return;
-    updateCampaignState(prev => ({
-      ...prev,
-      docs: removeById(prev.docs || [], docId),
-      recentDocIds: (prev.recentDocIds || []).filter(id => id !== docId)
-    }));
-  };
-
-  const moveDoc = (docId: string, folderId: string | undefined, order?: number) => {
-    if (!campaign) return;
-
-    updateCampaignState(prev => {
-      const currentDoc = prev.docs.find(d => d.id === docId);
-      if (!currentDoc) return prev;
-
-      const siblings = getSiblingDocs(prev.docs, folderId, docId);
-      const resolvedOrder = order ?? getNextOrder(siblings);
-      const now = new Date().toISOString();
-
-      return {
-        ...prev,
-        docs: prev.docs.map(d =>
-          d.id === docId
-            ? { ...d, folderId, order: resolvedOrder, lastUpdated: now, lastEditedBy: currentUser.id }
-            : d
-        ),
-        recentDocIds: updateRecentDocs(docId, prev.recentDocIds)
-      };
-    });
-  };
-
   // --- Canvas Actions ---
 
   const updateCanvasScene = (scene: CanvasScene) => {
@@ -1407,16 +962,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return campaign.canvasScene.relations
       .filter(relation => relation.type === 'TICKET_LINK' && relation.toId === ticketId)
       .map(relation => relation.fromId);
-  };
-
-  // --- Campaign Tags ---
-
-  const addCampaignTag = (tag: string) => {
-    if (!campaign || (campaign.availableTags || []).includes(tag)) return;
-    updateCampaignState(prev => ({
-      ...prev,
-      availableTags: [...(prev.availableTags || []), tag]
-    }));
   };
 
   // --- AI Import ---
@@ -1647,43 +1192,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setCampaignState(null);
   };
 
-  // --- Agent & Review Actions ---
-
-  const updateChatHistory = (mode: 'DAILY' | 'WEEKLY', messages: ChatMessage[]) => {
-    if (!campaign) return;
-    updateCampaignState(prev => ({
-      ...prev,
-      dailyChatHistory: mode === 'DAILY' ? messages : prev.dailyChatHistory,
-      weeklyChatHistory: mode === 'WEEKLY' ? messages : prev.weeklyChatHistory
-    }));
-  };
-
-  const completeReviewSession = (mode: 'DAILY' | 'WEEKLY') => {
-    if (!campaign) return;
-    const now = new Date().toISOString();
-    updateCampaignState(prev => ({
-      ...prev,
-      lastDailyStandup: mode === 'DAILY' ? now : prev.lastDailyStandup,
-      lastWeeklyReview: mode === 'WEEKLY' ? now : prev.lastWeeklyReview
-    }));
-  };
-
-  const initiateDocCreationForTicket = (ticketId: string) => {
-    setPendingTicketLink(ticketId);
-    setCurrentView('DOCS');
-  };
-
-  const clearPendingTicketLink = () => {
-    setPendingTicketLink(null);
-  };
-
   return (
     <StoreContext.Provider value={{
       currentView,
       setCurrentView,
-      pendingTicketLink,
-      initiateDocCreationForTicket,
-      clearPendingTicketLink,
       campaign,
       users,
       currentUser,
@@ -1718,31 +1230,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       addExecutionRow,
       updateExecutionRow,
       deleteExecutionRow,
-      linkDocToTicket,
-      addDocFolder,
-      updateDocFolder,
-      renameDocFolder: (id, name) => updateDocFolder(id, { name }), // Compatibility
-      moveDocFolder,
-      deleteDocFolder,
-      toggleRagIndexing,
-      toggleDocFavorite,
-      toggleFolderFavorite,
-      recordRecentDoc,
-      addDoc,
-      updateDoc,
-      deleteDoc,
-      moveDoc,
       updateCanvasScene,
       getCanvasChildren,
       getCanvasTicketLinks,
       getCanvasElementsLinkedToTicket,
-      addCampaignTag,
       importAIPlan,
       switchUser,
       reset,
-      toggleSampleData,
-      updateChatHistory,
-      completeReviewSession
+      toggleSampleData
     }}>
       {children}
     </StoreContext.Provider>
