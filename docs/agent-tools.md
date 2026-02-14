@@ -5,7 +5,7 @@
 This document defines an upload-first tooling architecture for the planning agent. It specifies:
 
 - How files are uploaded and converted into planning context.
-- How planning subtools retrieve existing campaign hierarchy (channels, projects, roadmap, docs).
+- How planning subtools retrieve existing campaign hierarchy (channels, projects, docs).
 - How the agent proposes modular, dependency-aware plans without auto-mutating state.
 - How tools conditionally call other tools based on runtime results.
 
@@ -78,7 +78,6 @@ interface PlanningContextSnapshot {
   objective: string;
   channels: Array<{ id: string; name: string }>;
   projects: Array<{ id: string; name: string }>;
-  roadmapItems: Array<{ id: string; title: string; channelId?: string; projectId?: string }>;
   docs: Array<{ id: string; title: string; tags?: string[]; channelId?: string }>;
   gaps: {
     missingChannels: string[];
@@ -352,7 +351,6 @@ All mutations must occur in store actions, never inside model/tool logic.
 - `campaign.objective`
 - `campaign.channels`
 - `campaign.projects`
-- `campaign.roadmapItems`
 - `campaign.docs`
 
 Output includes a normalized snapshot plus `gaps` scaffold.

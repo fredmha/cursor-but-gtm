@@ -1,11 +1,11 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useStore } from '../store';
 import { generateChannelsAndBets } from '../services/geminiService';
 import { Campaign, OperatingPrinciple, Channel } from '../types';
 
 export const useOnboarding = () => {
-  const { setCampaign, updateCampaign, importAIPlan, campaign, addChannel, updateChannel, deleteChannel } = useStore();
+  const { setCampaign, updateCampaign, importAIPlan, campaign, addChannel, updateChannel, deleteChannel, setCurrentView } = useStore();
   
   // --- Core State ---
   const [step, setStep] = useState(1);
@@ -53,8 +53,6 @@ export const useOnboarding = () => {
       channels: campaign?.channels || [],
       principles: formData.principles,
       projects: campaign?.projects || [],
-      roadmapItems: campaign?.roadmapItems || [],
-      timelineTags: campaign?.timelineTags || [],
       docs: campaign?.docs || [],
       docFolders: campaign?.docFolders || []
     };
@@ -71,19 +69,17 @@ export const useOnboarding = () => {
       updateStore('Onboarding');
       // Directly show Channel Setup instead of Principles step
       setShowChannelModal(true);
-    } else if (step === 2) { // Roadmap View
-       updateStore('Onboarding');
-       setStep(3); // Go to AI Strategy
-    } else if (step === 3) { // AI Strategy
+    } else if (step === 2) { // AI Strategy
       setLoading(true);
       const result = await generateChannelsAndBets(formData.objective);
       if (result && result.channels) {
         importAIPlan(result.channels);
       }
       setLoading(false);
-      setStep(4); // Summary
+      setStep(3); // Summary
     } else {
       updateStore('Planning');
+      setCurrentView('CANVAS');
     }
   };
 
@@ -117,7 +113,7 @@ export const useOnboarding = () => {
       }
 
       setShowChannelModal(false);
-      setStep(2); // Go to Roadmap
+      setStep(2); // Go to AI Strategy
   };
 
   const handleBack = () => {

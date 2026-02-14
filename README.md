@@ -12,30 +12,24 @@ GTM OS replaces the fragmented stack of Google Docs, Jira, and Miro with a singl
 
 ## 🌟 Core Philosophy
 
-1.  **The Map IS The Terrain**: Planning and execution happen in the same database. A card on the Roadmap *is* a ticket in the backlog.
+1.  **One Source of Truth**: Planning and execution happen in the same database. Tickets are the shared execution primitive.
 2.  **Context Over Control**: Every task links to a "Why" (Strategy Doc, Principle, or KPI).
 3.  **Finite vs. Infinite**: Work is split into **Projects** (Finite, time-bound initiatives) and **Channels** (Infinite, ongoing operational lanes).
 
 ## 🚀 Key Features
 
-### 1. Roadmap Sandbox ("The War Room")
-*   **Visual Strategy**: A Gantt-style timeline for high-level planning.
-*   **Strategy Horizon**: A dedicated top-layer view for finite Projects.
-*   **Contextual Tags**: Week-level markers for "Launches", "Themes", and "Deadlines".
-*   **Vertical Auto-Stacking**: Dynamic layout engine handles high-density planning without overlap.
-
-### 2. Execution Board ("Linear-Style")
+### 1. Execution Board ("Linear-Style")
 *   **Team Pulse**: A manager's view of the entire team's velocity and workload distribution.
 *   **My Focus**: An IC (Individual Contributor) view filtering out noise.
 *   **Project Command**: Dedicated dashboards for specific initiatives with embedded Kanban boards.
 *   **Strict Hierarchy**: Tickets cannot exist in a vacuum; they must belong to a Channel or Project.
 
-### 3. Knowledge Base ("Notion-Lite")
+### 2. Knowledge Base ("Notion-Lite")
 *   **Rich Text & Canvas**: Integrated WYSIWYG editor and infinite Canvas/Whiteboard.
 *   **Direct Linkage**: Documents can be "pinned" to specific Tickets to provide immediate context (PRDs, designs, briefs).
 *   **Folder Organization**: Dynamic folder structures for Strategy, Personas, Brand, etc.
 
-### 4. Strategy Lab (AI)
+### 3. Strategy Lab (AI)
 *   **Conversational Architect**: A Gemini-powered agent that interviews you to generate full GTM strategies.
 *   **Review Agent**: A Daily/Weekly AI companion that runs standups, identifies slippage, and proposes schedule adjustments.
 
@@ -86,7 +80,6 @@ GTM OS replaces the fragmented stack of Google Docs, Jira, and Miro with a singl
 /
 ├── components/
 │   ├── ExecutionBoard.tsx    # Main issue tracking & Team Pulse
-│   ├── RoadmapSandbox.tsx    # Visual timeline & Strategy Horizon
 │   ├── DocsView.tsx          # Knowledge base & Editors
 │   ├── ReviewMode.tsx        # AI Agent chat interface
 │   ├── ProjectDashboard.tsx  # "God Mode" view for Projects

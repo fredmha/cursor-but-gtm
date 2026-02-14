@@ -4,7 +4,6 @@ import { StoreProvider, useStore, generateId } from './store';
 import { ExecutionBoard } from './components/ExecutionBoard';
 import { ReviewMode } from './components/ReviewMode';
 import { CanvasView } from './components/CanvasView';
-import { RoadmapSandbox } from './components/RoadmapSandbox';
 import { DocsView } from './components/DocsView';
 import { SettingsView } from './components/SettingsView';
 import { ViewMode, Campaign, CanvasScene } from './types';
@@ -34,8 +33,6 @@ const MainLayout: React.FC = () => {
           projects: [],
           standaloneTickets: [],
           principles: [],
-          roadmapItems: [],
-          timelineTags: [],
           docFolders: [],
           docs: [],
           recentDocIds: [],
@@ -99,10 +96,9 @@ const MainLayout: React.FC = () => {
 
          {/* Navigation Links */}
          <div className={`flex-1 ${isCompactSidebarView ? 'px-2' : 'px-3'} space-y-0.5`}>
-             {(['ROADMAP', 'EXECUTION', 'DOCS', 'REVIEW', 'CANVAS'] as ViewMode[]).map((v) => {
+             {(['EXECUTION', 'DOCS', 'REVIEW', 'CANVAS'] as ViewMode[]).map((v) => {
                  const isActive = currentView === v;
                  const icons: Record<ViewMode, React.FC<any>> = {
-                     'ROADMAP': Icons.Kanban,
                      'EXECUTION': Icons.Zap,
                      'DOCS': Icons.FileText,
                      'REVIEW': Icons.Target,
@@ -177,7 +173,6 @@ const MainLayout: React.FC = () => {
 
       {/* MAIN CONTENT AREA */}
       <main className="flex-1 overflow-hidden bg-background relative">
-          {currentView === 'ROADMAP' && <RoadmapSandbox />}
           {currentView === 'EXECUTION' && <ExecutionBoard />}
           {currentView === 'REVIEW' && <ReviewMode />}
           {currentView === 'CANVAS' && <CanvasView />}

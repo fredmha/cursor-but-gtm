@@ -1,7 +1,6 @@
 
 import React from 'react';
 import { useOnboarding } from '../hooks/useOnboarding';
-import { RoadmapSandbox } from './RoadmapSandbox';
 import { ChannelSetupModal } from './ChannelSetupModal';
 import { Icons } from '../constants';
 import { useStore } from '../store';
@@ -16,19 +15,9 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onEnableLabM
 
   const { step, loading, formData, campaign, showChannelModal } = state;
   
-  const TOTAL_STEPS = 4;
+  const TOTAL_STEPS = 3;
 
-  // --- STEP 2: ROADMAP SANDBOX (Full Screen) ---
-  if (step === 2) {
-      return (
-          <div className="fixed inset-0 bg-white flex flex-col z-50 font-sans text-zinc-900 animate-in fade-in duration-500">
-             {/* Minimal Header included in RoadmapSandbox or just render it raw */}
-             <RoadmapSandbox onNext={actions.handleNext} onBack={actions.handleBack} />
-          </div>
-      );
-  }
-
-  // --- WIZARD CARD MODE (Step 1, 3, 4) ---
+  // --- WIZARD CARD MODE (Step 1, 2, 3) ---
   return (
     <div className="h-full flex flex-col items-center justify-center p-8 bg-zinc-50 relative overflow-hidden font-sans">
       {/* Background Decor */}
@@ -125,7 +114,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onEnableLabM
             </div>
           )}
 
-          {step === 3 && (
+          {step === 2 && (
             <div className="h-full overflow-y-auto p-8 custom-scrollbar">
               <div className="max-w-xl mx-auto text-center space-y-8 animate-in fade-in slide-in-from-right-4 duration-500 pt-12">
                  <div className="w-20 h-20 bg-purple-50 rounded-full flex items-center justify-center mx-auto mb-6 relative">
@@ -135,7 +124,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onEnableLabM
                  
                  <div>
                     <h2 className="text-2xl font-bold text-zinc-900 mb-3">Initializing Strategy Engine</h2>
-                    <p className="text-zinc-500">Analyzing roadmap and objective parameters...</p>
+                    <p className="text-zinc-500">Analyzing objective and channel parameters...</p>
                  </div>
 
                  <div className="bg-zinc-50 border border-zinc-200 rounded-lg p-6 text-left font-mono text-xs text-zinc-600 space-y-2 max-w-sm mx-auto shadow-sm">
@@ -144,8 +133,8 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onEnableLabM
                       <span className="text-zinc-900">"{formData.objective.substring(0, 25)}..."</span>
                    </div>
                    <div className="flex justify-between">
-                      <span>Roadmap Items:</span>
-                      <span className="text-indigo-600">{campaign?.roadmapItems?.length || 0} defined</span>
+                      <span>Channels:</span>
+                      <span className="text-indigo-600">{campaign?.channels?.length || 0} defined</span>
                    </div>
                    <div className="flex justify-between">
                       <span>Model:</span>
@@ -169,7 +158,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onEnableLabM
             </div>
           )}
 
-          {step === 4 && (
+          {step === 3 && (
             <div className="h-full overflow-y-auto p-8 custom-scrollbar">
               <div className="max-w-xl mx-auto text-center space-y-8 animate-in fade-in slide-in-from-right-4 duration-500 pt-12">
                  <div className="w-20 h-20 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-6">
@@ -187,8 +176,8 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onEnableLabM
                        <div className="text-[10px] uppercase text-zinc-400 font-bold">Channels</div>
                     </div>
                     <div className="bg-zinc-50 rounded p-4 border border-zinc-200">
-                       <div className="text-2xl font-bold text-zinc-900 font-mono">{campaign?.roadmapItems?.length || 0}</div>
-                       <div className="text-[10px] uppercase text-zinc-400 font-bold">Roadmap Items</div>
+                       <div className="text-2xl font-bold text-zinc-900 font-mono">{campaign?.projects?.length || 0}</div>
+                       <div className="text-[10px] uppercase text-zinc-400 font-bold">Projects</div>
                     </div>
                  </div>
                  

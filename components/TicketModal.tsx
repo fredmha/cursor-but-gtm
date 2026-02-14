@@ -46,7 +46,7 @@ export const TicketModal: React.FC<TicketModalProps> = ({ variant = 'full', init
     const [projectId, setProjectId] = useState<string>(initialData?.projectId || '');
     const [linkedDocIds, setLinkedDocIds] = useState<string[]>(initialData?.linkedDocIds || []);
 
-    // Roadmap Specific
+    // Schedule fields
     const [startDate, setStartDate] = useState<string>(initialData?.startDate || '');
     const [endDate, setEndDate] = useState<string>(initialData?.endDate || '');
 

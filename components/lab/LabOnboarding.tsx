@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useStore, generateId } from '../../store';
 import { Icons } from '../../constants';
-import { Campaign, Status, TicketStatus } from '../../types';
+import { Campaign, TicketStatus } from '../../types';
 import { GoogleGenAI } from "@google/genai";
 import { generateFullCampaignFromChat } from '../../services/labService';
 
@@ -134,8 +134,6 @@ export const LabOnboarding: React.FC = () => {
                   description: p.description,
                   category: p.category
               })),
-              roadmapItems: [],
-              timelineTags: [],
               docFolders: [
                   { id: 'f_strategy', name: 'Strategy', createdAt: new Date().toISOString() },
                   { id: 'f_personas', name: 'Personas', createdAt: new Date().toISOString() },

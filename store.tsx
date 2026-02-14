@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
-import { Campaign, Channel, Ticket, TicketStatus, Status, User, Priority, RoadmapItem, Project, ProjectUpdate, ChannelLink, ChannelNote, TimelineTag, ChannelPlan, ContextDoc, DocFolder, ViewMode, Role, ChatMessage, CanvasScene, CanvasElement, CanvasRelation, ExecutionRowType, CanvasEmailTemplate, CanvasEmailBlock, EmailBlockType, EmailBlockAlign } from './types';
+import { Campaign, Channel, Ticket, TicketStatus, User, Priority, Project, ProjectUpdate, ChannelLink, ChannelNote, ChannelPlan, ContextDoc, DocFolder, ViewMode, Role, ChatMessage, CanvasScene, CanvasElement, CanvasRelation, ExecutionRowType, CanvasEmailTemplate, CanvasEmailBlock, EmailBlockType, EmailBlockAlign } from './types';
 
 // --- Constants ---
 
@@ -382,14 +382,6 @@ interface StoreState {
 
   linkDocToTicket: (docId: string, ticketId: string, channelId?: string, projectId?: string) => void;
 
-  addRoadmapItem: (item: RoadmapItem) => void;
-  updateRoadmapItem: (itemId: string, updates: Partial<RoadmapItem>) => void;
-  deleteRoadmapItem: (itemId: string) => void;
-  moveRoadmapItem: (itemId: string, newChannelId: string, newWeekIndex: number) => void;
-
-  addTimelineTag: (tag: TimelineTag) => void;
-  deleteTimelineTag: (tagId: string) => void;
-
   addDocFolder: (name: string, icon?: string, parentId?: string, order?: number) => void;
   updateDocFolder: (folderId: string, updates: Partial<DocFolder>) => void;
   renameDocFolder: (folderId: string, name: string) => void;
@@ -447,7 +439,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   });
 
   const [currentUser, setCurrentUser] = useState<User>(users[0] || DEFAULT_USER);
-  const [currentView, setCurrentView] = useState<ViewMode>('ROADMAP');
+  const [currentView, setCurrentView] = useState<ViewMode>('CANVAS');
   const [pendingTicketLink, setPendingTicketLink] = useState<string | null>(null);
 
   const [campaign, setCampaignState] = useState<Campaign | null>(() => {
@@ -467,11 +459,15 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         notes: c.notes || [],
         memberIds: c.memberIds || [],
         plan: c.plan || undefined,
-        tickets: (c.tickets || []).map((t: any) => ({
-          ...t,
-          rowType: t.rowType === 'TEXT' ? 'TEXT' : 'TASK',
-          canvasItemIds: Array.isArray(t.canvasItemIds) ? t.canvasItemIds : []
-        }))
+        tickets: (c.tickets || []).map((t: any) => {
+          const normalized = { ...t };
+          delete normalized.roadmapItemId;
+          return {
+            ...normalized,
+            rowType: normalized.rowType === 'TEXT' ? 'TEXT' : 'TASK',
+            canvasItemIds: Array.isArray(normalized.canvasItemIds) ? normalized.canvasItemIds : []
+          };
+        })
       }));
     }
 
@@ -480,21 +476,34 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } else {
       data.projects = data.projects.map((p: any) => ({
         ...p,
-        tickets: (p.tickets || []).map((t: any) => ({
-          ...t,
-          rowType: t.rowType === 'TEXT' ? 'TEXT' : 'TASK',
-          canvasItemIds: Array.isArray(t.canvasItemIds) ? t.canvasItemIds : []
-        }))
+        tickets: (p.tickets || []).map((t: any) => {
+          const normalized = { ...t };
+          delete normalized.roadmapItemId;
+          return {
+            ...normalized,
+            rowType: normalized.rowType === 'TEXT' ? 'TEXT' : 'TASK',
+            canvasItemIds: Array.isArray(normalized.canvasItemIds) ? normalized.canvasItemIds : []
+          };
+        })
       }));
     }
 
-    data.standaloneTickets = (data.standaloneTickets || []).map((t: any) => ({
-      ...t,
-      rowType: t.rowType === 'TEXT' ? 'TEXT' : 'TASK',
-      canvasItemIds: Array.isArray(t.canvasItemIds) ? t.canvasItemIds : []
-    }));
+    data.standaloneTickets = (data.standaloneTickets || []).map((t: any) => {
+      const normalized = { ...t };
+      delete normalized.roadmapItemId;
+      return {
+        ...normalized,
+        rowType: normalized.rowType === 'TEXT' ? 'TEXT' : 'TASK',
+        canvasItemIds: Array.isArray(normalized.canvasItemIds) ? normalized.canvasItemIds : []
+      };
+    });
 
-    if (!data.timelineTags) data.timelineTags = [];
+    delete data.roadmapItems;
+    delete data.timelineTags;
+    if (data.sampleData) {
+      delete data.sampleData.roadmapItemIds;
+      delete data.sampleData.timelineTagIds;
+    }
     if (!data.docs) data.docs = [];
 
     const ORDER_STEP = 1000;
@@ -682,13 +691,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const deleteChannel = (channelId: string) => {
     if (!campaign) return;
-    const newChannels = campaign.channels.filter(c => c.id !== channelId);
-    const newRoadmapItems = (campaign.roadmapItems || []).filter(i => i.channelId !== channelId);
-
     updateCampaignState(prev => ({
       ...prev,
-      channels: newChannels,
-      roadmapItems: newRoadmapItems
+      channels: prev.channels.filter(c => c.id !== channelId)
     }));
   };
 
@@ -799,8 +804,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (!campaign) return;
     updateCampaignState(prev => ({
       ...prev,
-      projects: removeById(prev.projects || [], projectId),
-      roadmapItems: (prev.roadmapItems || []).filter(i => i.projectId !== projectId)
+      projects: removeById(prev.projects || [], projectId)
     }));
   };
 
@@ -819,8 +823,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const addProjectTicket = (projectId: string, ticket: Ticket) => {
     if (!campaign) return;
-
-    let newRoadmapItems = [...(campaign.roadmapItems || [])];
     const finalTicket = normalizeTicketForExecution({
       ...ticket,
       projectId,
@@ -828,47 +830,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       canvasItemIds: ticket.canvasItemIds || []
     });
 
-    if (!finalTicket.roadmapItemId) {
-      const newItemId = generateId();
-      finalTicket.roadmapItemId = newItemId;
-
-      const newItem: RoadmapItem = {
-        id: newItemId,
-        channelId: undefined,
-        weekIndex: -1, // Unscheduled by default
-        durationWeeks: 1,
-        title: ticket.title,
-        description: ticket.description,
-        type: 'CONTENT',
-        ticketId: finalTicket.id,
-        projectId: projectId,
-        status: ticket.status === TicketStatus.Done ? Status.Completed : Status.Active,
-        ownerIds: ticket.assigneeId ? [ticket.assigneeId] : [],
-        priority: ticket.priority,
-        label: 'Task',
-        startDate: ticket.startDate,
-        endDate: ticket.dueDate
-      };
-      if (ticket.startDate && campaign.startDate) {
-        const start = new Date(ticket.startDate);
-        const campStart = new Date(campaign.startDate);
-        if (!Number.isNaN(start.getTime()) && !Number.isNaN(campStart.getTime())) {
-          newItem.weekIndex = Math.floor((start.getTime() - campStart.getTime()) / (1000 * 60 * 60 * 24 * 7));
-        }
-      }
-      if (ticket.startDate && ticket.dueDate) {
-        const start = new Date(ticket.startDate);
-        const end = new Date(ticket.dueDate);
-        if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())) {
-          newItem.durationWeeks = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24 * 7)));
-        }
-      }
-      newRoadmapItems.push(newItem);
-    }
-
     updateCampaignState(prev => ({
       ...prev,
-      roadmapItems: newRoadmapItems,
       projects: prev.projects.map(p => p.id === projectId ? {
         ...p,
         tickets: [...(p.tickets || []), finalTicket]
@@ -878,74 +841,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const updateProjectTicket = (projectId: string, ticketId: string, updates: Partial<Ticket>) => {
     if (!campaign) return;
-
-    setCampaignState(prev => {
-      if (!prev) return null;
-
-      let newRoadmapItems = [...(prev.roadmapItems || [])];
-      const rItemIndex = newRoadmapItems.findIndex(i => i.ticketId === ticketId);
-
-      if (rItemIndex !== -1) {
-        const rItem = newRoadmapItems[rItemIndex];
-        let updatedRItem = { ...rItem };
-        let changed = false;
-
-        if (updates.status) {
-          if (updates.status === TicketStatus.Done) {
-            updatedRItem.status = Status.Completed;
-            changed = true;
-          } else if (rItem.status === Status.Completed) {
-            updatedRItem.status = Status.Active;
-            changed = true;
-          }
-        }
-        if (updates.title) {
-          updatedRItem.title = updates.title;
-          changed = true;
-        }
-        if (updates.assigneeId) {
-          updatedRItem.ownerIds = [updates.assigneeId];
-          changed = true;
-        }
-
-        // Sync Dates
-        if (Object.prototype.hasOwnProperty.call(updates, 'startDate')) {
-          updatedRItem.startDate = updates.startDate;
-          if (updates.startDate && prev.startDate) {
-            const start = new Date(updates.startDate);
-            const campStart = new Date(prev.startDate);
-            if (!Number.isNaN(start.getTime()) && !Number.isNaN(campStart.getTime())) {
-              updatedRItem.weekIndex = Math.floor((start.getTime() - campStart.getTime()) / (1000 * 60 * 60 * 24 * 7));
-            }
-          } else if (!updates.startDate) {
-            updatedRItem.weekIndex = -1;
-          }
-          changed = true;
-        }
-        if (Object.prototype.hasOwnProperty.call(updates, 'dueDate')) {
-          updatedRItem.endDate = updates.dueDate;
-          if (updatedRItem.startDate && updates.dueDate) {
-            const start = new Date(updatedRItem.startDate);
-            const end = new Date(updates.dueDate);
-            if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())) {
-              updatedRItem.durationWeeks = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24 * 7)));
-            }
-          }
-          changed = true;
-        }
-
-        if (changed) newRoadmapItems[rItemIndex] = updatedRItem;
-      }
-
-      return {
-        ...prev,
-        roadmapItems: newRoadmapItems,
-        projects: prev.projects.map(p => p.id === projectId ? {
-          ...p,
-          tickets: p.tickets.map(t => t.id === ticketId ? { ...t, ...updates } : t)
-        } : p)
-      };
-    });
+    updateCampaignState(prev => ({
+      ...prev,
+      projects: prev.projects.map(p => p.id === projectId ? {
+        ...p,
+        tickets: p.tickets.map(t => t.id === ticketId ? { ...t, ...updates } : t)
+      } : p)
+    }));
   };
 
   const deleteProjectTicket = (projectId: string, ticketId: string) => {
@@ -955,7 +857,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       canvasScene: prev.canvasScene
         ? removeTicketLinksFromScene(prev.canvasScene, ticketId)
         : prev.canvasScene,
-      roadmapItems: prev.roadmapItems.filter(i => i.ticketId !== ticketId),
       projects: prev.projects.map(p => p.id === projectId ? {
         ...p,
         tickets: p.tickets.filter(t => t.id !== ticketId)
@@ -976,49 +877,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       canvasItemIds: ticket.canvasItemIds || []
     });
 
-    let newRoadmapItems = [...(campaign.roadmapItems || [])];
-
-    if (!finalTicket.roadmapItemId) {
-      const newItemId = generateId();
-      finalTicket.roadmapItemId = newItemId;
-
-      const newItem: RoadmapItem = {
-        id: newItemId,
-        channelId: channelId,
-        weekIndex: -1, // Unscheduled by default
-        durationWeeks: 1,
-        title: ticket.title,
-        description: ticket.description,
-        type: 'CONTENT',
-        ticketId: finalTicket.id,
-        projectId: ticket.projectId,
-        status: ticket.status === TicketStatus.Done ? Status.Completed : Status.Active,
-        ownerIds: ticket.assigneeId ? [ticket.assigneeId] : [],
-        priority: ticket.priority,
-        label: 'Task',
-        startDate: ticket.startDate,
-        endDate: ticket.dueDate
-      };
-      if (ticket.startDate && campaign.startDate) {
-        const start = new Date(ticket.startDate);
-        const campStart = new Date(campaign.startDate);
-        if (!Number.isNaN(start.getTime()) && !Number.isNaN(campStart.getTime())) {
-          newItem.weekIndex = Math.floor((start.getTime() - campStart.getTime()) / (1000 * 60 * 60 * 24 * 7));
-        }
-      }
-      if (ticket.startDate && ticket.dueDate) {
-        const start = new Date(ticket.startDate);
-        const end = new Date(ticket.dueDate);
-        if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())) {
-          newItem.durationWeeks = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24 * 7)));
-        }
-      }
-      newRoadmapItems.push(newItem);
-    }
-
     updateCampaignState(prev => ({
       ...prev,
-      roadmapItems: newRoadmapItems,
       channels: prev.channels.map(c =>
         c.id === channelId ? { ...c, tickets: [...c.tickets, finalTicket] } : c
       )
@@ -1027,88 +887,24 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const updateTicket = (channelId: string, ticketId: string, updates: Partial<Ticket>) => {
     if (!campaign) return;
-
-    setCampaignState(prev => {
-      if (!prev) return null;
-
-      let newRoadmapItems = [...(prev.roadmapItems || [])];
-      const rItemIndex = newRoadmapItems.findIndex(i => i.ticketId === ticketId);
-
-      if (rItemIndex !== -1) {
-        const rItem = newRoadmapItems[rItemIndex];
-        let updatedRItem = { ...rItem };
-        let changed = false;
-
-        if (updates.status) {
-          if (updates.status === TicketStatus.Done) {
-            updatedRItem.status = Status.Completed;
-            changed = true;
-          } else if (rItem.status === Status.Completed) {
-            updatedRItem.status = Status.Active;
-            changed = true;
-          }
-        }
-        if (updates.title) {
-          updatedRItem.title = updates.title;
-          changed = true;
-        }
-        if (updates.assigneeId) {
-          updatedRItem.ownerIds = [updates.assigneeId];
-          changed = true;
-        }
-
-        // Sync Dates
-        if (Object.prototype.hasOwnProperty.call(updates, 'startDate')) {
-          updatedRItem.startDate = updates.startDate;
-          if (updates.startDate && prev.startDate) {
-            const start = new Date(updates.startDate);
-            const campStart = new Date(prev.startDate);
-            if (!Number.isNaN(start.getTime()) && !Number.isNaN(campStart.getTime())) {
-              updatedRItem.weekIndex = Math.floor((start.getTime() - campStart.getTime()) / (1000 * 60 * 60 * 24 * 7));
-            }
-          } else if (!updates.startDate) {
-            updatedRItem.weekIndex = -1;
-          }
-          changed = true;
-        }
-        if (Object.prototype.hasOwnProperty.call(updates, 'dueDate')) {
-          updatedRItem.endDate = updates.dueDate;
-          if (updatedRItem.startDate && updates.dueDate) {
-            const start = new Date(updatedRItem.startDate);
-            const end = new Date(updates.dueDate);
-            if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())) {
-              updatedRItem.durationWeeks = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24 * 7)));
-            }
-          }
-          changed = true;
-        }
-
-        if (changed) newRoadmapItems[rItemIndex] = updatedRItem;
-      }
-
-      return {
-        ...prev,
-        roadmapItems: newRoadmapItems,
-        channels: prev.channels.map(c =>
-          c.id === channelId ? {
-            ...c,
-            tickets: c.tickets.map(t => t.id === ticketId ? { ...t, ...updates } : t)
-          } : c
-        )
-      };
-    });
+    updateCampaignState(prev => ({
+      ...prev,
+      channels: prev.channels.map(c =>
+        c.id === channelId ? {
+          ...c,
+          tickets: c.tickets.map(t => t.id === ticketId ? { ...t, ...updates } : t)
+        } : c
+      )
+    }));
   };
 
   const deleteTicket = (channelId: string, ticketId: string) => {
     if (!campaign) return;
-    const newRoadmapItems = (campaign.roadmapItems || []).filter(i => i.ticketId !== ticketId);
-
     updateCampaignState(prev => ({
       ...prev,
       canvasScene: prev.canvasScene
         ? removeTicketLinksFromScene(prev.canvasScene, ticketId)
         : prev.canvasScene,
-      roadmapItems: newRoadmapItems,
       channels: prev.channels.map(c =>
         c.id === channelId ? {
           ...c,
@@ -1278,224 +1074,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
       }
     }
-  };
-
-  // --- Roadmap Actions ---
-
-  const addRoadmapItem = (item: RoadmapItem) => {
-    if (!campaign) return;
-    let newItem = { ...item };
-
-    // Direct Channel Link (Create Ticket)
-    if (newItem.channelId && !newItem.ticketId) {
-      const ticketId = generateId();
-      const ticket: Ticket = {
-        id: ticketId,
-        shortId: `T-${Math.floor(Math.random() * 10000)}`,
-        title: newItem.title,
-        description: newItem.description,
-        rowType: 'TASK',
-        status: TicketStatus.Todo,
-        channelId: newItem.channelId,
-        projectId: newItem.projectId,
-        roadmapItemId: newItem.id,
-        assigneeId: newItem.ownerIds?.[0],
-        priority: newItem.priority || 'Medium',
-        createdAt: new Date().toISOString(),
-        canvasItemIds: []
-      };
-
-      newItem.ticketId = ticketId;
-
-      setCampaignState(prev => {
-        if (!prev) return null;
-        const newChannels = prev.channels.map(c =>
-          c.id === newItem.channelId ? { ...c, tickets: [...c.tickets, ticket] } : c
-        );
-        return {
-          ...prev,
-          channels: newChannels,
-          roadmapItems: [...(prev.roadmapItems || []), newItem]
-        };
-      });
-      return;
-    }
-    // Direct Project Link (Create Project Ticket)
-    else if (newItem.projectId && !newItem.channelId && !newItem.ticketId) {
-      const ticketId = generateId();
-      const ticket: Ticket = {
-        id: ticketId,
-        shortId: `T-${Math.floor(Math.random() * 10000)}`,
-        title: newItem.title,
-        description: newItem.description,
-        rowType: 'TASK',
-        status: TicketStatus.Todo,
-        projectId: newItem.projectId,
-        roadmapItemId: newItem.id,
-        assigneeId: newItem.ownerIds?.[0],
-        priority: newItem.priority || 'Medium',
-        createdAt: new Date().toISOString(),
-        canvasItemIds: []
-      };
-      newItem.ticketId = ticketId;
-
-      updateCampaignState(prev => ({
-        ...prev,
-        roadmapItems: [...(prev.roadmapItems || []), newItem],
-        projects: prev.projects.map(p => p.id === newItem.projectId ? {
-          ...p,
-          tickets: [...(p.tickets || []), ticket]
-        } : p)
-      }));
-      return;
-    }
-
-    updateCampaignState(prev => ({
-      ...prev,
-      roadmapItems: [...(prev.roadmapItems || []), newItem]
-    }));
-  };
-
-  const updateRoadmapItem = (itemId: string, updates: Partial<RoadmapItem>) => {
-    if (!campaign) return;
-    setCampaignState(prev => {
-      if (!prev) return null;
-
-      const item = prev.roadmapItems.find(i => i.id === itemId);
-      if (!item) return prev;
-
-      let finalUpdates = { ...updates };
-
-      // If dates changed, update grid logic
-      if (updates.startDate || updates.endDate) {
-        const start = updates.startDate || item.startDate;
-        const end = updates.endDate || item.endDate;
-
-        if (start && prev.startDate) {
-          const sDate = new Date(start);
-          const campStart = new Date(prev.startDate);
-          finalUpdates.weekIndex = Math.floor((sDate.getTime() - campStart.getTime()) / (1000 * 60 * 60 * 24 * 7));
-        }
-        if (start && end) {
-          const sDate = new Date(start);
-          const eDate = new Date(end);
-          finalUpdates.durationWeeks = Math.max(1, Math.ceil((eDate.getTime() - sDate.getTime()) / (1000 * 60 * 60 * 24 * 7)));
-        }
-      } else if (updates.weekIndex !== undefined && updates.weekIndex >= 0 && updates.weekIndex !== item.weekIndex && prev.startDate) {
-        // If weekIndex changed (dragging)
-        const campStart = new Date(prev.startDate);
-
-        if (item.startDate) {
-          const oldStart = new Date(item.startDate);
-          // Calculate the day of the week offset within the week
-          const daysIntoWeek = Math.floor((oldStart.getTime() - campStart.getTime()) / (24 * 60 * 60 * 1000)) % 7;
-
-          const newStart = new Date(campStart);
-          newStart.setDate(newStart.getDate() + (updates.weekIndex * 7) + daysIntoWeek);
-          finalUpdates.startDate = newStart.toISOString();
-
-          if (item.endDate) {
-            const oldEnd = new Date(item.endDate);
-            const duration = oldEnd.getTime() - oldStart.getTime();
-            const newEnd = new Date(newStart.getTime() + duration);
-            finalUpdates.endDate = newEnd.toISOString();
-          }
-        } else {
-          // First time scheduling: start on Monday of that week
-          const newStart = new Date(campStart);
-          newStart.setDate(newStart.getDate() + (updates.weekIndex * 7));
-          finalUpdates.startDate = newStart.toISOString();
-
-          const newEnd = new Date(newStart);
-          newEnd.setDate(newEnd.getDate() + ((item.durationWeeks || 1) * 7));
-          finalUpdates.endDate = newEnd.toISOString();
-        }
-      }
-
-      // Keep Ticket in sync
-      const newChannels = prev.channels.map(c => ({
-        ...c,
-        tickets: c.tickets.map(t => {
-          if (t.roadmapItemId !== itemId) return t;
-          const ticketUpdates: any = {};
-          if (finalUpdates.title) ticketUpdates.title = finalUpdates.title;
-          if (finalUpdates.startDate) ticketUpdates.startDate = finalUpdates.startDate;
-          if (finalUpdates.endDate) ticketUpdates.dueDate = finalUpdates.endDate;
-          if (finalUpdates.ownerIds) ticketUpdates.assigneeId = finalUpdates.ownerIds[0];
-          return { ...t, ...ticketUpdates };
-        })
-      }));
-
-      const newProjects = prev.projects.map(p => ({
-        ...p,
-        tickets: p.tickets.map(t => {
-          if (t.roadmapItemId !== itemId) return t;
-          const ticketUpdates: any = {};
-          if (finalUpdates.title) ticketUpdates.title = finalUpdates.title;
-          if (finalUpdates.startDate) ticketUpdates.startDate = finalUpdates.startDate;
-          if (finalUpdates.endDate) ticketUpdates.dueDate = finalUpdates.endDate;
-          if (finalUpdates.ownerIds) ticketUpdates.assigneeId = finalUpdates.ownerIds[0];
-          return { ...t, ...ticketUpdates };
-        })
-      }));
-
-      return {
-        ...prev,
-        channels: newChannels,
-        projects: newProjects,
-        roadmapItems: prev.roadmapItems.map(i => i.id === itemId ? { ...i, ...finalUpdates } : i)
-      };
-    });
-  };
-
-  const moveRoadmapItem = (itemId: string, newChannelId: string, newWeekIndex: number) => {
-    updateRoadmapItem(itemId, { channelId: newChannelId, weekIndex: newWeekIndex });
-  };
-
-  const deleteRoadmapItem = (itemId: string) => {
-    if (!campaign) return;
-    const item = campaign.roadmapItems.find(i => i.id === itemId);
-    let newChannels = [...campaign.channels];
-    let newProjects = [...campaign.projects];
-
-    if (item && item.ticketId) {
-      if (item.channelId) {
-        newChannels = newChannels.map(c => ({
-          ...c,
-          tickets: c.tickets.filter(t => t.id !== item.ticketId)
-        }));
-      } else if (item.projectId) {
-        newProjects = newProjects.map(p => ({
-          ...p,
-          tickets: p.tickets.filter(t => t.id !== item.ticketId)
-        }));
-      }
-    }
-
-    updateCampaignState(prev => ({
-      ...prev,
-      channels: newChannels,
-      projects: newProjects,
-      roadmapItems: (prev.roadmapItems || []).filter(i => i.id !== itemId)
-    }));
-  };
-
-  // --- Timeline Actions ---
-
-  const addTimelineTag = (tag: TimelineTag) => {
-    if (!campaign) return;
-    updateCampaignState(prev => ({
-      ...prev,
-      timelineTags: [...(prev.timelineTags || []), tag]
-    }));
-  };
-
-  const deleteTimelineTag = (tagId: string) => {
-    if (!campaign) return;
-    updateCampaignState(prev => ({
-      ...prev,
-      timelineTags: (prev.timelineTags || []).filter(t => t.id !== tagId)
-    }));
   };
 
   // --- Docs & Folder Helpers ---
@@ -1907,14 +1485,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const ticketProject1Id = generateId();
         const ticketProject2Id = generateId();
 
-        const roadmapPaid1Id = generateId();
-        const roadmapPaid2Id = generateId();
-        const roadmapLifecycleId = generateId();
-        const roadmapProjectId = generateId();
-
-        const timelineTag1Id = generateId();
-        const timelineTag2Id = generateId();
-
         const tickets: Ticket[] = [
           {
             id: ticketPaid1Id,
@@ -1927,8 +1497,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             priority: 'High',
             startDate: campaignStart.toISOString(),
             dueDate: week1.toISOString(),
-            createdAt: now.toISOString(),
-            roadmapItemId: roadmapPaid1Id
+            createdAt: now.toISOString()
           },
           {
             id: ticketPaid2Id,
@@ -1941,8 +1510,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             priority: 'Medium',
             startDate: week1.toISOString(),
             dueDate: week2.toISOString(),
-            createdAt: now.toISOString(),
-            roadmapItemId: roadmapPaid2Id
+            createdAt: now.toISOString()
           },
           {
             id: ticketLifecycleId,
@@ -1955,8 +1523,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             priority: 'Medium',
             startDate: campaignStart.toISOString(),
             dueDate: week2.toISOString(),
-            createdAt: now.toISOString(),
-            roadmapItemId: roadmapLifecycleId
+            createdAt: now.toISOString()
           },
           {
             id: ticketProject1Id,
@@ -1969,8 +1536,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             priority: 'High',
             startDate: week1.toISOString(),
             dueDate: week2.toISOString(),
-            createdAt: now.toISOString(),
-            roadmapItemId: roadmapProjectId
+            createdAt: now.toISOString()
           },
           {
             id: ticketProject2Id,
@@ -2026,80 +1592,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           }
         ];
 
-        const roadmapItems: RoadmapItem[] = [
-          {
-            id: roadmapPaid1Id,
-            channelId: channelPaidId,
-            weekIndex: 0,
-            durationWeeks: 1,
-            title: 'Prospecting Phase 1',
-            description: 'Initial ad launch and testing.',
-            ownerIds: [currentUser.id],
-            type: 'CONTENT',
-            priority: 'High',
-            ticketId: ticketPaid1Id
-          },
-          {
-            id: roadmapPaid2Id,
-            channelId: channelPaidId,
-            weekIndex: 1,
-            durationWeeks: 1,
-            title: 'Creative Iteration',
-            description: 'Refresh performance creatives.',
-            ownerIds: [currentUser.id],
-            type: 'CONTENT',
-            priority: 'Medium',
-            ticketId: ticketPaid2Id
-          },
-          {
-            id: roadmapLifecycleId,
-            channelId: channelLifecycleId,
-            weekIndex: 0,
-            durationWeeks: 2,
-            title: 'Onboarding Drip',
-            description: 'Welcome and activation emails.',
-            ownerIds: [currentUser.id],
-            type: 'CONTENT',
-            priority: 'Medium',
-            ticketId: ticketLifecycleId
-          },
-          {
-            id: roadmapProjectId,
-            projectId,
-            weekIndex: 1,
-            durationWeeks: 2,
-            title: 'Hero Section Overhaul',
-            description: 'Main landing page restructure.',
-            ownerIds: [currentUser.id],
-            type: 'LAUNCH',
-            priority: 'Urgent',
-            ticketId: ticketProject1Id
-          }
-        ];
-
-        const timelineTags: TimelineTag[] = [
-          {
-            id: timelineTag1Id,
-            weekIndex: 0,
-            label: 'LAUNCH',
-            title: 'Campaign Kickoff',
-            color: 'bg-emerald-500'
-          },
-          {
-            id: timelineTag2Id,
-            weekIndex: 2,
-            label: 'EVENT',
-            title: 'Milestone Review',
-            color: 'bg-indigo-500'
-          }
-        ];
-
         return {
           ...prev,
           channels: [...prev.channels, ...channels],
           projects: [...prev.projects, ...projects],
-          roadmapItems: [...(prev.roadmapItems || []), ...roadmapItems],
-          timelineTags: [...(prev.timelineTags || []), ...timelineTags],
           sampleData: {
             enabled: true,
             channelIds: [channelPaidId, channelLifecycleId],
@@ -2110,14 +1606,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               ticketLifecycleId,
               ticketProject1Id,
               ticketProject2Id
-            ],
-            roadmapItemIds: [
-              roadmapPaid1Id,
-              roadmapPaid2Id,
-              roadmapLifecycleId,
-              roadmapProjectId
-            ],
-            timelineTagIds: [timelineTag1Id, timelineTag2Id]
+            ]
           }
         };
       }
@@ -2125,8 +1614,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const removeChannelIds = new Set(sample.channelIds);
       const removeProjectIds = new Set(sample.projectIds);
       const removeTicketIds = new Set(sample.ticketIds);
-      const removeRoadmapItemIds = new Set(sample.roadmapItemIds);
-      const removeTimelineTagIds = new Set(sample.timelineTagIds);
 
       const channels = prev.channels
         .filter(c => !removeChannelIds.has(c.id))
@@ -2142,21 +1629,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           tickets: p.tickets.filter(t => !removeTicketIds.has(t.id))
         }));
 
-      const roadmapItems = (prev.roadmapItems || []).filter(item => {
-        if (removeRoadmapItemIds.has(item.id)) return false;
-        if (item.channelId && removeChannelIds.has(item.channelId)) return false;
-        if (item.projectId && removeProjectIds.has(item.projectId)) return false;
-        return true;
-      });
-
-      const timelineTags = (prev.timelineTags || []).filter(tag => !removeTimelineTagIds.has(tag.id));
-
       return {
         ...prev,
         channels,
         projects,
-        roadmapItems,
-        timelineTags,
         sampleData: undefined
       };
     });
@@ -2243,12 +1719,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       updateExecutionRow,
       deleteExecutionRow,
       linkDocToTicket,
-      addRoadmapItem,
-      updateRoadmapItem,
-      deleteRoadmapItem,
-      moveRoadmapItem,
-      addTimelineTag,
-      deleteTimelineTag,
       addDocFolder,
       updateDocFolder,
       renameDocFolder: (id, name) => updateDocFolder(id, { name }), // Compatibility

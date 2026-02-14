@@ -22,11 +22,10 @@ export type Role = 'Admin' | 'Member';
 export type ProjectHealth = 'On Track' | 'At Risk' | 'Off Track' | 'Completed';
 export type ChannelTag = 'Inbound' | 'Outbound';
 export type ChannelType = '' | 'PROJECT';
-export type RoadmapItemType = 'CONTENT' | 'LAUNCH' | 'THEME' | 'NOTE';
 export type DocType = 'STRATEGY' | 'PERSONA' | 'BRAND' | 'PROCESS';
 export type DocFormat = 'TEXT' | 'CANVAS';
 export type CanvasNodeType = 'RECT' | 'CIRCLE' | 'STICKY' | 'TEXT' | 'IMAGE';
-export type ViewMode = 'ONBOARDING' | 'ROADMAP' | 'EXECUTION' | 'REVIEW' | 'CANVAS' | 'DOCS' | 'SETTINGS';
+export type ViewMode = 'ONBOARDING' | 'EXECUTION' | 'REVIEW' | 'CANVAS' | 'DOCS' | 'SETTINGS';
 export type CanvasTool = 'SELECT' | 'HAND' | 'EMAIL_CARD' | 'CONTAINER';
 export type CanvasElementKind = 'EMAIL_CARD' | 'CONTAINER';
 export type CanvasRelationType = 'PARENT' | 'TICKET_LINK' | 'EDGE';
@@ -54,7 +53,6 @@ export interface Ticket {
   status: TicketStatus;
   channelId?: string;
   projectId?: string;
-  roadmapItemId?: string;
   assigneeId?: string;
   priority: Priority;
   dueDate?: string;
@@ -132,35 +130,6 @@ export interface OperatingPrinciple {
   title: string;
   description: string;
   category: string;
-}
-
-export interface RoadmapItem {
-  id: string;
-  channelId?: string;
-  weekIndex: number;
-  durationWeeks: number;
-  title: string;
-  description?: string;
-  ownerIds?: string[];
-  type: RoadmapItemType;
-  label?: string;
-  priority?: Priority;
-  attachments?: string[];
-  externalLinks?: { title: string; url: string }[];
-  ticketId?: string;
-  projectId?: string;
-  startDate?: string;
-  endDate?: string;
-  color?: string;
-  status?: Status;
-}
-
-export interface TimelineTag {
-  id: string;
-  weekIndex: number;
-  label: string;
-  title: string;
-  color: string;
 }
 
 // --- Docs & Canvas ---
@@ -314,8 +283,6 @@ export interface Campaign {
   projects: Project[];
   standaloneTickets?: Ticket[];
   principles: OperatingPrinciple[];
-  roadmapItems: RoadmapItem[];
-  timelineTags: TimelineTag[];
   docFolders: DocFolder[];
   docs: ContextDoc[];
   availableTags?: string[];
@@ -325,8 +292,6 @@ export interface Campaign {
     channelIds: string[];
     projectIds: string[];
     ticketIds: string[];
-    roadmapItemIds: string[];
-    timelineTagIds: string[];
   };
   lastDailyStandup?: string;
   lastWeeklyReview?: string;

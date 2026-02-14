@@ -44,9 +44,9 @@ The UI follows a strict **"Muted Canvas"** philosophy.
 
 ## 3. Component Rules
 
-### `RoadmapSandbox.tsx` (Gold Master)
-*   **Status**: This is the most complex component. It handles the virtualized grid, drag-and-drop logic, and SVG rendering.
-*   **Rule**: Changes to the Grid Layout engine (`calculateLaneLayout`) must be tested against "Vertical Stacking" scenarios (e.g., 5 overlapping tickets in one week).
+### `CanvasView.tsx`
+*   **Status**: Canvas is a core planning surface for visual composition and ticket relationships.
+*   **Rule**: Changes to canvas element transforms, relation mapping, or viewport logic must preserve ticket-link integrity.
 
 ### `ExecutionBoard.tsx`
 *   **View Modes**: Must always support both `scope='MINE'` and `scope='TEAM'`.

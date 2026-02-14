@@ -9,7 +9,7 @@ This document describes how the app and its agent systems work so that LLMs can 
 **GTM OS** is a local-first, strategy-to-execution platform. One **Campaign** is the root of all data. There is no backend: state lives in React Context and persists to **localStorage**. AI is used for strategy generation and a **task agent** that operates over the user’s tickets via tool calls.
 
 - **Entry**: `App.tsx` → `StoreProvider` → `MainLayout`. If no campaign exists, user sees “Initialize Workspace” and a blank `Campaign` is created.
-- **Views** (sidebar): `ROADMAP` | `EXECUTION` | `DOCS` | `REVIEW` | `SETTINGS`. Each view is a full-screen component; `currentView` is in store.
+- **Views** (sidebar): `EXECUTION` | `DOCS` | `REVIEW` | `CANVAS` | `SETTINGS`. Each view is a full-screen component; `currentView` is in store.
 - **Single source of truth**: `campaign` (and `users`) in `store.tsx`. All reads/writes go through the store.
 
 ---
@@ -20,7 +20,7 @@ This document describes how the app and its agent systems work so that LLMs can 
 
 - **Identity**: `id`, `name`, `objective`, `startDate`, `endDate`, `status`.
 - **Containers**: `channels[]`, `projects[]`. Work always belongs to one of these.
-- **Planning**: `roadmapItems[]`, `timelineTags[]`, `principles[]`.
+- **Planning**: `principles[]`.
 - **Knowledge**: `docFolders[]`, `docs[]` (ContextDoc). Docs can be linked to tickets via `ticket.linkedDocIds`.
 - **Agent state**: `dailyChatHistory?`, `weeklyChatHistory?` (ChatMessage[]), `lastDailyStandup?`, `lastWeeklyReview?`.
 - **Meta**: `recentDocIds`, `availableTags`, `sampleData` (for demo data toggle).
@@ -29,11 +29,7 @@ This document describes how the app and its agent systems work so that LLMs can 
 
 - **Channel**: Ongoing lane (e.g. “Paid Social”). Has `tickets[]`, `principles[]`, `tags`, `links`, `notes`, `memberIds`, `plan?: ChannelPlan`.
 - **Project**: Time-bound initiative. Has `tickets[]`, `updates[]`, dates, health status.
-- **Ticket**: Atomic task. Has `channelId` **or** `projectId` (not both). Also `roadmapItemId` when tied to a roadmap bar. Fields: `title`, `description`, `status` (Backlog | Todo | In Progress | Done | Canceled), `priority`, `assigneeId`, `startDate`, `dueDate`, `linkedDocIds`.
-
-### Roadmap ↔ Ticket Sync
-
-- **RoadmapItem** can have `ticketId`, `channelId`, or `projectId`. When you add a roadmap item with a channel/project, the store can create a corresponding **Ticket** and link it. Updates to ticket status/title/dates are reflected on the roadmap; updates to roadmap item (drag, resize) update the linked ticket. Logic lives in `store.tsx` (`updateTicket`, `updateProjectTicket`, `updateRoadmapItem`).
+- **Ticket**: Atomic task. Has `channelId` **or** `projectId` (not both). Fields: `title`, `description`, `status` (Backlog | Todo | In Progress | Done | Canceled), `priority`, `assigneeId`, `startDate`, `dueDate`, `linkedDocIds`.
 
 ### Users
 
@@ -86,7 +82,7 @@ This document describes how the app and its agent systems work so that LLMs can 
 
 **Data out / platform changes**:
 
-- New or updated or deleted tickets are written through the store; roadmap and execution views update automatically because they read from `campaign`.
+- New or updated or deleted tickets are written through the store; execution and related dashboards update automatically because they read from `campaign`.
 - Chat history is written to `campaign.dailyChatHistory`.
 
 **Design note**: RULES.md describes an “approve before commit” pattern (e.g. `AgentTicketCard` with PENDING/APPROVED). The current Review Mode implementation commits create/update/delete immediately. Extending to “propose then approve” would mean having the agent call a different tool (e.g. `propose_task`) and the UI committing only on user approval.
@@ -119,7 +115,7 @@ These are **not** chat agents; they take structured input and return JSON. The *
 
 ### Data in
 
-- **User**: Typing in REVIEW chat, forms (Execution, Roadmap, Docs, Settings), drag-and-drop on roadmap, approving/discarding bulk or proposed tasks.
+- **User**: Typing in REVIEW chat, forms (Execution, Docs, Settings), approving/discarding bulk or proposed tasks.
 - **AI**:
   - Review agent: user message + tool calls; tool handlers read `campaign` and `currentUser` and call store actions.
   - One-shot services: inputs from campaign/UI; outputs are applied by the calling component via store.
@@ -133,7 +129,7 @@ These are **not** chat agents; they take structured input and return JSON. The *
 ### How the agent modifies the platform
 
 1. **Review agent**: Invoked only in REVIEW. It modifies the platform by having its **tool calls** implemented in `ReviewMode.tsx` so they call:
-   - `addTicket`, `updateTicket`, `updateProjectTicket`, `deleteTicket`, `deleteProjectTicket` → changes `campaign.channels[].tickets` and `campaign.projects[].tickets` (and synced roadmap items).
+   - `addTicket`, `updateTicket`, `updateProjectTicket`, `deleteTicket`, `deleteProjectTicket` → changes `campaign.channels[].tickets` and `campaign.projects[].tickets`.
    - `updateChatHistory('DAILY', messages)` → changes `campaign.dailyChatHistory`.
 2. **One-shot flows**: Callers (e.g. onboarding, lab, channel plan modal) call `geminiService`/`labService`, then call store actions with the returned data; the platform is modified only through those store actions.
 
@@ -145,7 +141,7 @@ These are **not** chat agents; they take structured input and return JSON. The *
 |----------|-----------|
 | Single Campaign, no backend | Local-first; one workspace per browser. |
 | Tickets must have channel **or** project | Enforces “context over control”; no orphan tasks. |
-| RoadmapItem ↔ Ticket sync in store | “The map is the terrain”; one source of truth, no duplicate work records. |
+| Store-centric ticket lifecycle | One mutation path for task CRUD across channels and projects. |
 | All mutations via store actions | Predictable state updates, one place for persistence and migrations. |
 | Agent tools implemented in UI (ReviewMode) | Tool semantics (e.g. “create task for current user”, first channel fallback) are app-specific; keep them next to the chat and store. |
 | Chat history on Campaign | Daily/weekly review state is part of the workspace and survives reload. |
@@ -162,7 +158,7 @@ These are **not** chat agents; they take structured input and return JSON. The *
 | Review (task) agent | `services/reviewAgent.ts`, `components/ReviewMode.tsx` |
 | Planning agent (spec) | `services/planningAgent.ts` |
 | One-shot AI | `services/geminiService.ts`, `services/labService.ts` |
-| Roadmap + ticket sync | `store.tsx` (addTicket, updateTicket, updateRoadmapItem, etc.), `components/RoadmapSandbox.tsx` |
+| Ticket lifecycle and task mutation | `store.tsx` (addTicket, updateTicket, deleteTicket, project-ticket variants) |
 | Execution (tickets by channel/project) | `components/ExecutionBoard.tsx`, `ChannelDashboard`, `ProjectDashboard` |
 | Docs and ticket linking | `components/DocsView.tsx`, `store.tsx` (addDoc, linkDocToTicket, pendingTicketLink) |
 | Agent-proposed task UI (approve/reject) | `components/AgentTicketCard.tsx`, `BulkTaskCallout.tsx` (used where bulk or proposed tasks are approved) |

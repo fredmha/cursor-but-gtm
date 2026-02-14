@@ -66,7 +66,7 @@ export const ChannelSetupModal: React.FC<ChannelSetupModalProps> = ({ existingCh
                 </div>
                 <div>
                     <h2 className="text-xl font-bold text-zinc-900">Distribution Architecture</h2>
-                    <p className="text-xs text-zinc-500">Define the lanes for your roadmap execution.</p>
+                    <p className="text-xs text-zinc-500">Define the lanes for your execution workflow.</p>
                 </div>
             </div>
         </div>
@@ -143,14 +143,14 @@ export const ChannelSetupModal: React.FC<ChannelSetupModalProps> = ({ existingCh
         {/* Footer */}
         <div className="p-6 border-t border-zinc-100 bg-zinc-50/50 flex justify-between items-center rounded-b-xl">
             <button onClick={onBack} className="text-sm text-zinc-500 hover:text-zinc-900 font-medium px-4 py-2">
-                Back to Principles
+                Back to Setup
             </button>
             <button 
                 onClick={() => onComplete(channels)}
                 disabled={channels.length === 0}
                 className="px-6 py-2.5 bg-zinc-900 text-white text-sm font-bold rounded-lg hover:bg-zinc-800 disabled:opacity-50 transition-all flex items-center gap-2 shadow-lg shadow-zinc-200"
             >
-                Enter Roadmap <Icons.ChevronRight className="w-4 h-4" />
+                Continue <Icons.ChevronRight className="w-4 h-4" />
             </button>
         </div>
 
