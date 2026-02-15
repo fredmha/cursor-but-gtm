@@ -355,8 +355,16 @@ export const useCanvasController = () => {
     setNodes(previousNodes => {
       const zIndex = kind === 'CONTAINER' ? 0 : getNextZIndex(previousNodes);
       const element = makeDefaultElement(kind, flowX, flowY, zIndex, generateId);
-      return [...previousNodes, createNodeFromElement(element)];
+      const clearedSelectionNodes = previousNodes.map(node => (
+        node.selected ? { ...node, selected: false } : node
+      ));
+      const createdNode = { ...createNodeFromElement(element), selected: true };
+      return [...clearedSelectionNodes, createdNode];
     });
+
+    setEdges(previousEdges => previousEdges.map(edge => (
+      edge.selected ? { ...edge, selected: false } : edge
+    )));
 
     scheduleCommit();
   }, [createNodeFromElement, getNextZIndex, scheduleCommit]);
@@ -860,6 +868,7 @@ export const useCanvasController = () => {
 
     const flowPosition = toFlowPoint(event.clientX, event.clientY);
     createElementFromTool(kind, flowPosition.x, flowPosition.y);
+    setTool('SELECT');
   }, [createElementFromTool, toFlowPoint, tool]);
 
   const onEmailBlockSelect = useCallback((cardId: string, blockId: string) => {

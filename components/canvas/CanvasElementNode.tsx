@@ -78,6 +78,14 @@ const isCardShellKind = (kind: CanvasElement['kind']): boolean =>
   kind === 'EMAIL_CARD' || kind === 'CONTAINER';
 
 /**
+ * Determines whether a kind is rendered as a direct primitive node.
+ * Primitive nodes can safely disable inner pointer events because selection/dragging is owned by the outer node shell.
+ * Tradeoff: future inline-edit primitives must opt out if they need direct pointer handling.
+ */
+const isPrimitiveKind = (kind: CanvasElement['kind']): boolean =>
+  kind === 'RECTANGLE' || kind === 'ELLIPSE' || kind === 'DIAMOND' || kind === 'TEXT' || kind === 'PENCIL';
+
+/**
  * Renders a first-class rectangle shape directly in node bounds.
  * The direct SVG avoids nested card visuals so rectangles behave like native whiteboard shapes.
  * Tradeoff: text is centered-only in this version to keep primitive editing simple.
@@ -346,6 +354,7 @@ export const CanvasElementNode: React.FC<CanvasElementNodeProps> = ({
   const isContainer = element.kind === 'CONTAINER';
   const isGroupedChild = !!parentId && !isContainer;
   const isCardShell = isCardShellKind(element.kind);
+  const isPrimitiveNode = isPrimitiveKind(element.kind);
   const frameWidth = toFiniteNumber(width) ?? element.width;
   const frameHeight = toFiniteNumber(height) ?? element.height;
   const emailBlocks = element.kind === 'EMAIL_CARD' ? (element.emailTemplate?.blocks || []) : [];
@@ -421,15 +430,15 @@ export const CanvasElementNode: React.FC<CanvasElementNodeProps> = ({
         isVisible={selected}
         minWidth={CANVAS_ELEMENT_MIN_WIDTH}
         minHeight={CANVAS_ELEMENT_MIN_HEIGHT}
-        lineStyle={{ borderColor: '#6366f1' }}
-        handleStyle={{ borderColor: '#6366f1' }}
+        lineStyle={{ borderColor: '#6366f1', zIndex: 40, pointerEvents: 'all' }}
+        handleStyle={{ borderColor: '#6366f1', zIndex: 40, pointerEvents: 'all' }}
         onResize={(_, params) => onResizeLive(id, params)}
         onResizeEnd={(_, params) => onResizeDone(id, params)}
       />
-      <Handle type="target" position={Position.Top} style={{ width: 8, height: 8 }} />
-      <Handle type="source" position={Position.Right} style={{ width: 8, height: 8 }} />
-      <Handle type="target" position={Position.Bottom} style={{ width: 8, height: 8 }} />
-      <Handle type="source" position={Position.Left} style={{ width: 8, height: 8 }} />
+      <Handle type="target" position={Position.Top} style={{ width: 8, height: 8, zIndex: 40, pointerEvents: 'all' }} />
+      <Handle type="source" position={Position.Right} style={{ width: 8, height: 8, zIndex: 40, pointerEvents: 'all' }} />
+      <Handle type="target" position={Position.Bottom} style={{ width: 8, height: 8, zIndex: 40, pointerEvents: 'all' }} />
+      <Handle type="source" position={Position.Left} style={{ width: 8, height: 8, zIndex: 40, pointerEvents: 'all' }} />
 
       {isCardShell ? (
         <div className="h-full w-full p-3 flex flex-col min-h-0 min-w-0" data-testid="card-shell">
@@ -477,7 +486,7 @@ export const CanvasElementNode: React.FC<CanvasElementNodeProps> = ({
           )}
         </div>
       ) : (
-        <div className="h-full w-full">{renderPrimitiveContent()}</div>
+        <div className={`h-full w-full ${isPrimitiveNode ? 'pointer-events-none' : ''}`}>{renderPrimitiveContent()}</div>
       )}
     </div>
   );

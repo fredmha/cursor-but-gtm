@@ -134,14 +134,31 @@ const createNodeProps = (
   ...overrides
 } as unknown as CanvasElementNodeProps);
 
+/**
+ * Asserts that all four connector handles are present for a rendered node.
+ * Keeping this expectation centralized makes handle-regression tests easier to read.
+ * Tradeoff: this helper assumes canonical top/right/bottom/left handle positions.
+ */
+const expectAllConnectorHandles = (): void => {
+  expect(screen.getByTestId('handle-target-top')).toBeInTheDocument();
+  expect(screen.getByTestId('handle-source-right')).toBeInTheDocument();
+  expect(screen.getByTestId('handle-target-bottom')).toBeInTheDocument();
+  expect(screen.getByTestId('handle-source-left')).toBeInTheDocument();
+};
+
 describe('CanvasElementNode primitive rendering', () => {
   it('renders rectangle as a direct shape without card shell chrome', () => {
     const rectangle = createElementFixture('RECTANGLE', { text: 'Opportunity' });
-    render(<CanvasElementNode {...createNodeProps(rectangle)} />);
+    render(<CanvasElementNode {...createNodeProps(rectangle, { selected: true })} />);
 
     expect(screen.getByTestId('rectangle-shape')).toBeInTheDocument();
     expect(screen.queryByTestId('card-shell')).not.toBeInTheDocument();
     expect(screen.queryByText('RECTANGLE')).not.toBeInTheDocument();
+    expect(screen.getByTestId('node-resizer')).toBeInTheDocument();
+    expectAllConnectorHandles();
+
+    const rectangleInteractionLayer = screen.getByTestId('rectangle-shape').parentElement;
+    expect(rectangleInteractionLayer).toHaveClass('pointer-events-none');
   });
 
   it('renders pencil as a direct stroke without card shell chrome', () => {
@@ -153,6 +170,7 @@ describe('CanvasElementNode primitive rendering', () => {
 
     expect(screen.getByTestId('pencil-shape')).toBeInTheDocument();
     expect(screen.queryByTestId('card-shell')).not.toBeInTheDocument();
+    expectAllConnectorHandles();
   });
 });
 
