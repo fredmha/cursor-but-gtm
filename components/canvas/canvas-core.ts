@@ -2,6 +2,7 @@ import { MutableRefObject } from 'react';
 import { Edge, Node } from '@xyflow/react';
 import {
   CanvasElement,
+  CanvasElementKind,
   CanvasEmailBlock,
   CanvasEmailTemplate,
   CanvasRelation,
@@ -9,6 +10,7 @@ import {
   EmailBlockAlign,
   EmailBlockType
 } from '../../types';
+import { createDefaultElementForKind } from './canvas-element-catalog';
 
 // Types
 
@@ -19,6 +21,18 @@ export type CanvasNodeData = {
 export type ResizeDimensions = {
   width?: number;
   height?: number;
+};
+
+export type CanvasPoint = {
+  x: number;
+  y: number;
+};
+
+export type CanvasBounds = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 };
 
 export type BlockResizeState = {
@@ -57,11 +71,6 @@ export const EMAIL_BLOCK_MIN_FONT_SIZE = 10;
 export const EMAIL_BLOCK_MAX_FONT_SIZE = 48;
 export const EMAIL_BLOCK_MAX_PADDING = 24;
 export const EMAIL_BLOCK_MAX_MARGIN_BOTTOM = 48;
-
-const DEFAULT_CONTAINER_WIDTH = 560;
-const DEFAULT_CONTAINER_HEIGHT = 400;
-const DEFAULT_EMAIL_CARD_WIDTH = 340;
-const DEFAULT_EMAIL_CARD_HEIGHT = 200;
 
 const DEFAULT_CANVAS_VIEWPORT = { x: 0, y: 0, zoom: 1 };
 
@@ -245,27 +254,12 @@ export const createDefaultCanvasScene = (): CanvasScene => ({
  * Invariant: defaults match current UI semantics.
  */
 export const makeDefaultElement = (
-  kind: 'EMAIL_CARD' | 'CONTAINER',
+  kind: CanvasElementKind,
   x: number,
   y: number,
   zIndex: number,
-  createId: () => string
-): CanvasElement => ({
-  id: createId(),
-  kind,
-  x,
-  y,
-  width: kind === 'CONTAINER' ? DEFAULT_CONTAINER_WIDTH : DEFAULT_EMAIL_CARD_WIDTH,
-  height: kind === 'CONTAINER' ? DEFAULT_CONTAINER_HEIGHT : DEFAULT_EMAIL_CARD_HEIGHT,
-  zIndex,
-  text: kind === 'CONTAINER' ? 'Email Collection' : 'Email Card',
-  style: {
-    fill: kind === 'CONTAINER' ? '#f8fafc' : '#ffffff',
-    stroke: '#d4d4d8',
-    fontSize: 14,
-    fontFamily: 'Inter'
-  }
-});
+  createId: () => string 
+): CanvasElement => createDefaultElementForKind(kind, x, y, zIndex, createId);
 
 const getParentMap = (relations: CanvasRelation[]): Map<string, string> => {
   const parentMap = new Map<string, string>();
@@ -299,7 +293,6 @@ export const mapSceneToState = (scene: CanvasScene): {
       type: 'canvasElement',
       position: { x: element.x, y: element.y },
       parentId: parentMap.get(element.id),
-      extent: parentMap.has(element.id) ? 'parent' : undefined,
       data: { element },
       style: { width: element.width, height: element.height, zIndex: element.zIndex },
       selectable: true,
@@ -391,6 +384,147 @@ export const getAbsolutePosition = (
 
   const parentPosition = getAbsolutePosition(node.parentId, nodeById);
   return { x: parentPosition.x + node.position.x, y: parentPosition.y + node.position.y };
+};
+
+/**
+ * Resolves runtime node dimensions with a deterministic fallback chain.
+ * Inputs: runtime node payload.
+ * Output: finite width and height values.
+ * Invariant: dimensions are always non-negative finite numbers.
+ */
+export const getNodeDimensions = (node: Node<CanvasNodeData>): { width: number; height: number } => {
+  const nodeStyle = node.style as { width?: unknown; height?: unknown } | undefined;
+  const width = toFiniteNumber(node.width)
+    ?? toFiniteNumber(node.measured?.width)
+    ?? toFiniteNumber(nodeStyle?.width)
+    ?? node.data.element.width;
+  const height = toFiniteNumber(node.height)
+    ?? toFiniteNumber(node.measured?.height)
+    ?? toFiniteNumber(nodeStyle?.height)
+    ?? node.data.element.height;
+
+  return {
+    width: Math.max(0, width),
+    height: Math.max(0, height)
+  };
+};
+
+/**
+ * Resolves absolute node bounds by combining absolute origin and measured size.
+ * Inputs: node id and runtime node map.
+ * Output: absolute bounds in flow space.
+ * Invariant: missing nodes return an empty zero-sized bounds object at origin.
+ */
+export const getNodeAbsoluteBounds = (
+  nodeId: string,
+  nodeById: Map<string, Node<CanvasNodeData>>
+): CanvasBounds => {
+  const node = nodeById.get(nodeId);
+  if (!node) return { x: 0, y: 0, width: 0, height: 0 };
+
+  const origin = getAbsolutePosition(nodeId, nodeById);
+  const dimensions = getNodeDimensions(node);
+  return {
+    x: origin.x,
+    y: origin.y,
+    width: dimensions.width,
+    height: dimensions.height
+  };
+};
+
+/**
+ * Tests whether a point is inside inclusive bounds.
+ * Inputs: point and bounds.
+ * Output: true when point lies on or inside the bounds edges.
+ * Invariant: inclusive checks keep drop behavior stable on border pixels.
+ */
+export const isPointInsideBounds = (point: CanvasPoint, bounds: CanvasBounds): boolean =>
+  point.x >= bounds.x
+  && point.x <= bounds.x + bounds.width
+  && point.y >= bounds.y
+  && point.y <= bounds.y + bounds.height;
+
+/**
+ * Converts absolute coordinates into parent-relative coordinates.
+ * Inputs: absolute point, parent node id, node map.
+ * Output: coordinates local to the parent origin.
+ * Invariant: when parent is missing, input absolute coordinates are returned unchanged.
+ */
+export const toParentRelativePosition = (
+  absolutePosition: CanvasPoint,
+  parentId: string,
+  nodeById: Map<string, Node<CanvasNodeData>>
+): CanvasPoint => {
+  const parentNode = nodeById.get(parentId);
+  if (!parentNode) return absolutePosition;
+  const parentAbsolute = getAbsolutePosition(parentId, nodeById);
+  return {
+    x: absolutePosition.x - parentAbsolute.x,
+    y: absolutePosition.y - parentAbsolute.y
+  };
+};
+
+/**
+ * Resolves a node's absolute flow-space coordinates.
+ * Inputs: node id and runtime node map.
+ * Output: absolute point.
+ * Invariant: delegates to parent-walk resolution for consistent positioning semantics.
+ */
+export const toAbsolutePosition = (
+  nodeId: string,
+  nodeById: Map<string, Node<CanvasNodeData>>
+): CanvasPoint => getAbsolutePosition(nodeId, nodeById);
+
+const getNodeZIndex = (node: Node<CanvasNodeData>): number => {
+  const nodeStyle = node.style as { zIndex?: unknown } | undefined;
+  return toFiniteNumber(nodeStyle?.zIndex) ?? node.data.element.zIndex;
+};
+
+const isNodeAncestor = (
+  ancestorId: string,
+  childId: string,
+  nodeById: Map<string, Node<CanvasNodeData>>
+): boolean => {
+  let currentId = nodeById.get(childId)?.parentId;
+
+  while (currentId) {
+    if (currentId === ancestorId) return true;
+    currentId = nodeById.get(currentId)?.parentId;
+  }
+
+  return false;
+};
+
+/**
+ * Picks the best-fit container for a dropped node using center-point hit testing.
+ * Inputs: dropped node, all nodes, and node map.
+ * Output: selected container node or undefined.
+ * Invariant: only container nodes are considered, with highest z-index taking priority.
+ */
+export const pickDropContainerForNode = (
+  droppedNode: Node<CanvasNodeData>,
+  nodes: Node<CanvasNodeData>[],
+  nodeById: Map<string, Node<CanvasNodeData>>
+): Node<CanvasNodeData> | undefined => {
+  if (droppedNode.data.element.kind === 'CONTAINER') return undefined;
+
+  const droppedBounds = getNodeAbsoluteBounds(droppedNode.id, nodeById);
+  const droppedCenter: CanvasPoint = {
+    x: droppedBounds.x + droppedBounds.width / 2,
+    y: droppedBounds.y + droppedBounds.height / 2
+  };
+  const indexById = new Map(nodes.map((node, index) => [node.id, index]));
+
+  return nodes
+    .filter(node => node.data.element.kind === 'CONTAINER')
+    .filter(node => node.id !== droppedNode.id)
+    .filter(node => !isNodeAncestor(droppedNode.id, node.id, nodeById))
+    .filter(node => isPointInsideBounds(droppedCenter, getNodeAbsoluteBounds(node.id, nodeById)))
+    .sort((leftNode, rightNode) => {
+      const zDiff = getNodeZIndex(rightNode) - getNodeZIndex(leftNode);
+      if (zDiff !== 0) return zDiff;
+      return (indexById.get(rightNode.id) ?? 0) - (indexById.get(leftNode.id) ?? 0);
+    })[0];
 };
 
 // History + timer helpers

@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
-import { Campaign, Channel, Ticket, TicketStatus, User, Priority, Project, ProjectUpdate, ChannelLink, ChannelNote, ChannelPlan, ViewMode, Role, CanvasScene, CanvasElement, CanvasRelation, ExecutionRowType, CanvasEmailTemplate, CanvasEmailBlock, EmailBlockType, EmailBlockAlign } from './types';
+import { Campaign, Channel, Ticket, TicketStatus, User, Priority, Project, ProjectUpdate, ChannelLink, ChannelNote, ChannelPlan, ViewMode, Role, CanvasScene, CanvasElement, CanvasRelation, ExecutionRowType, CanvasEmailTemplate, CanvasEmailBlock, EmailBlockType, EmailBlockAlign, CanvasElementKind, CanvasElementStyle, CanvasStrokeData, CanvasStrokePoint } from './types';
 
 // --- Constants ---
 
@@ -91,25 +91,85 @@ const updateById = <T extends { id: string }>(items: T[], id: string, updates: P
 const removeById = <T extends { id: string }>(items: T[], id: string) =>
   items.filter(item => item.id !== id);
 
+const CANVAS_ELEMENT_KINDS: CanvasElementKind[] = [
+  'EMAIL_CARD',
+  'CONTAINER',
+  'RECTANGLE',
+  'ELLIPSE',
+  'DIAMOND',
+  'TEXT',
+  'PENCIL'
+];
 
-const normalizeCanvasElement = (element: any): CanvasElement => ({
-  id: typeof element?.id === 'string' ? element.id : generateId(),
-  kind: element?.kind === 'CONTAINER' ? 'CONTAINER' : 'EMAIL_CARD',
-  x: parseCanvasNumber(element?.x) ?? 0,
-  y: parseCanvasNumber(element?.y) ?? 0,
-  width: Math.max(
-    40,
-    parseCanvasNumber(element?.width) ?? (element?.kind === 'CONTAINER' ? 520 : 320)
-  ),
-  height: Math.max(
-    30,
-    parseCanvasNumber(element?.height) ?? (element?.kind === 'CONTAINER' ? 380 : 180)
-  ),
-  zIndex: parseCanvasNumber(element?.zIndex) ?? 0,
-  text: typeof element?.text === 'string' ? element.text : '',
-  style: element?.style && typeof element.style === 'object' ? element.style : undefined,
-  emailTemplate: normalizeEmailTemplate(element?.emailTemplate)
-});
+const getCanvasElementKind = (value: unknown): CanvasElementKind => {
+  if (typeof value !== 'string') return 'EMAIL_CARD';
+  return CANVAS_ELEMENT_KINDS.includes(value as CanvasElementKind) ? value as CanvasElementKind : 'EMAIL_CARD';
+};
+
+const getDefaultCanvasDimensions = (kind: CanvasElementKind): { width: number; height: number } => {
+  if (kind === 'CONTAINER') return { width: 520, height: 380 };
+  if (kind === 'TEXT') return { width: 260, height: 90 };
+  if (kind === 'PENCIL') return { width: 120, height: 80 };
+  if (kind === 'RECTANGLE') return { width: 260, height: 160 };
+  if (kind === 'ELLIPSE') return { width: 240, height: 160 };
+  if (kind === 'DIAMOND') return { width: 220, height: 170 };
+  return { width: 320, height: 180 };
+};
+
+const normalizeCanvasStyle = (value: unknown): CanvasElementStyle | undefined => {
+  if (!value || typeof value !== 'object') return undefined;
+  const source = value as Record<string, unknown>;
+
+  return {
+    fill: typeof source.fill === 'string' ? source.fill : undefined,
+    stroke: typeof source.stroke === 'string' ? source.stroke : undefined,
+    strokeWidth: parseCanvasNumber(source.strokeWidth),
+    fontSize: parseCanvasNumber(source.fontSize),
+    fontFamily: typeof source.fontFamily === 'string' ? source.fontFamily : undefined
+  };
+};
+
+const toStrokePoint = (value: unknown): CanvasStrokePoint | null => {
+  if (!value || typeof value !== 'object') return null;
+  const point = value as Record<string, unknown>;
+  const x = parseCanvasNumber(point.x);
+  const y = parseCanvasNumber(point.y);
+  if (x === undefined || y === undefined) return null;
+  return { x, y };
+};
+
+const normalizeCanvasStroke = (value: unknown): CanvasStrokeData | undefined => {
+  if (!value || typeof value !== 'object') return undefined;
+  const source = value as Record<string, unknown>;
+  if (!Array.isArray(source.points)) return undefined;
+
+  const points = source.points
+    .map(toStrokePoint)
+    .filter((point): point is CanvasStrokePoint => point !== null);
+
+  if (points.length < 2) return undefined;
+  return { points };
+};
+
+const normalizeCanvasElement = (value: unknown): CanvasElement => {
+  const element = value && typeof value === 'object' ? (value as Record<string, unknown>) : {} as Record<string, unknown>;
+  const kind = getCanvasElementKind(element.kind);
+  const defaults = getDefaultCanvasDimensions(kind);
+
+  return {
+    id: typeof element.id === 'string' ? element.id : generateId(),
+    kind,
+    x: parseCanvasNumber(element.x) ?? 0,
+    y: parseCanvasNumber(element.y) ?? 0,
+    width: Math.max(40, parseCanvasNumber(element.width) ?? defaults.width),
+    height: Math.max(30, parseCanvasNumber(element.height) ?? defaults.height),
+    zIndex: parseCanvasNumber(element.zIndex) ?? 0,
+    text: typeof element.text === 'string' ? element.text : '',
+    style: normalizeCanvasStyle(element.style),
+    emailTemplate: normalizeEmailTemplate(element.emailTemplate),
+    stroke: normalizeCanvasStroke(element.stroke)
+  };
+};
 
 const parseCanvasNumber = (value: unknown): number | undefined => {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -188,14 +248,18 @@ const normalizeEmailTemplate = (rawTemplate: unknown): CanvasEmailTemplate | und
   };
 };
 
-const normalizeCanvasViewport = (viewport: any): CanvasScene['viewport'] => ({
-  x: Number(viewport?.x) || 0,
-  y: Number(viewport?.y) || 0,
-  zoom: Number(viewport?.zoom) || 1
-});
+const normalizeCanvasViewport = (value: unknown): CanvasScene['viewport'] => {
+  const viewport = value && typeof value === 'object' ? (value as Record<string, unknown>) : {} as Record<string, unknown>;
+  return {
+    x: Number(viewport.x) || 0,
+    y: Number(viewport.y) || 0,
+    zoom: Number(viewport.zoom) || 1
+  };
+};
 
-const normalizeCanvasRelation = (relation: any): CanvasRelation | null => {
-  if (!relation || typeof relation !== 'object') return null;
+const normalizeCanvasRelation = (value: unknown): CanvasRelation | null => {
+  if (!value || typeof value !== 'object') return null;
+  const relation = value as Record<string, unknown>;
   if (relation.type !== 'PARENT' && relation.type !== 'TICKET_LINK' && relation.type !== 'EDGE') return null;
   const fromId = typeof relation.fromId === 'string' ? relation.fromId : '';
   const toId = typeof relation.toId === 'string' ? relation.toId : '';
@@ -205,12 +269,13 @@ const normalizeCanvasRelation = (relation: any): CanvasRelation | null => {
     type: relation.type,
     fromId,
     toId,
-    meta: relation.meta && typeof relation.meta === 'object' ? relation.meta : undefined
+    meta: relation.meta && typeof relation.meta === 'object' ? relation.meta as Record<string, unknown> : undefined
   };
 };
 
-const migrateCanvasScene = (rawScene: any): CanvasScene => {
-  if (!rawScene || typeof rawScene !== 'object') return createDefaultCanvasScene();
+const migrateCanvasScene = (rawValue: unknown): CanvasScene => {
+  if (!rawValue || typeof rawValue !== 'object') return createDefaultCanvasScene();
+  const rawScene = rawValue as Record<string, unknown>;
 
   const viewport = normalizeCanvasViewport(rawScene.viewport);
 
@@ -230,18 +295,24 @@ const migrateCanvasScene = (rawScene: any): CanvasScene => {
 
   // Legacy v1 migration: items + parentId/ticketIds -> elements + relations
   const legacyItems = Array.isArray(rawScene.items) ? rawScene.items : [];
-  const normalized = legacyItems.map((item: any) => {
-    const element = normalizeCanvasElement(item);
+  const normalized = legacyItems.map(item => {
+    const legacy = item && typeof item === 'object' ? (item as Record<string, unknown>) : {} as Record<string, unknown>;
+    const element = normalizeCanvasElement(legacy);
     return {
       element,
-      legacyParentId: typeof item?.parentId === 'string' ? item.parentId : undefined,
-      legacyTicketIds: Array.isArray(item?.ticketIds) ? item.ticketIds.filter((id: unknown) => typeof id === 'string') as string[] : []
+      legacyParentId: typeof legacy.parentId === 'string' ? legacy.parentId : undefined,
+      legacyTicketIds: Array.isArray(legacy.ticketIds)
+        ? legacy.ticketIds.filter((id): id is string => typeof id === 'string')
+        : []
     };
   });
 
   const idMap = new Map<string, string>();
   normalized.forEach(({ element }, index) => {
-    const legacyId = typeof legacyItems[index]?.id === 'string' ? legacyItems[index].id : element.id;
+    const legacyItem = legacyItems[index];
+    const legacyId = legacyItem && typeof legacyItem === 'object' && typeof (legacyItem as { id?: unknown }).id === 'string'
+      ? (legacyItem as { id: string }).id
+      : element.id;
     idMap.set(legacyId, element.id);
   });
 

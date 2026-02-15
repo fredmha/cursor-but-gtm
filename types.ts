@@ -23,8 +23,24 @@ export type ProjectHealth = 'On Track' | 'At Risk' | 'Off Track' | 'Completed';
 export type ChannelTag = 'Inbound' | 'Outbound';
 export type ChannelType = '' | 'PROJECT';
 export type ViewMode = 'EXECUTION' | 'CANVAS';
-export type CanvasTool = 'SELECT' | 'HAND' | 'EMAIL_CARD' | 'CONTAINER';
-export type CanvasElementKind = 'EMAIL_CARD' | 'CONTAINER';
+export type CanvasTool =
+  | 'SELECT'
+  | 'HAND'
+  | 'EMAIL_CARD'
+  | 'CONTAINER'
+  | 'RECTANGLE'
+  | 'ELLIPSE'
+  | 'DIAMOND'
+  | 'TEXT'
+  | 'PENCIL';
+export type CanvasElementKind =
+  | 'EMAIL_CARD'
+  | 'CONTAINER'
+  | 'RECTANGLE'
+  | 'ELLIPSE'
+  | 'DIAMOND'
+  | 'TEXT'
+  | 'PENCIL';
 export type CanvasRelationType = 'PARENT' | 'TICKET_LINK' | 'EDGE';
 export type ExecutionRowType = 'TASK' | 'TEXT';
 export type EmailBlockType = 'H1' | 'H2' | 'H3' | 'BODY' | 'IMAGE';
@@ -134,8 +150,18 @@ export interface OperatingPrinciple {
 export interface CanvasElementStyle {
   fill?: string;
   stroke?: string;
+  strokeWidth?: number;
   fontSize?: number;
   fontFamily?: string;
+}
+
+export interface CanvasStrokePoint {
+  x: number;
+  y: number;
+}
+
+export interface CanvasStrokeData {
+  points: CanvasStrokePoint[];
 }
 
 export interface CanvasEmailBlock {
@@ -168,6 +194,7 @@ export interface CanvasElement {
   text?: string;
   style?: CanvasElementStyle;
   emailTemplate?: CanvasEmailTemplate;
+  stroke?: CanvasStrokeData;
 }
 
 export interface CanvasRelation {

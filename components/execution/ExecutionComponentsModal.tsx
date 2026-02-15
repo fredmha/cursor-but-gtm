@@ -58,7 +58,7 @@ export const ExecutionComponentsModal: React.FC<{
                   }}
                 />
                 <span className="text-sm text-zinc-700 flex-1 truncate">{option.label}</span>
-                <span className="text-[10px] uppercase tracking-wider text-zinc-400">{option.kind}</span>
+                <span className="text-[10px] tracking-wider text-zinc-400">{option.kind}</span>
               </label>
             );
           })}

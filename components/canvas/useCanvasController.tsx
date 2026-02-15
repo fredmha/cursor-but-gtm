@@ -1,4 +1,4 @@
-import { MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   addEdge,
   applyEdgeChanges,
@@ -11,9 +11,10 @@ import {
   NodeProps,
   ReactFlowInstance
 } from '@xyflow/react';
-import { CanvasElement, CanvasEmailBlock, CanvasEmailTemplate, CanvasRelation, CanvasScene, CanvasTool, EmailBlockType } from '../../types';
+import { CanvasElement, CanvasElementKind, CanvasEmailBlock, CanvasEmailTemplate, CanvasRelation, CanvasScene, CanvasStrokePoint, CanvasTool, EmailBlockType } from '../../types';
 import { generateId, useStore } from '../../store';
 import { CanvasElementNode } from './CanvasElementNode';
+import { canAssignParentForKind, getCanvasKindLabel, getElementKindForTool } from './canvas-element-catalog';
 import {
   BlockResizeState,
   buildScene,
@@ -34,6 +35,7 @@ import {
   getAbsolutePosition,
   makeDefaultElement,
   mapSceneToState,
+  pickDropContainerForNode,
   moveBlockById,
   normalizeEmailBlockOrder,
   normalizeBlockMetrics,
@@ -41,13 +43,34 @@ import {
   ResizeDimensions,
   resetSceneHistory,
   TicketRef,
+  toAbsolutePosition,
   toFiniteNumber,
+  toParentRelativePosition,
   VIEWPORT_COMMIT_MS
 } from './canvas-core';
+import { appendFreehandPoint, createFreehandDraft, finalizeFreehandElement, FreehandDraft } from './canvas-freehand';
 
 export type ContainerOption = {
   id: string;
   label: string;
+};
+
+/**
+ * Collects node ids that finished a drag operation in this ReactFlow change batch.
+ * Inputs: batched node changes emitted by ReactFlow.
+ * Output: set of node ids whose dragging flag transitioned to false.
+ * Invariant: only position changes can mark drag-end membership reconciliation candidates.
+ */
+const getDroppedNodeIds = (changes: NodeChange<Node<CanvasNodeData>>[]): Set<string> => {
+  const droppedNodeIds = new Set<string>();
+
+  changes.forEach(change => {
+    if (change.type !== 'position') return;
+    const isDragEnd = (change as { dragging?: boolean }).dragging === false;
+    if (isDragEnd) droppedNodeIds.add(change.id);
+  });
+
+  return droppedNodeIds;
 };
 
 /**
@@ -80,12 +103,14 @@ export const useCanvasController = () => {
   const [editingCardId, setEditingCardId] = useState<string | null>(null);
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
   const [resizeState, setResizeState] = useState<BlockResizeState | null>(null);
+  const [freehandDraft, setFreehandDraft] = useState<FreehandDraft | null>(null);
 
   // Refs for commit/historical state
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
   const ticketLinksRef = useRef(ticketLinks);
   const viewportRef = useRef(viewport);
+  const freehandDraftRef = useRef<FreehandDraft | null>(freehandDraft);
   const commitTimerRef = useRef<number | null>(null);
   const viewportCommitTimerRef = useRef<number | null>(null);
   const historyRef = useRef<CanvasScene[]>([initialScene]);
@@ -106,6 +131,10 @@ export const useCanvasController = () => {
   useEffect(() => {
     viewportRef.current = viewport;
   }, [viewport]);
+
+  useEffect(() => {
+    freehandDraftRef.current = freehandDraft;
+  }, [freehandDraft]);
 
   // Commit helpers
   const bumpHistoryVersion = useCallback(() => {
@@ -270,7 +299,7 @@ export const useCanvasController = () => {
     if (!selectedNode) return [];
     return nodes
       .filter(node => node.data.element.kind === 'CONTAINER' && node.id !== selectedNode.id)
-      .map(node => ({ id: node.id, label: node.data.element.text || `Container ${node.id.slice(0, 6)}` }));
+      .map(node => ({ id: node.id, label: node.data.element.text || `${getCanvasKindLabel('CONTAINER')} ${node.id.slice(0, 6)}` }));
   }, [nodes, selectedNode]);
 
   const linkedTicketIdsForSelection = useMemo(() => {
@@ -280,29 +309,175 @@ export const useCanvasController = () => {
 
   const canUndo = historyIndexRef.current > 0;
   const canRedo = historyIndexRef.current < historyRef.current.length - 1;
+  const canGroupSelection = selectedNodes.length > 1;
 
   // Commands
-  const createElementFromTool = useCallback((kind: 'EMAIL_CARD' | 'CONTAINER', flowX: number, flowY: number) => {
+  /**
+   * Computes the next front-most z-index for a new element.
+   * This keeps newly created primitives discoverable without rewriting historical z-order.
+   * Tradeoff: z-index values are monotonic and can grow over long editing sessions.
+   */
+  const getNextZIndex = useCallback((sourceNodes: Node<CanvasNodeData>[]): number => (
+    sourceNodes.reduce((maxValue, node) => Math.max(maxValue, node.data.element.zIndex), 0) + 1
+  ), []);
+
+  /**
+   * Converts a persisted canvas element into a ReactFlow node payload.
+   * This keeps node construction consistent across click-create, freehand finalize, and grouping flows.
+   * Tradeoff: every caller must supply fully normalized element data before conversion.
+   */
+  const createNodeFromElement = useCallback((element: CanvasElement): Node<CanvasNodeData> => ({
+    id: element.id,
+    type: 'canvasElement',
+    position: { x: element.x, y: element.y },
+    data: { element },
+    style: { width: element.width, height: element.height, zIndex: element.zIndex },
+    selectable: true,
+    draggable: true
+  }), []);
+
+  /**
+   * Translates screen-space coordinates into flow-space coordinates.
+   * This centralizes pointer conversion so all creation tools use identical positioning semantics.
+   * Tradeoff: before rfInstance initialization, a fixed fallback point is used.
+   */
+  const toFlowPoint = useCallback((clientX: number, clientY: number): CanvasStrokePoint => {
+    if (!rfInstance) return { x: 80, y: 80 };
+    return rfInstance.screenToFlowPosition({ x: clientX, y: clientY });
+  }, [rfInstance]);
+
+  /**
+   * Creates one element from the active non-selection tool at a flow coordinate.
+   * It preserves container-on-back semantics while placing regular primitives on top.
+   * Tradeoff: containers always start at z-index 0 and may need manual z-order adjustment.
+   */
+  const createElementFromTool = useCallback((kind: CanvasElementKind, flowX: number, flowY: number) => {
     setNodes(previousNodes => {
-      const maxZ = previousNodes.reduce((maxValue, node) => Math.max(maxValue, node.data.element.zIndex), 0);
-      const zIndex = kind === 'CONTAINER' ? 0 : maxZ + 1;
+      const zIndex = kind === 'CONTAINER' ? 0 : getNextZIndex(previousNodes);
       const element = makeDefaultElement(kind, flowX, flowY, zIndex, generateId);
-
-      const nextNode: Node<CanvasNodeData> = {
-        id: element.id,
-        type: 'canvasElement',
-        position: { x: element.x, y: element.y },
-        data: { element },
-        style: { width: element.width, height: element.height, zIndex: element.zIndex },
-        selectable: true,
-        draggable: true
-      };
-
-      return [...previousNodes, nextNode];
+      return [...previousNodes, createNodeFromElement(element)];
     });
 
     scheduleCommit();
-  }, [scheduleCommit]);
+  }, [createNodeFromElement, getNextZIndex, scheduleCommit]);
+
+  /**
+   * Reconciles parent container membership for nodes that were just dropped.
+   * This enables drag-in grouping and drag-out ungrouping without rigid parent bounds.
+   * Tradeoff: membership resolves on drag-end, not continuously during hover.
+   */
+  const reconcileContainerMembershipAfterDrop = useCallback((
+    sourceNodes: Node<CanvasNodeData>[],
+    droppedNodeIds: Set<string>
+  ): Node<CanvasNodeData>[] => {
+    if (droppedNodeIds.size === 0) return sourceNodes;
+
+    const nodeById = new Map<string, Node<CanvasNodeData>>(
+      sourceNodes.map(node => [node.id, node] as [string, Node<CanvasNodeData>])
+    );
+
+    return sourceNodes.map(node => {
+      if (!droppedNodeIds.has(node.id)) return node;
+      if (!canAssignParentForKind(node.data.element.kind)) return node;
+
+      const absolutePosition = toAbsolutePosition(node.id, nodeById);
+      const targetContainer = pickDropContainerForNode(node, sourceNodes, nodeById);
+      const targetParentId = targetContainer?.id;
+
+      if (targetParentId === node.parentId) return node;
+
+      if (!targetParentId) {
+        return {
+          ...node,
+          parentId: undefined,
+          position: absolutePosition,
+          data: {
+            ...node.data,
+            element: {
+              ...node.data.element,
+              x: absolutePosition.x,
+              y: absolutePosition.y
+            }
+          }
+        };
+      }
+
+      const relativePosition = toParentRelativePosition(absolutePosition, targetParentId, nodeById);
+      return {
+        ...node,
+        parentId: targetParentId,
+        position: relativePosition,
+        data: {
+          ...node.data,
+          element: {
+            ...node.data.element,
+            x: relativePosition.x,
+            y: relativePosition.y
+          }
+        }
+      };
+    });
+  }, []);
+
+  /**
+   * Wraps the current multi-selection into a new container to form a component group.
+   * Absolute coordinates are preserved so grouping is non-destructive to existing layout.
+   * Tradeoff: nested container grouping is intentionally limited to avoid complex parent graphs.
+   */
+  const groupSelectionIntoContainer = useCallback(() => {
+    if (selectedNodes.length < 2) return;
+
+    const nodeById = new Map<string, Node<CanvasNodeData>>(
+      nodes.map(node => [node.id, node] as [string, Node<CanvasNodeData>])
+    );
+    const absoluteSelection = selectedNodes.map(node => ({
+      node,
+      absolute: getAbsolutePosition(node.id, nodeById)
+    }));
+
+    const minX = Math.min(...absoluteSelection.map(entry => entry.absolute.x));
+    const minY = Math.min(...absoluteSelection.map(entry => entry.absolute.y));
+    const maxX = Math.max(...absoluteSelection.map(entry => entry.absolute.x + entry.node.data.element.width));
+    const maxY = Math.max(...absoluteSelection.map(entry => entry.absolute.y + entry.node.data.element.height));
+
+    const containerPadding = 40;
+    const containerElement = makeDefaultElement('CONTAINER', minX - containerPadding, minY - containerPadding, 0, generateId);
+    containerElement.width = Math.max(containerElement.width, maxX - minX + containerPadding * 2);
+    containerElement.height = Math.max(containerElement.height, maxY - minY + containerPadding * 2);
+    containerElement.text = 'Component Group';
+
+    const selectedIds = new Set(selectedNodes.map(node => node.id));
+    setNodes(previousNodes => {
+      const nextNodes = previousNodes.map(node => {
+        if (!selectedIds.has(node.id)) return node;
+
+        const absolute = getAbsolutePosition(node.id, nodeById);
+        const relative = {
+          x: absolute.x - containerElement.x,
+          y: absolute.y - containerElement.y
+        };
+
+        return {
+          ...node,
+          selected: false,
+          parentId: containerElement.id,
+          position: relative,
+          data: {
+            ...node.data,
+            element: {
+              ...node.data.element,
+              x: relative.x,
+              y: relative.y
+            }
+          }
+        };
+      });
+
+      return [...nextNodes, { ...createNodeFromElement(containerElement), selected: true }];
+    });
+
+    scheduleCommit();
+  }, [createNodeFromElement, nodes, scheduleCommit, selectedNodes]);
 
   const updateSelectedElement = useCallback((updater: (element: CanvasElement) => CanvasElement) => {
     if (!selectedNode) return;
@@ -380,7 +555,7 @@ export const useCanvasController = () => {
   }, [updateEmailBlock]);
 
   const assignSelectedParent = useCallback((parentId?: string) => {
-    if (!selectedNode || selectedNode.data.element.kind === 'CONTAINER') return;
+    if (!selectedNode || !canAssignParentForKind(selectedNode.data.element.kind)) return;
 
     const nodeMap = new Map<string, Node<CanvasNodeData>>(
       nodes.map(node => [node.id, node] as [string, Node<CanvasNodeData>])
@@ -396,19 +571,16 @@ export const useCanvasController = () => {
         return {
           ...node,
           parentId: undefined,
-          extent: undefined,
           position: absolute,
           data: { element: { ...node.data.element, x: absolute.x, y: absolute.y } }
         };
       }
 
       // Convert absolute coordinates into parent-relative local space.
-      const parentAbsolute = getAbsolutePosition(parentId, nodeMap);
-      const relative = { x: absolute.x - parentAbsolute.x, y: absolute.y - parentAbsolute.y };
+      const relative = toParentRelativePosition(absolute, parentId, nodeMap);
       return {
         ...node,
         parentId,
-        extent: 'parent',
         position: relative,
         data: { element: { ...node.data.element, x: relative.x, y: relative.y } }
       };
@@ -421,13 +593,31 @@ export const useCanvasController = () => {
     const selectedIds = new Set(selectedNodes.map(node => node.id));
     if (selectedIds.size === 0 && selectedEdgeIds.size === 0) return;
 
-    setNodes(previousNodes => previousNodes
-      .filter(node => !selectedIds.has(node.id))
-      .map(node => {
-        if (!node.parentId || !selectedIds.has(node.parentId)) return node;
-        return { ...node, parentId: undefined, extent: undefined };
-      })
-    );
+    setNodes(previousNodes => {
+      const nodeById = new Map<string, Node<CanvasNodeData>>(
+        previousNodes.map(node => [node.id, node] as [string, Node<CanvasNodeData>])
+      );
+
+      return previousNodes
+        .filter(node => !selectedIds.has(node.id))
+        .map(node => {
+          if (!node.parentId || !selectedIds.has(node.parentId)) return node;
+          const absolutePosition = toAbsolutePosition(node.id, nodeById);
+          return {
+            ...node,
+            parentId: undefined,
+            position: absolutePosition,
+            data: {
+              ...node.data,
+              element: {
+                ...node.data.element,
+                x: absolutePosition.x,
+                y: absolutePosition.y
+              }
+            }
+          };
+        });
+    });
 
     setEdges(previousEdges => previousEdges.filter(edge =>
       !selectedIds.has(edge.source)
@@ -467,7 +657,6 @@ export const useCanvasController = () => {
           ...node,
           id: nextId,
           parentId: clonedParentId,
-          extent: clonedParentId ? 'parent' : undefined,
           position: { x: node.position.x + 40, y: node.position.y + 40 },
           data: { element: clonedElement },
           style: { ...(node.style || {}), zIndex: clonedElement.zIndex },
@@ -535,6 +724,8 @@ export const useCanvasController = () => {
 
   // ReactFlow event handlers
   const onNodesChange = useCallback((changes: NodeChange<Node<CanvasNodeData>>[]) => {
+    const droppedNodeIds = getDroppedNodeIds(changes);
+
     setNodes(previousNodes => {
       const changedDimensions = new Map<string, ResizeDimensions>();
 
@@ -545,34 +736,36 @@ export const useCanvasController = () => {
         changedDimensions.set(change.id, dimensions);
       });
 
-      const nextNodes = applyNodeChanges(changes, previousNodes);
-      if (changedDimensions.size === 0) return nextNodes;
+      const changedNodes = applyNodeChanges(changes, previousNodes);
+      const nodesWithDimensions = changedDimensions.size === 0
+        ? changedNodes
+        : changedNodes.map(node => {
+          const dimensions = changedDimensions.get(node.id);
+          if (!dimensions) return node;
 
-      return nextNodes.map(node => {
-        const dimensions = changedDimensions.get(node.id);
-        if (!dimensions) return node;
+          const width = toFiniteNumber(dimensions.width)
+            ?? toFiniteNumber(node.width)
+            ?? toFiniteNumber(node.measured?.width)
+            ?? toFiniteNumber((node.style as { width?: unknown } | undefined)?.width)
+            ?? node.data.element.width;
 
-        const width = toFiniteNumber(dimensions.width)
-          ?? toFiniteNumber(node.width)
-          ?? toFiniteNumber(node.measured?.width)
-          ?? toFiniteNumber((node.style as { width?: unknown } | undefined)?.width)
-          ?? node.data.element.width;
+          const height = toFiniteNumber(dimensions.height)
+            ?? toFiniteNumber(node.height)
+            ?? toFiniteNumber(node.measured?.height)
+            ?? toFiniteNumber((node.style as { height?: unknown } | undefined)?.height)
+            ?? node.data.element.height;
 
-        const height = toFiniteNumber(dimensions.height)
-          ?? toFiniteNumber(node.height)
-          ?? toFiniteNumber(node.measured?.height)
-          ?? toFiniteNumber((node.style as { height?: unknown } | undefined)?.height)
-          ?? node.data.element.height;
+          return {
+            ...node,
+            width,
+            height,
+            measured: { ...(node.measured || {}), width, height },
+            data: { ...node.data, element: { ...node.data.element, width, height } },
+            style: { ...(node.style || {}), width, height }
+          };
+        });
 
-        return {
-          ...node,
-          width,
-          height,
-          measured: { ...(node.measured || {}), width, height },
-          data: { ...node.data, element: { ...node.data.element, width, height } },
-          style: { ...(node.style || {}), width, height }
-        };
-      });
+      return reconcileContainerMembershipAfterDrop(nodesWithDimensions, droppedNodeIds);
     });
 
     const shouldCommit = changes.some(change => {
@@ -583,7 +776,7 @@ export const useCanvasController = () => {
     });
 
     if (shouldCommit) scheduleCommit();
-  }, [scheduleCommit]);
+  }, [reconcileContainerMembershipAfterDrop, scheduleCommit]);
 
   const onEdgesChange = useCallback((changes: EdgeChange<Edge>[]) => {
     setEdges(previousEdges => applyEdgeChanges(changes, previousEdges));
@@ -602,15 +795,72 @@ export const useCanvasController = () => {
     scheduleCommit();
   }, [scheduleCommit]);
 
-  const onPaneClick = useCallback((event: MouseEvent) => {
-    if (tool !== 'EMAIL_CARD' && tool !== 'CONTAINER') return;
+  /**
+   * Commits an in-progress freehand draft into a persisted pencil element.
+   * This separates high-frequency pointer updates from store/history writes for better responsiveness.
+   * Tradeoff: unfinished drafts are discarded when fewer than two points exist.
+   */
+  const finishFreehandDraw = useCallback(() => {
+    if (tool !== 'PENCIL') return;
 
-    const flowPosition = rfInstance
-      ? rfInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY })
-      : { x: 80, y: 80 };
+    const currentDraft = freehandDraftRef.current;
+    setFreehandDraft(null);
+    if (!currentDraft) return;
 
-    createElementFromTool(tool, flowPosition.x, flowPosition.y);
-  }, [createElementFromTool, rfInstance, tool]);
+    setNodes(previousNodes => {
+      const zIndex = getNextZIndex(previousNodes);
+      const element = finalizeFreehandElement(currentDraft, zIndex, generateId);
+      if (!element) return previousNodes;
+      return [...previousNodes, createNodeFromElement(element)];
+    });
+
+    scheduleCommit();
+  }, [createNodeFromElement, getNextZIndex, scheduleCommit, tool]);
+
+  /**
+   * Handles pane pointer movement while pencil mode is active.
+   * The handler creates or extends drafts using the primary mouse button state.
+   * Tradeoff: touch/pen pressure input is not modeled in this V1 implementation.
+   */
+  const onPaneMouseMove = useCallback((event: ReactMouseEvent) => {
+    if (tool !== 'PENCIL') return;
+
+    if (event.buttons !== 1) {
+      if (freehandDraftRef.current) finishFreehandDraw();
+      return;
+    }
+
+    const point = toFlowPoint(event.clientX, event.clientY);
+    setFreehandDraft(previousDraft => (
+      previousDraft
+        ? appendFreehandPoint(previousDraft, point)
+        : createFreehandDraft(point)
+    ));
+  }, [finishFreehandDraw, toFlowPoint, tool]);
+
+  /**
+   * Finalizes drawing when pointer leaves the pane during pencil mode.
+   * This prevents orphan drafts when mouseup happens outside the canvas surface.
+   * Tradeoff: leaving the pane always commits current stroke instead of canceling it.
+   */
+  const onPaneMouseLeave = useCallback(() => {
+    if (tool !== 'PENCIL') return;
+    if (!freehandDraftRef.current) return;
+    finishFreehandDraw();
+  }, [finishFreehandDraw, tool]);
+
+  /**
+   * Creates a new element for click-based creation tools.
+   * Selection and navigation tools intentionally no-op here.
+   * Tradeoff: pencil creation uses move-driven drafting and is excluded from click creation.
+   */
+  const onPaneClick = useCallback((event: ReactMouseEvent) => {
+    const kind = getElementKindForTool(tool);
+    if (!kind || kind === 'PENCIL') return;
+
+    const flowPosition = toFlowPoint(event.clientX, event.clientY);
+    createElementFromTool(kind, flowPosition.x, flowPosition.y);
+  }, [createElementFromTool, toFlowPoint, tool]);
 
   const onEmailBlockSelect = useCallback((cardId: string, blockId: string) => {
     setEditingCardId(cardId);
@@ -661,7 +911,7 @@ export const useCanvasController = () => {
     const resizingBlock = currentBlocks.find(block => block.id === resizeState.blockId);
     if (!resizingBlock) return;
 
-    const handleMouseMove = (event: MouseEvent) => {
+    const handleMouseMove = (event: globalThis.MouseEvent) => {
       const delta = event.clientY - resizeState.startY;
       const nextHeight = clampNumber(resizeState.startHeight + delta, EMAIL_BLOCK_MIN_HEIGHT, EMAIL_BLOCK_MAX_HEIGHT);
 
@@ -756,6 +1006,12 @@ export const useCanvasController = () => {
         return;
       }
 
+      if (isMeta && event.key.toLowerCase() === 'g') {
+        event.preventDefault();
+        groupSelectionIntoContainer();
+        return;
+      }
+
       if (event.key === 'Delete' || event.key === 'Backspace') {
         event.preventDefault();
         removeSelection();
@@ -773,7 +1029,24 @@ export const useCanvasController = () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [clipboardNodes, duplicateSelection, redo, removeSelection, selectedNodes, undo]);
+  }, [clipboardNodes, duplicateSelection, groupSelectionIntoContainer, redo, removeSelection, selectedNodes, undo]);
+
+  useEffect(() => {
+    const handleMouseUp = () => {
+      if (tool !== 'PENCIL') return;
+      if (!freehandDraftRef.current) return;
+      finishFreehandDraw();
+    };
+
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => window.removeEventListener('mouseup', handleMouseUp);
+  }, [finishFreehandDraw, tool]);
+
+  useEffect(() => {
+    if (tool === 'PENCIL') return;
+    if (!freehandDraftRef.current) return;
+    setFreehandDraft(null);
+  }, [tool]);
 
   const selectedElement = selectedNode?.data.element;
   const selectedIsEmailCard = selectedElement?.kind === 'EMAIL_CARD';
@@ -789,6 +1062,34 @@ export const useCanvasController = () => {
     setViewport({ x: 0, y: 0, zoom: 1 });
     scheduleViewportCommit();
   }, [rfInstance, scheduleViewportCommit]);
+
+  /**
+   * Persists viewport updates after panning/zooming ends.
+   * This keeps local state in sync with ReactFlow without committing every transient frame.
+   * Tradeoff: viewport snapshots are eventually consistent during active movement.
+   */
+  const onCanvasMoveEnd = useCallback((_: unknown, nextViewport: { x: number; y: number; zoom: number }) => {
+    setViewport(nextViewport);
+    scheduleViewportCommit();
+  }, [scheduleViewportCommit]);
+
+  /**
+   * Zooms the canvas viewport in with a short animation.
+   * A named command keeps toolbar wiring explicit and test-friendly.
+   * Tradeoff: zoom step granularity relies on ReactFlow defaults.
+   */
+  const zoomIn = useCallback(() => {
+    rfInstance?.zoomIn({ duration: 120 });
+  }, [rfInstance]);
+
+  /**
+   * Zooms the canvas viewport out with a short animation.
+   * A named command mirrors zoom-in semantics for symmetric toolbar behavior.
+   * Tradeoff: zoom bounds are enforced by ReactFlow configuration, not this helper.
+   */
+  const zoomOut = useCallback(() => {
+    rfInstance?.zoomOut({ duration: 120 });
+  }, [rfInstance]);
 
   return {
     campaign,
@@ -812,11 +1113,13 @@ export const useCanvasController = () => {
     activeSelectedBlock,
     activeSelectedBlockMetrics,
     activeBlockId,
+    freehandDraft,
     containerOptions,
     linkedTicketIdsForSelection,
     ticketById,
     canUndo,
     canRedo,
+    canGroupSelection,
     setRfInstance,
     setTool,
     setLinkPanelOpen,
@@ -827,13 +1130,13 @@ export const useCanvasController = () => {
     onEdgesChange,
     onConnect,
     onPaneClick,
-    onMoveEnd: (_: unknown, nextViewport: { x: number; y: number; zoom: number }) => {
-      setViewport(nextViewport);
-      scheduleViewportCommit();
-    },
+    onPaneMouseMove,
+    onPaneMouseLeave,
+    onMoveEnd: onCanvasMoveEnd,
     undo,
     redo,
     removeSelection,
+    groupSelectionIntoContainer,
     addEmailBlock,
     updateEmailBlock,
     deleteEmailBlock,
@@ -844,8 +1147,8 @@ export const useCanvasController = () => {
     saveTicketLinks,
     selectPanelBlock,
     resetViewport,
-    zoomIn: () => rfInstance?.zoomIn({ duration: 120 }),
-    zoomOut: () => rfInstance?.zoomOut({ duration: 120 }),
+    zoomIn,
+    zoomOut,
     blockTypeOptions: EMAIL_BLOCK_TYPES,
     blockLimits: {
       minHeight: EMAIL_BLOCK_MIN_HEIGHT,

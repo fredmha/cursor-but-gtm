@@ -7,6 +7,7 @@ import {
   EMAIL_BLOCK_TYPES,
   TicketRef
 } from './canvas-core';
+import { canAssignParentForKind, supportsPlainTextEditing } from './canvas-element-catalog';
 import { ContainerOption } from './useCanvasController';
 
 type CanvasInspectorPanelProps = {
@@ -263,7 +264,7 @@ export const CanvasInspectorPanel: React.FC<CanvasInspectorPanelProps> = ({
           </div>
         </div>
       )
-    ) : (
+    ) : supportsPlainTextEditing(selectedElement.kind) ? (
       <div>
         <label className="block text-[11px] font-semibold text-zinc-500 mb-1">Text</label>
         <textarea
@@ -273,7 +274,40 @@ export const CanvasInspectorPanel: React.FC<CanvasInspectorPanelProps> = ({
           onChange={event => onUpdateSelectedElement(element => ({ ...element, text: event.target.value }))}
         />
       </div>
+    ) : (
+      <div className="text-xs text-zinc-500">
+        This element does not support inline text. Add a Text node to annotate it.
+      </div>
     )}
+
+    <div className="grid grid-cols-2 gap-2">
+      <div>
+        <label className="block text-[11px] font-semibold text-zinc-500 mb-1">Fill</label>
+        <input
+          type="text"
+          value={selectedElement.style?.fill || ''}
+          placeholder="#ffffff"
+          className="w-full rounded border border-zinc-200 px-2 py-1 text-sm"
+          onChange={event => onUpdateSelectedElement(element => ({
+            ...element,
+            style: { ...(element.style || {}), fill: event.target.value || undefined }
+          }))}
+        />
+      </div>
+      <div>
+        <label className="block text-[11px] font-semibold text-zinc-500 mb-1">Stroke</label>
+        <input
+          type="text"
+          value={selectedElement.style?.stroke || ''}
+          placeholder="#334155"
+          className="w-full rounded border border-zinc-200 px-2 py-1 text-sm"
+          onChange={event => onUpdateSelectedElement(element => ({
+            ...element,
+            style: { ...(element.style || {}), stroke: event.target.value || undefined }
+          }))}
+        />
+      </div>
+    </div>
 
     <div className="grid grid-cols-2 gap-2">
       <div>
@@ -311,7 +345,7 @@ export const CanvasInspectorPanel: React.FC<CanvasInspectorPanelProps> = ({
       </button>
     </div>
 
-    {selectedElement.kind !== 'CONTAINER' && (
+    {canAssignParentForKind(selectedElement.kind) && (
       <div>
         <label className="block text-[11px] font-semibold text-zinc-500 mb-1">Container</label>
         <select
