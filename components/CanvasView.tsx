@@ -5,6 +5,7 @@ import { CanvasStrokePoint, CanvasViewport } from '../types';
 import { CanvasInspectorPanel } from './canvas/CanvasInspectorPanel';
 import { CanvasTicketLinkModal } from './canvas/CanvasTicketLinkModal';
 import { CanvasToolbar } from './canvas/CanvasToolbar';
+import { getCanvasBoardStyle } from './canvas/canvas-theme';
 import { useCanvasController } from './canvas/useCanvasController';
 
 type FreehandDraftOverlayProps = {
@@ -19,6 +20,14 @@ type PencilCaptureLayerProps = {
   onPointerUp: (event: React.PointerEvent<HTMLDivElement>) => void;
   onPointerCancel: (event: React.PointerEvent<HTMLDivElement>) => void;
 };
+
+/**
+ * Determines whether the inspector should render for the current selection.
+ * Pencil strokes remain inspector-free to keep freehand interactions lightweight.
+ * Tradeoff: pencil styling stays constrained to current draw defaults.
+ */
+const shouldShowInspector = (selectedKind: string | undefined): boolean =>
+  !!selectedKind && selectedKind !== 'PENCIL';
 
 /**
  * Converts a flow-space point into screen-space point for draft stroke preview.
@@ -182,6 +191,64 @@ const CanvasWorkspace: React.FC = () => {
   const closeLinkPanel = (): void => controller.setLinkPanelOpen(false);
   const handleToggleLinkTicket = (ticketId: string, checked: boolean): void =>
     updateDraftTicketIds(ticketId, checked, controller.setDraftLinkedTicketIds);
+  const inspectorVisible = shouldShowInspector(controller.selectedElement?.kind);
+  const drawCaptureLayerEnabled = controller.tool === 'PENCIL' || controller.tool === 'ERASER';
+
+  /**
+   * Routes pointer-down capture events to the active draw tool handler.
+   * This preserves one shared full-surface capture layer for both drawing and erasing tools.
+   * Tradeoff: mode branching adds one dispatch check per capture event.
+   */
+  const handleDrawPointerDown = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (controller.tool === 'ERASER') {
+      controller.onEraserPointerDown(event);
+      return;
+    }
+
+    controller.onPencilPointerDown(event);
+  };
+
+  /**
+   * Routes pointer-move capture events to the active draw tool handler.
+   * Shared move routing keeps capture behavior consistent between pencil and eraser modes.
+   * Tradeoff: non-draw tools no-op because capture layer is disabled outside draw modes.
+   */
+  const handleDrawPointerMove = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (controller.tool === 'ERASER') {
+      controller.onEraserPointerMove(event);
+      return;
+    }
+
+    controller.onPencilPointerMove(event);
+  };
+
+  /**
+   * Routes pointer-up capture events to the active draw tool handler.
+   * This ensures each draw mode closes its gesture lifecycle through controller ownership checks.
+   * Tradeoff: pointer-up dispatch relies on current tool state at event time.
+   */
+  const handleDrawPointerUp = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (controller.tool === 'ERASER') {
+      controller.onEraserPointerUp(event);
+      return;
+    }
+
+    controller.onPencilPointerUp(event);
+  };
+
+  /**
+   * Routes pointer-cancel capture events to the active draw tool handler.
+   * A shared cancel path avoids stranded pointer refs across tool-specific controllers.
+   * Tradeoff: cancellation semantics remain tool-specific after routing.
+   */
+  const handleDrawPointerCancel = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (controller.tool === 'ERASER') {
+      controller.onEraserPointerCancel(event);
+      return;
+    }
+
+    controller.onPencilPointerCancel(event);
+  };
 
   if (!controller.campaign) {
     return (
@@ -192,14 +259,13 @@ const CanvasWorkspace: React.FC = () => {
   }
 
   return (
-    <div className="h-full w-full bg-zinc-50 relative">
+    <div className="h-full w-full relative overflow-hidden" style={getCanvasBoardStyle()}>
+      <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(180deg,rgba(255,255,255,0.72),rgba(248,250,252,0.96))]" />
       <ReactFlow
+        className="!bg-transparent"
         nodes={controller.nodes}
-        edges={controller.edges}
         nodeTypes={controller.nodeTypes}
         onNodesChange={controller.onNodesChange}
-        onEdgesChange={controller.onEdgesChange}
-        onConnect={controller.onConnect}
         onPaneClick={controller.onPaneClick}
         onInit={controller.setRfInstance}
         onMoveEnd={controller.onMoveEnd}
@@ -211,26 +277,28 @@ const CanvasWorkspace: React.FC = () => {
         minZoom={0.2}
         maxZoom={3}
       >
-        <Background gap={24} color="#e4e4e7" />
+        <Background gap={24} color="#cbd5e1" />
       </ReactFlow>
 
       <PencilCaptureLayer
-        enabled={controller.tool === 'PENCIL'}
-        onPointerDown={controller.onPencilPointerDown}
-        onPointerMove={controller.onPencilPointerMove}
-        onPointerUp={controller.onPencilPointerUp}
-        onPointerCancel={controller.onPencilPointerCancel}
+        enabled={drawCaptureLayerEnabled}
+        onPointerDown={handleDrawPointerDown}
+        onPointerMove={handleDrawPointerMove}
+        onPointerUp={handleDrawPointerUp}
+        onPointerCancel={handleDrawPointerCancel}
       />
 
       <FreehandDraftOverlay points={controller.freehandDraft?.points || []} viewport={controller.viewport} />
 
-      {controller.selectedElement && controller.selectedIsEmailCard && (
+      {controller.selectedElement && inspectorVisible && (
         <CanvasInspectorPanel
           selectedElement={controller.selectedElement}
           selectedNodeParentId={controller.selectedNode?.parentId}
           selectedIsEmailCard={controller.selectedIsEmailCard}
+          emailSubject={controller.selectedEmailSubject}
           panelIsBlockMode={controller.panelIsBlockMode}
           panelEmailBlocks={controller.panelEmailBlocks}
+          requiredEmailBodyBlockId={controller.requiredEmailBodyBlockId}
           activeBlockId={controller.activeBlockId}
           activeSelectedBlock={controller.activeSelectedBlock}
           activeSelectedBlockMetrics={controller.activeSelectedBlockMetrics}
@@ -243,6 +311,7 @@ const CanvasWorkspace: React.FC = () => {
           onSetActiveBlockId={controller.setActiveBlockId}
           onSelectPanelBlock={controller.selectPanelBlock}
           onAddEmailBlock={controller.addEmailBlock}
+          onUpdateEmailSubject={controller.updateEmailSubject}
           onUpdateEmailBlock={controller.updateEmailBlock}
           onDeleteEmailBlock={controller.deleteEmailBlock}
           onHandleEmailBlockUpload={controller.handleEmailBlockUpload}
@@ -257,7 +326,11 @@ const CanvasWorkspace: React.FC = () => {
         canUndo={controller.canUndo}
         canRedo={controller.canRedo}
         canGroupSelection={controller.canGroupSelection}
+        eraserMode={controller.eraserMode}
+        eraserSize={controller.eraserSize}
         onSetTool={controller.setTool}
+        onSetEraserMode={controller.setEraserMode}
+        onSetEraserSize={controller.setEraserSize}
         onUndo={controller.undo}
         onRedo={controller.redo}
         onGroupSelection={controller.groupSelectionIntoContainer}

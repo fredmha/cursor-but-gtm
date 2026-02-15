@@ -3,7 +3,7 @@ import { CanvasElement, CanvasElementKind, CanvasTool } from '../../types';
 export type CanvasToolDefinition = {
   tool: CanvasTool;
   label: string;
-  icon: 'MousePointer' | 'Layers' | 'FileText' | 'Layout' | 'Square' | 'Circle' | 'Kanban' | 'Type' | 'Edit';
+  icon: 'MousePointer' | 'Layers' | 'FileText' | 'Layout' | 'Square' | 'Circle' | 'Kanban' | 'Type' | 'Edit' | 'Trash';
 };
 
 const CANVAS_KIND_LABELS: Record<CanvasElementKind, string> = {
@@ -35,7 +35,8 @@ const TOOLBAR_TOOLS: CanvasToolDefinition[] = [
   { tool: 'ELLIPSE', label: 'Ellipse', icon: 'Circle' },
   { tool: 'DIAMOND', label: 'Diamond', icon: 'Kanban' },
   { tool: 'TEXT', label: 'Text', icon: 'Type' },
-  { tool: 'PENCIL', label: 'Pencil', icon: 'Edit' }
+  { tool: 'PENCIL', label: 'Pencil', icon: 'Edit' },
+  { tool: 'ERASER', label: 'Eraser', icon: 'Trash' }
 ];
 
 type CanvasElementKindDefaults = {
@@ -48,11 +49,11 @@ type CanvasElementKindDefaults = {
 };
 
 const CANVAS_KIND_DEFAULTS: Record<CanvasElementKind, CanvasElementKindDefaults> = {
-  EMAIL_CARD: { width: 340, height: 200, text: 'Email Card', fill: '#ffffff', stroke: '#d4d4d8', strokeWidth: 1 },
+  EMAIL_CARD: { width: 460, height: 320, text: 'Email Card', fill: '#ffffff', stroke: '#d4d4d8', strokeWidth: 1 },
   CONTAINER: { width: 560, height: 400, text: 'Component Group', fill: '#f8fafc', stroke: '#94a3b8', strokeWidth: 1 },
-  RECTANGLE: { width: 260, height: 160, text: 'Rectangle', fill: '#f1f5f9', stroke: '#64748b', strokeWidth: 1 },
-  ELLIPSE: { width: 240, height: 160, text: 'Ellipse', fill: '#f5f3ff', stroke: '#7c3aed', strokeWidth: 1 },
-  DIAMOND: { width: 220, height: 170, text: 'Decision', fill: '#fef3c7', stroke: '#b45309', strokeWidth: 1 },
+  RECTANGLE: { width: 260, height: 160, text: 'Rectangle', fill: '#fee2e2', stroke: '#e11d48', strokeWidth: 2 },
+  ELLIPSE: { width: 240, height: 160, text: 'Ellipse', fill: '#dcfce7', stroke: '#16a34a', strokeWidth: 2 },
+  DIAMOND: { width: 220, height: 170, text: 'Decision', fill: '#fef3c7', stroke: '#d97706', strokeWidth: 2 },
   TEXT: { width: 260, height: 90, text: 'Type here...', fill: 'transparent', stroke: 'transparent', strokeWidth: 0 },
   PENCIL: { width: 120, height: 80, text: '', fill: 'transparent', stroke: '#334155', strokeWidth: 2 }
 };
@@ -71,6 +72,22 @@ export const getElementKindForTool = (tool: CanvasTool): CanvasElementKind | nul
  * Tradeoff: icon names are stringly typed to avoid coupling catalog to icon components.
  */
 export const getToolbarTools = (): CanvasToolDefinition[] => TOOLBAR_TOOLS;
+
+/**
+ * Returns style defaults for the provided canvas kind.
+ * This helper prevents renderer-level fallback drift from creation defaults.
+ * Tradeoff: callers depend on this module for visual baseline values.
+ */
+export const getCanvasKindStyleDefaults = (
+  kind: CanvasElementKind
+): Pick<CanvasElementKindDefaults, 'fill' | 'stroke' | 'strokeWidth'> => {
+  const defaults = CANVAS_KIND_DEFAULTS[kind];
+  return {
+    fill: defaults.fill,
+    stroke: defaults.stroke,
+    strokeWidth: defaults.strokeWidth
+  };
+};
 
 /**
  * Creates a default element payload for a specific kind.

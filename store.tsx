@@ -185,6 +185,8 @@ const clampNumber = (value: number, min: number, max: number): number =>
 
 const EMAIL_BLOCK_TYPES: EmailBlockType[] = ['H1', 'H2', 'H3', 'BODY', 'IMAGE'];
 const EMAIL_BLOCK_ALIGNMENTS: EmailBlockAlign[] = ['left', 'center', 'right'];
+const DEFAULT_EMAIL_SUBJECT = 'Subject line...';
+const REQUIRED_EMAIL_BODY_BLOCK_ID_BASE = 'required-body';
 
 const getDefaultBlockLayout = (type: EmailBlockType): Required<Pick<CanvasEmailBlock, 'heightPx' | 'fontSizePx' | 'paddingY' | 'paddingX' | 'marginBottomPx'>> => {
   if (type === 'H1') return { heightPx: 56, fontSizePx: 30, paddingY: 8, paddingX: 10, marginBottomPx: 8 };
@@ -228,23 +230,106 @@ const normalizeEmailBlock = (rawBlock: unknown, fallbackOrder: number): CanvasEm
   };
 };
 
-const normalizeEmailTemplate = (rawTemplate: unknown): CanvasEmailTemplate | undefined => {
-  if (!rawTemplate || typeof rawTemplate !== 'object') return undefined;
-  const template = rawTemplate as Record<string, unknown>;
-  const rawBlocks = Array.isArray(template.blocks) ? template.blocks : [];
-  const blocks = rawBlocks
-    .map((rawBlock, index) => normalizeEmailBlock(rawBlock, index))
-    .filter((block): block is CanvasEmailBlock => block !== null);
-  if (blocks.length === 0) return undefined;
+/**
+ * Derives a subject fallback from legacy text blocks.
+ * This preserves prior author intent for templates without explicit subject storage.
+ * Tradeoff: fallback picks first available text block and may not match perfect subject semantics.
+ */
+const getSubjectFallbackFromBlocks = (blocks: CanvasEmailBlock[]): string => {
+  const firstTextBlock = blocks.find(block => block.type !== 'IMAGE' && (block.text || '').trim().length > 0);
+  return (firstTextBlock?.text || '').trim();
+};
+
+/**
+ * Builds a deterministic id for injected required-body blocks.
+ * Stable ids avoid noisy churn when normalizing legacy templates repeatedly.
+ * Tradeoff: deterministic ids are predictable and optimized for editor consistency.
+ */
+const getRequiredBodyBlockIdCandidate = (blocks: CanvasEmailBlock[]): string => {
+  const existingBlockIds = new Set(blocks.map(block => block.id));
+  let suffix = 1;
+  let candidateId = REQUIRED_EMAIL_BODY_BLOCK_ID_BASE;
+
+  while (existingBlockIds.has(candidateId)) {
+    suffix += 1;
+    candidateId = `${REQUIRED_EMAIL_BODY_BLOCK_ID_BASE}-${suffix}`;
+  }
+
+  return candidateId;
+};
+
+/**
+ * Creates an injected BODY block payload for templates that are missing BODY content.
+ * This guarantees editor safety while preserving user-authored block ordering.
+ * Tradeoff: injected body copy starts from a generic placeholder.
+ */
+const createRequiredBodyBlock = (blockId: string): CanvasEmailBlock => {
+  const defaults = getDefaultBlockLayout('BODY');
+  return {
+    id: blockId,
+    order: 0,
+    type: 'BODY',
+    align: 'left',
+    text: 'Body copy...',
+    imageUrl: '',
+    ...defaults
+  };
+};
+
+/**
+ * Ensures persisted templates contain at least one BODY block without forcing BODY-first ordering.
+ * This preserves drag-reordered layouts while still repairing malformed BODY-free templates.
+ * Tradeoff: repaired templates append synthesized BODY content at the end.
+ */
+const ensureAtLeastOneBodyBlock = (blocks: CanvasEmailBlock[]): CanvasEmailBlock[] => {
   const orderedBlocks = [...blocks]
     .sort((leftBlock, rightBlock) => {
       if (leftBlock.order !== rightBlock.order) return leftBlock.order - rightBlock.order;
       return leftBlock.id.localeCompare(rightBlock.id);
     })
     .map((block, index) => ({ ...block, order: index }));
+
+  const hasBodyBlock = orderedBlocks.some(block => block.type === 'BODY');
+  if (!hasBodyBlock) {
+    const requiredBodyBlockId = getRequiredBodyBlockIdCandidate(orderedBlocks);
+    return [...orderedBlocks, createRequiredBodyBlock(requiredBodyBlockId)]
+      .map((block, index) => ({ ...block, order: index }));
+  }
+
+  return orderedBlocks;
+};
+
+/**
+ * Normalizes persisted email-template payloads into the mandated subject/body structure.
+ * This migrates legacy blocks-only templates while preserving existing content where possible.
+ * Tradeoff: malformed payloads may gain synthesized defaults to keep editing stable.
+ */
+const normalizeEmailTemplate = (rawTemplate: unknown): CanvasEmailTemplate | undefined => {
+  if (!rawTemplate || typeof rawTemplate !== 'object') return undefined;
+  const template = rawTemplate as Record<string, unknown>;
+  const hasRawSubject = typeof template.subject === 'string';
+  const rawSubject = hasRawSubject ? template.subject as string : '';
+  const rawBlocks = Array.isArray(template.blocks) ? template.blocks : [];
+  if (rawBlocks.length === 0 && !hasRawSubject) return undefined;
+
+  const blocks = rawBlocks
+    .map((rawBlock, index) => normalizeEmailBlock(rawBlock, index))
+    .filter((block): block is CanvasEmailBlock => block !== null);
+  const orderedBlocks = [...blocks]
+    .sort((leftBlock, rightBlock) => {
+      if (leftBlock.order !== rightBlock.order) return leftBlock.order - rightBlock.order;
+      return leftBlock.id.localeCompare(rightBlock.id);
+    })
+    .map((block, index) => ({ ...block, order: index }));
+  const normalizedSubject = rawSubject.trim().length > 0
+    ? rawSubject
+    : (getSubjectFallbackFromBlocks(orderedBlocks) || DEFAULT_EMAIL_SUBJECT);
+  const structuredBlocks = ensureAtLeastOneBodyBlock(orderedBlocks);
+
   return {
     version: 1,
-    blocks: orderedBlocks
+    subject: normalizedSubject,
+    blocks: structuredBlocks
   };
 };
 
@@ -260,7 +345,7 @@ const normalizeCanvasViewport = (value: unknown): CanvasScene['viewport'] => {
 const normalizeCanvasRelation = (value: unknown): CanvasRelation | null => {
   if (!value || typeof value !== 'object') return null;
   const relation = value as Record<string, unknown>;
-  if (relation.type !== 'PARENT' && relation.type !== 'TICKET_LINK' && relation.type !== 'EDGE') return null;
+  if (relation.type !== 'PARENT' && relation.type !== 'TICKET_LINK') return null;
   const fromId = typeof relation.fromId === 'string' ? relation.fromId : '';
   const toId = typeof relation.toId === 'string' ? relation.toId : '';
   if (!fromId || !toId) return null;

@@ -6,7 +6,9 @@ import {
   buildScene,
   createDefaultCanvasScene,
   createEmailBlock,
+  DEFAULT_EMAIL_SUBJECT,
   ensureEmailTemplate,
+  getRequiredEmailBodyBlockId,
   getNodeAbsoluteBounds,
   isPointInsideBounds,
   makeDefaultElement,
@@ -15,6 +17,7 @@ import {
   moveBlockById,
   moveBlockByIndex,
   normalizeEmailBlockOrder,
+  shouldReconcileContainerMembershipAfterDrop,
   toAbsolutePosition,
   toParentRelativePosition
 } from './canvas-core';
@@ -113,13 +116,64 @@ describe('email block ordering helpers', () => {
 
   it('normalizes legacy blocks missing order inside ensureEmailTemplate', () => {
     const legacyBlocks = [
-      { ...makeBlock('a', 0), order: undefined },
-      { ...makeBlock('b', 0), order: undefined }
+      { ...makeBlock('a', 0, 'BODY'), order: undefined, text: 'Body intro' },
+      { ...makeBlock('b', 0, 'H1'), order: undefined, text: 'Heading' }
     ] as unknown as CanvasEmailBlock[];
 
-    const template = ensureEmailTemplate({ version: 1, blocks: legacyBlocks });
+    const template = ensureEmailTemplate({ version: 1, subject: '', blocks: legacyBlocks });
+    expect(template.subject).toBe('Body intro');
     expect(template.blocks.map(block => block.id)).toEqual(['a', 'b']);
     expect(template.blocks.map(block => block.order)).toEqual([0, 1]);
+  });
+
+  it('preserves existing body position instead of forcing body-first', () => {
+    const template = ensureEmailTemplate({
+      version: 1,
+      subject: 'My subject',
+      blocks: [
+        makeBlock('h1-top', 0, 'H1'),
+        makeBlock('body-middle', 1, 'BODY'),
+        makeBlock('h2-bottom', 2, 'H2')
+      ]
+    });
+
+    expect(template.blocks.map(block => block.id)).toEqual(['h1-top', 'body-middle', 'h2-bottom']);
+    expect(template.blocks.map(block => block.order)).toEqual([0, 1, 2]);
+  });
+
+  it('appends one body block when missing', () => {
+    const template = ensureEmailTemplate({
+      version: 1,
+      subject: '',
+      blocks: [makeBlock('h1-only', 0, 'H1')]
+    });
+
+    expect(template.blocks.map(block => block.type)).toEqual(['H1', 'BODY']);
+    expect(getRequiredEmailBodyBlockId(template)).toBe(template.blocks[1].id);
+  });
+
+  it('returns null protected-body id when multiple body blocks exist', () => {
+    const template = ensureEmailTemplate({
+      version: 1,
+      subject: '',
+      blocks: [
+        makeBlock('body-1', 0, 'BODY'),
+        makeBlock('body-2', 1, 'BODY'),
+        makeBlock('h1-1', 2, 'H1')
+      ]
+    });
+
+    expect(getRequiredEmailBodyBlockId(template)).toBeNull();
+  });
+
+  it('falls back to default subject when template has no text content', () => {
+    const template = ensureEmailTemplate({
+      version: 1,
+      subject: '',
+      blocks: [{ ...makeBlock('image-only', 0, 'IMAGE'), text: '' }]
+    });
+
+    expect(template.subject).toBe(DEFAULT_EMAIL_SUBJECT);
   });
 
   it('creates H3 block with explicit order', () => {
@@ -204,6 +258,11 @@ describe('container grouping helpers', () => {
     expect(selectedContainer).toBeUndefined();
   });
 
+  it('reconciles drop membership only for single-node drops', () => {
+    expect(shouldReconcileContainerMembershipAfterDrop(new Set(['node-a']))).toBe(true);
+    expect(shouldReconcileContainerMembershipAfterDrop(new Set(['node-a', 'node-b']))).toBe(false);
+  });
+
   it('maps and rebuilds parent relations without rigid parent extent', () => {
     const scene: CanvasScene = {
       version: 2,
@@ -222,7 +281,7 @@ describe('container grouping helpers', () => {
     expect(mappedChild?.parentId).toBe('container-a');
     expect(mappedChild?.extent).toBeUndefined();
 
-    const rebuilt = buildScene(mapped.nodes, mapped.edges, mapped.ticketLinks, mapped.viewport);
+    const rebuilt = buildScene(mapped.nodes, mapped.ticketLinks, mapped.viewport);
     expect(rebuilt.relations.some(relation =>
       relation.type === 'PARENT' && relation.fromId === 'child-a' && relation.toId === 'container-a'
     )).toBe(true);

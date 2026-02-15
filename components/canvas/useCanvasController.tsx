@@ -1,11 +1,6 @@
 import { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  addEdge,
-  applyEdgeChanges,
   applyNodeChanges,
-  Connection,
-  Edge,
-  EdgeChange,
   Node,
   NodeChange,
   NodeProps,
@@ -19,6 +14,7 @@ import {
   BlockResizeState,
   buildScene,
   CanvasNodeData,
+  CanvasPoint,
   clampNumber,
   clearScheduledTimer,
   createDefaultCanvasScene,
@@ -32,16 +28,17 @@ import {
   EMAIL_BLOCK_MIN_HEIGHT,
   EMAIL_BLOCK_TYPES,
   ensureEmailTemplate,
+  getRequiredEmailBodyBlockId,
   getAbsolutePosition,
   makeDefaultElement,
   mapSceneToState,
   pickDropContainerForNode,
   moveBlockById,
-  normalizeEmailBlockOrder,
   normalizeBlockMetrics,
   pushSceneHistory,
   ResizeDimensions,
   resetSceneHistory,
+  shouldReconcileContainerMembershipAfterDrop,
   TicketRef,
   toAbsolutePosition,
   toFiniteNumber,
@@ -49,6 +46,16 @@ import {
   VIEWPORT_COMMIT_MS
 } from './canvas-core';
 import { appendFreehandPoint, createFreehandDraft, finalizeFreehandElement, FreehandDraft } from './canvas-freehand';
+import {
+  areStrokePointsEqual,
+  CanvasEraserMode,
+  clampEraserSize,
+  doesStrokeIntersectEraser,
+  ERASER_DEFAULT_MODE,
+  ERASER_DEFAULT_SIZE,
+  splitStrokePointsByEraser,
+  toAbsoluteStrokePoints
+} from './canvas-eraser';
 import { extractPlainTextFromRichText, isShapeRichTextEditableKind, sanitizeShapeRichText } from './canvas-rich-text';
 
 export type ContainerOption = {
@@ -124,6 +131,24 @@ const isDrawButtonActive = (event: ReactPointerEvent<HTMLDivElement>): boolean =
 };
 
 /**
+ * Determines whether a runtime node represents a persisted pencil stroke.
+ * This keeps eraser operations constrained to freehand content only.
+ * Tradeoff: other vector-like element kinds cannot opt into erasing without explicit expansion.
+ */
+const isPencilNode = (node: Node<CanvasNodeData>): boolean =>
+  node.data.element.kind === 'PENCIL' && !!node.data.element.stroke && node.data.element.stroke.points.length >= 2;
+
+/**
+ * Checks whether a run list exactly matches the original absolute stroke points.
+ * This avoids rewriting node payloads when a partial erase gesture misses a stroke.
+ * Tradeoff: strict coordinate equality can miss imperceptible float drift cases.
+ */
+const isUnchangedSingleRun = (
+  runs: CanvasStrokePoint[][],
+  absolutePoints: CanvasStrokePoint[]
+): boolean => runs.length === 1 && areStrokePointsEqual(runs[0], absolutePoints);
+
+/**
  * Canvas controller hook.
  * Inputs: none (reads store internally).
  * Output: full canvas state + commands for orchestration components.
@@ -136,12 +161,13 @@ export const useCanvasController = () => {
   const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null);
   const [tool, setTool] = useState<CanvasTool>('SELECT');
   const [spacePan, setSpacePan] = useState(false);
+  const [eraserMode, setEraserMode] = useState<CanvasEraserMode>(ERASER_DEFAULT_MODE);
+  const [eraserSize, setEraserSize] = useState<number>(ERASER_DEFAULT_SIZE);
 
   const initialScene = campaign?.canvasScene || createDefaultCanvasScene();
   const initialState = mapSceneToState(initialScene);
 
   const [nodes, setNodes] = useState<Node<CanvasNodeData>[]>(initialState.nodes);
-  const [edges, setEdges] = useState<Edge[]>(initialState.edges);
   const [ticketLinks, setTicketLinks] = useState<CanvasRelation[]>(initialState.ticketLinks);
   const [viewport, setViewport] = useState(initialState.viewport);
 
@@ -158,11 +184,12 @@ export const useCanvasController = () => {
 
   // Refs for commit/historical state
   const nodesRef = useRef(nodes);
-  const edgesRef = useRef(edges);
   const ticketLinksRef = useRef(ticketLinks);
   const viewportRef = useRef(viewport);
   const freehandDraftRef = useRef<FreehandDraft | null>(freehandDraft);
   const activeFreehandPointerIdRef = useRef<number | null>(null);
+  const activeEraserPointerIdRef = useRef<number | null>(null);
+  const eraserMutatedSceneRef = useRef(false);
   const commitTimerRef = useRef<number | null>(null);
   const viewportCommitTimerRef = useRef<number | null>(null);
   const historyRef = useRef<CanvasScene[]>([initialScene]);
@@ -171,10 +198,6 @@ export const useCanvasController = () => {
   useEffect(() => {
     nodesRef.current = nodes;
   }, [nodes]);
-
-  useEffect(() => {
-    edgesRef.current = edges;
-  }, [edges]);
 
   useEffect(() => {
     ticketLinksRef.current = ticketLinks;
@@ -194,7 +217,7 @@ export const useCanvasController = () => {
   }, []);
 
   const commitScene = useCallback((pushToHistory = true) => {
-    const nextScene = buildScene(nodesRef.current, edgesRef.current, ticketLinksRef.current, viewportRef.current);
+    const nextScene = buildScene(nodesRef.current, ticketLinksRef.current, viewportRef.current);
     updateCanvasScene(nextScene);
 
     if (pushToHistory) {
@@ -252,7 +275,6 @@ export const useCanvasController = () => {
   const applyScene = useCallback((nextScene: CanvasScene, resetHistory: boolean) => {
     const nextState = mapSceneToState(nextScene);
     setNodes(nextState.nodes);
-    setEdges(nextState.edges);
     setTicketLinks(nextState.ticketLinks);
     setViewport(nextState.viewport);
 
@@ -294,7 +316,6 @@ export const useCanvasController = () => {
   // Derived selection state
   const selectedNodes = useMemo(() => nodes.filter(node => node.selected), [nodes]);
   const selectedNode = selectedNodes.length === 1 ? selectedNodes[0] : undefined;
-  const selectedEdgeIds = useMemo(() => new Set(edges.filter(edge => edge.selected).map(edge => edge.id)), [edges]);
   const nodeLookup = useMemo(() => getNodeLookup(nodes), [nodes]);
 
   useEffect(() => {
@@ -306,7 +327,7 @@ export const useCanvasController = () => {
     }
 
     setEditingCardId(selectedNode.id);
-    const blocks = selectedNode.data.element.emailTemplate?.blocks || [];
+    const blocks = ensureEmailTemplate(selectedNode.data.element.emailTemplate).blocks;
 
     if (blocks.length === 0) {
       setActiveBlockId(null);
@@ -426,6 +447,15 @@ export const useCanvasController = () => {
   }, [rfInstance]);
 
   /**
+   * Updates eraser brush size while enforcing configured numeric bounds.
+   * This keeps slider and programmatic updates aligned with hit-test assumptions.
+   * Tradeoff: values outside bounds are silently clamped instead of rejected.
+   */
+  const setEraserBrushSize = useCallback((nextSize: number) => {
+    setEraserSize(clampEraserSize(nextSize));
+  }, []);
+
+  /**
    * Creates one element from the active non-selection tool at a flow coordinate.
    * It preserves container-on-back semantics while placing regular primitives on top.
    * Tradeoff: containers always start at z-index 0 and may need manual z-order adjustment.
@@ -441,10 +471,6 @@ export const useCanvasController = () => {
       return [...clearedSelectionNodes, createdNode];
     });
 
-    setEdges(previousEdges => previousEdges.map(edge => (
-      edge.selected ? { ...edge, selected: false } : edge
-    )));
-
     scheduleCommit();
   }, [createNodeFromElement, getNextZIndex, scheduleCommit]);
 
@@ -457,7 +483,7 @@ export const useCanvasController = () => {
     sourceNodes: Node<CanvasNodeData>[],
     droppedNodeIds: Set<string>
   ): Node<CanvasNodeData>[] => {
-    if (droppedNodeIds.size === 0) return sourceNodes;
+    if (!shouldReconcileContainerMembershipAfterDrop(droppedNodeIds)) return sourceNodes;
 
     const nodeById = new Map<string, Node<CanvasNodeData>>(
       sourceNodes.map(node => [node.id, node] as [string, Node<CanvasNodeData>])
@@ -594,10 +620,7 @@ export const useCanvasController = () => {
 
       const baseTemplate = ensureEmailTemplate(element.emailTemplate);
       const nextTemplate = updater(baseTemplate);
-      const normalizedTemplate: CanvasEmailTemplate = {
-        ...nextTemplate,
-        blocks: normalizeEmailBlockOrder(nextTemplate.blocks)
-      };
+      const normalizedTemplate = ensureEmailTemplate(nextTemplate);
       const nextLabel = deriveEmailCardLabel(normalizedTemplate);
 
       return {
@@ -615,6 +638,18 @@ export const useCanvasController = () => {
     }));
   }, [updateSelectedEmailTemplate]);
 
+  /**
+   * Updates the mandated email subject line for the selected email card.
+   * This keeps subject persistence separate from block-level editing interactions.
+   * Tradeoff: subject edits still flow through full element updates for history consistency.
+   */
+  const updateEmailSubject = useCallback((nextSubject: string) => {
+    updateSelectedEmailTemplate(template => ({
+      ...template,
+      subject: nextSubject
+    }));
+  }, [updateSelectedEmailTemplate]);
+
   const updateEmailBlock = useCallback((blockId: string, updater: (block: CanvasEmailBlock) => CanvasEmailBlock) => {
     updateSelectedEmailTemplate(template => ({
       ...template,
@@ -623,10 +658,20 @@ export const useCanvasController = () => {
   }, [updateSelectedEmailTemplate]);
 
   const deleteEmailBlock = useCallback((blockId: string) => {
-    updateSelectedEmailTemplate(template => ({
-      ...template,
-      blocks: template.blocks.filter(block => block.id !== blockId)
-    }));
+    updateSelectedEmailTemplate(template => {
+      const blockToDelete = template.blocks.find(block => block.id === blockId);
+      if (!blockToDelete) return template;
+
+      if (blockToDelete.type === 'BODY') {
+        const bodyBlockCount = template.blocks.filter(block => block.type === 'BODY').length;
+        if (bodyBlockCount <= 1) return template;
+      }
+
+      return {
+        ...template,
+        blocks: template.blocks.filter(block => block.id !== blockToDelete.id)
+      };
+    });
   }, [updateSelectedEmailTemplate]);
 
   const handleEmailBlockUpload = useCallback((blockId: string, file: File) => {
@@ -678,7 +723,7 @@ export const useCanvasController = () => {
 
   const removeSelection = useCallback(() => {
     const selectedIds = new Set(selectedNodes.map(node => node.id));
-    if (selectedIds.size === 0 && selectedEdgeIds.size === 0) return;
+    if (selectedIds.size === 0) return;
 
     setNodes(previousNodes => {
       const nodeById = new Map<string, Node<CanvasNodeData>>(
@@ -706,15 +751,9 @@ export const useCanvasController = () => {
         });
     });
 
-    setEdges(previousEdges => previousEdges.filter(edge =>
-      !selectedIds.has(edge.source)
-      && !selectedIds.has(edge.target)
-      && !selectedEdgeIds.has(edge.id)
-    ));
-
     setTicketLinks(previousLinks => previousLinks.filter(link => !selectedIds.has(link.fromId)));
     scheduleCommit();
-  }, [scheduleCommit, selectedEdgeIds, selectedNodes]);
+  }, [scheduleCommit, selectedNodes]);
 
   const duplicateSelection = useCallback((sourceNodes: Node<CanvasNodeData>[]) => {
     if (sourceNodes.length === 0) return;
@@ -865,23 +904,6 @@ export const useCanvasController = () => {
     if (shouldCommit) scheduleCommit();
   }, [reconcileContainerMembershipAfterDrop, scheduleCommit]);
 
-  const onEdgesChange = useCallback((changes: EdgeChange<Edge>[]) => {
-    setEdges(previousEdges => applyEdgeChanges(changes, previousEdges));
-    if (changes.some(change => change.type === 'remove')) scheduleCommit();
-  }, [scheduleCommit]);
-
-  const onConnect = useCallback((connection: Connection) => {
-    const edgeWithMeta = {
-      ...connection,
-      id: generateId(),
-      type: 'smoothstep',
-      markerEnd: { type: 'arrowclosed' as const }
-    };
-
-    setEdges(previousEdges => addEdge(edgeWithMeta, previousEdges));
-    scheduleCommit();
-  }, [scheduleCommit]);
-
   /**
    * Commits an in-progress freehand draft into a persisted pencil element.
    * This separates high-frequency pointer updates from store/history writes for better responsiveness.
@@ -912,6 +934,234 @@ export const useCanvasController = () => {
     activeFreehandPointerIdRef.current = null;
     setFreehandDraft(null);
   }, []);
+
+  /**
+   * Builds a pencil node from absolute stroke points while preserving parent ownership.
+   * This keeps partial-erase output compatible with container-relative positioning.
+   * Tradeoff: split segments inherit the original stroke style instead of deriving per-run styling.
+   */
+  const createEraserNodeFromAbsolutePoints = useCallback((
+    sourceNode: Node<CanvasNodeData>,
+    absolutePoints: CanvasStrokePoint[],
+    nodeById: Map<string, Node<CanvasNodeData>>,
+    nodeId: string
+  ): Node<CanvasNodeData> | null => {
+    const sourceElement = sourceNode.data.element;
+    const nextElement = finalizeFreehandElement({ points: absolutePoints }, sourceElement.zIndex, () => nodeId);
+    if (!nextElement) return null;
+
+    const absolutePosition = { x: nextElement.x, y: nextElement.y };
+    const localPosition = sourceNode.parentId
+      ? toParentRelativePosition(absolutePosition, sourceNode.parentId, nodeById)
+      : absolutePosition;
+
+    const persistedElement: CanvasElement = {
+      ...nextElement,
+      id: nodeId,
+      zIndex: sourceElement.zIndex,
+      x: localPosition.x,
+      y: localPosition.y,
+      style: sourceElement.style || nextElement.style
+    };
+
+    const nextNode = createNodeFromElement(persistedElement);
+    return {
+      ...nextNode,
+      parentId: sourceNode.parentId,
+      selected: sourceNode.selected && nodeId === sourceNode.id
+    };
+  }, [createNodeFromElement]);
+
+  /**
+   * Removes fully hit pencil strokes for whole-stroke erasing mode.
+   * This mirrors conventional whiteboard erase behavior with one-pass hit filtering.
+   * Tradeoff: all touched points remove the entire stroke even for small grazes.
+   */
+  const eraseWholeStrokesAtPoint = useCallback((point: CanvasPoint): boolean => {
+    const sourceNodes = nodesRef.current;
+    if (sourceNodes.length === 0) return false;
+
+    const nodeById = getNodeLookup(sourceNodes);
+    const removedNodeIds = new Set<string>();
+
+    sourceNodes.forEach(node => {
+      if (!isPencilNode(node)) return;
+      const origin = getAbsolutePosition(node.id, nodeById);
+      const localPoints = node.data.element.stroke?.points || [];
+      const absolutePoints = toAbsoluteStrokePoints(origin, localPoints);
+      if (doesStrokeIntersectEraser(absolutePoints, point, eraserSize)) removedNodeIds.add(node.id);
+    });
+
+    if (removedNodeIds.size === 0) return false;
+
+    const nextNodes = sourceNodes.filter(node => !removedNodeIds.has(node.id));
+    nodesRef.current = nextNodes;
+    setNodes(nextNodes);
+    setTicketLinks(previousLinks => previousLinks.filter(link => !removedNodeIds.has(link.fromId)));
+    return true;
+  }, [eraserSize]);
+
+  /**
+   * Removes touched point runs from pencil strokes for partial erasing mode.
+   * This approximates segment erasing by splitting surviving stroke runs into separate nodes.
+   * Tradeoff: precision depends on sampled stroke points rather than true vector booleans.
+   */
+  const erasePartialStrokesAtPoint = useCallback((point: CanvasPoint): boolean => {
+    const sourceNodes = nodesRef.current;
+    if (sourceNodes.length === 0) return false;
+
+    const nodeById = getNodeLookup(sourceNodes);
+    const removedNodeIds = new Set<string>();
+    const nextNodes: Node<CanvasNodeData>[] = [];
+    let mutated = false;
+
+    sourceNodes.forEach(node => {
+      if (!isPencilNode(node)) {
+        nextNodes.push(node);
+        return;
+      }
+
+      const origin = getAbsolutePosition(node.id, nodeById);
+      const localPoints = node.data.element.stroke?.points || [];
+      const absolutePoints = toAbsoluteStrokePoints(origin, localPoints);
+      const remainingRuns = splitStrokePointsByEraser(absolutePoints, point, eraserSize);
+
+      if (remainingRuns.length === 0) {
+        removedNodeIds.add(node.id);
+        mutated = true;
+        return;
+      }
+
+      if (isUnchangedSingleRun(remainingRuns, absolutePoints)) {
+        nextNodes.push(node);
+        return;
+      }
+
+      mutated = true;
+      remainingRuns.forEach((run, runIndex) => {
+        const nextId = runIndex === 0 ? node.id : generateId();
+        const nextNode = createEraserNodeFromAbsolutePoints(node, run, nodeById, nextId);
+        if (!nextNode) {
+          if (runIndex === 0) removedNodeIds.add(node.id);
+          return;
+        }
+        if (runIndex > 0) nextNode.selected = false;
+        nextNodes.push(nextNode);
+      });
+    });
+
+    if (!mutated) return false;
+
+    nodesRef.current = nextNodes;
+    setNodes(nextNodes);
+    if (removedNodeIds.size > 0) {
+      setTicketLinks(previousLinks => previousLinks.filter(link => !removedNodeIds.has(link.fromId)));
+    }
+
+    return true;
+  }, [createEraserNodeFromAbsolutePoints, eraserSize]);
+
+  /**
+   * Applies the active eraser behavior at one flow-space pointer coordinate.
+   * This centralizes mode branching so pointer handlers remain lifecycle-focused.
+   * Tradeoff: branching adds one mode check per pointer frame.
+   */
+  const applyEraserAtPoint = useCallback((point: CanvasPoint) => {
+    const didMutate = eraserMode === 'WHOLE_STROKE'
+      ? eraseWholeStrokesAtPoint(point)
+      : erasePartialStrokesAtPoint(point);
+
+    if (didMutate) eraserMutatedSceneRef.current = true;
+  }, [erasePartialStrokesAtPoint, eraseWholeStrokesAtPoint, eraserMode]);
+
+  /**
+   * Starts an eraser gesture for the active pointer and applies initial hit processing.
+   * This mirrors pencil draw-start semantics while supporting both eraser modes.
+   * Tradeoff: single-pointer policy blocks concurrent multi-touch erasing.
+   */
+  const startEraserDraw = useCallback((point: CanvasPoint, pointerId: number) => {
+    if (tool !== 'ERASER') return;
+    activeEraserPointerIdRef.current = pointerId;
+    eraserMutatedSceneRef.current = false;
+    applyEraserAtPoint(point);
+  }, [applyEraserAtPoint, tool]);
+
+  /**
+   * Commits an eraser gesture when scene mutations occurred.
+   * This preserves one history frame per completed erase interaction.
+   * Tradeoff: intermediate erase frames are not individually undoable.
+   */
+  const finishEraserDraw = useCallback(() => {
+    activeEraserPointerIdRef.current = null;
+    if (!eraserMutatedSceneRef.current) return;
+    eraserMutatedSceneRef.current = false;
+    scheduleCommit();
+  }, [scheduleCommit]);
+
+  /**
+   * Finalizes erasing for a specific pointer when it owns the active gesture.
+   * Pointer ownership checks prevent unrelated pointers from committing erase state.
+   * Tradeoff: stale pointer-up events are ignored as safe no-ops.
+   */
+  const endEraserDraw = useCallback((pointerId: number) => {
+    if (activeEraserPointerIdRef.current !== pointerId) return;
+    finishEraserDraw();
+  }, [finishEraserDraw]);
+
+  /**
+   * Begins erasing from the capture layer pointer-down event.
+   * This enforces primary-pointer semantics consistent with pencil drawing.
+   * Tradeoff: secondary mouse buttons never trigger erase operations.
+   */
+  const onEraserPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (tool !== 'ERASER') return;
+    if (activeEraserPointerIdRef.current !== null) return;
+    if (!canStartDrawingFromPointer(event)) return;
+
+    event.preventDefault();
+    const point = toFlowPoint(event.clientX, event.clientY);
+    startEraserDraw(point, event.pointerId);
+  }, [startEraserDraw, toFlowPoint, tool]);
+
+  /**
+   * Extends erasing while the active pointer remains pressed.
+   * Move events with released mouse buttons end the gesture early for consistency.
+   * Tradeoff: missing button-state streams terminate erase immediately.
+   */
+  const onEraserPointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (tool !== 'ERASER') return;
+    if (activeEraserPointerIdRef.current !== event.pointerId) return;
+
+    if (!isDrawButtonActive(event)) {
+      endEraserDraw(event.pointerId);
+      return;
+    }
+
+    event.preventDefault();
+    const point = toFlowPoint(event.clientX, event.clientY);
+    applyEraserAtPoint(point);
+  }, [applyEraserAtPoint, endEraserDraw, toFlowPoint, tool]);
+
+  /**
+   * Completes erasing when the active pointer is released.
+   * This closes one erase gesture even when release occurs off-canvas.
+   * Tradeoff: non-owner pointer-up events are ignored silently.
+   */
+  const onEraserPointerUp = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    endEraserDraw(event.pointerId);
+  }, [endEraserDraw]);
+
+  /**
+   * Finalizes erasing when the browser aborts pointer capture.
+   * This preserves already-applied erase updates as one undoable gesture.
+   * Tradeoff: interrupted sessions still produce a history frame when they mutated scene state.
+   */
+  const onEraserPointerCancel = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (activeEraserPointerIdRef.current !== event.pointerId) return;
+    event.preventDefault();
+    finishEraserDraw();
+  }, [finishEraserDraw]);
 
   /**
    * Starts a new freehand draft for an accepted pointer source.
@@ -1082,10 +1332,12 @@ export const useCanvasController = () => {
   const onEmailBlockReorder = useCallback((cardId: string, sourceBlockId: string, targetBlockId: string) => {
     if (selectedNode?.id !== cardId || sourceBlockId === targetBlockId) return;
 
-    updateSelectedEmailTemplate(template => ({
-      ...template,
-      blocks: moveBlockById(template.blocks, sourceBlockId, targetBlockId)
-    }));
+    updateSelectedEmailTemplate(template => {
+      return {
+        ...template,
+        blocks: moveBlockById(template.blocks, sourceBlockId, targetBlockId)
+      };
+    });
     setActiveBlockId(sourceBlockId);
   }, [selectedNode?.id, updateSelectedEmailTemplate]);
 
@@ -1106,6 +1358,16 @@ export const useCanvasController = () => {
     updateEmailBlock(blockId, block => ({ ...block, text: value }));
   }, [selectedNode?.id, updateEmailBlock]);
 
+  /**
+   * Persists inline subject edits coming from the email-card node header input.
+   * This keeps subject updates scoped to the selected card while reusing template-normalization flow.
+   * Tradeoff: ignored updates from stale/unselected cards are treated as safe no-ops.
+   */
+  const onEmailSubjectChange = useCallback((cardId: string, value: string) => {
+    if (selectedNode?.id !== cardId) return;
+    updateEmailSubject(value);
+  }, [selectedNode?.id, updateEmailSubject]);
+
   useEffect(() => {
     if (!resizeState || selectedNode?.data.element.kind !== 'EMAIL_CARD') return;
 
@@ -1118,14 +1380,7 @@ export const useCanvasController = () => {
       const nextHeight = clampNumber(resizeState.startHeight + delta, EMAIL_BLOCK_MIN_HEIGHT, EMAIL_BLOCK_MAX_HEIGHT);
 
       updateEmailBlock(resizeState.blockId, block => {
-        const metrics = normalizeBlockMetrics(block);
         const nextMetrics: Partial<CanvasEmailBlock> = { heightPx: nextHeight };
-
-        if (block.type !== 'IMAGE') {
-          const derivedFont = clampNumber(metrics.fontSizePx + delta * 0.08, EMAIL_BLOCK_MIN_FONT_SIZE, EMAIL_BLOCK_MAX_FONT_SIZE);
-          nextMetrics.fontSizePx = derivedFont;
-        }
-
         return { ...block, ...nextMetrics };
       });
     };
@@ -1160,6 +1415,7 @@ export const useCanvasController = () => {
         onEmailBlockReorder={onEmailBlockReorder}
         onEmailBlockResizeStart={onEmailBlockResizeStart}
         onEmailCardSurfaceSelect={onEmailCardSurfaceSelect}
+        onEmailSubjectChange={onEmailSubjectChange}
         onEmailBlockTextChange={onEmailBlockTextChange}
         editingShapeId={editingShapeId}
         onShapeTextEditStart={startShapeTextEdit}
@@ -1174,6 +1430,7 @@ export const useCanvasController = () => {
     onEmailBlockResizeStart,
     onEmailBlockSelect,
     onEmailCardSurfaceSelect,
+    onEmailSubjectChange,
     onEmailBlockTextChange,
     editingShapeId,
     startShapeTextEdit,
@@ -1243,14 +1500,19 @@ export const useCanvasController = () => {
 
   useEffect(() => {
     const handleWindowBlur = () => {
-      if (tool !== 'PENCIL') return;
-      if (activeFreehandPointerIdRef.current === null) return;
-      finishFreehandDraw();
+      if (tool === 'PENCIL' && activeFreehandPointerIdRef.current !== null) {
+        finishFreehandDraw();
+        return;
+      }
+
+      if (tool === 'ERASER' && activeEraserPointerIdRef.current !== null) {
+        finishEraserDraw();
+      }
     };
 
     window.addEventListener('blur', handleWindowBlur);
     return () => window.removeEventListener('blur', handleWindowBlur);
-  }, [finishFreehandDraw, tool]);
+  }, [finishEraserDraw, finishFreehandDraw, tool]);
 
   useEffect(() => {
     if (tool === 'PENCIL') return;
@@ -1258,10 +1520,19 @@ export const useCanvasController = () => {
     cancelFreehandDraw();
   }, [cancelFreehandDraw, tool]);
 
+  useEffect(() => {
+    if (tool === 'ERASER') return;
+    if (activeEraserPointerIdRef.current === null) return;
+    finishEraserDraw();
+  }, [finishEraserDraw, tool]);
+
   const selectedElement = selectedNode?.data.element;
   const selectedIsEmailCard = selectedElement?.kind === 'EMAIL_CARD';
-  const selectedEmailBlocks = selectedIsEmailCard ? ensureEmailTemplate(selectedElement.emailTemplate).blocks : [];
+  const selectedEmailTemplate = selectedIsEmailCard ? ensureEmailTemplate(selectedElement.emailTemplate) : null;
+  const selectedEmailSubject = selectedEmailTemplate?.subject || '';
+  const selectedEmailBlocks = selectedEmailTemplate?.blocks || [];
   const panelEmailBlocks = selectedEmailBlocks;
+  const requiredEmailBodyBlockId = selectedEmailTemplate ? getRequiredEmailBodyBlockId(selectedEmailTemplate) : null;
 
   const activeSelectedBlock = selectedEmailBlocks.find(block => block.id === activeBlockId);
   const activeSelectedBlockMetrics = activeSelectedBlock ? normalizeBlockMetrics(activeSelectedBlock) : null;
@@ -1304,10 +1575,11 @@ export const useCanvasController = () => {
   return {
     campaign,
     nodes,
-    edges,
     nodeTypes,
     viewport,
     tool,
+    eraserMode,
+    eraserSize,
     spacePan,
     rfInstance,
     historyVersion,
@@ -1318,8 +1590,10 @@ export const useCanvasController = () => {
     selectedNode,
     selectedElement,
     selectedIsEmailCard,
+    selectedEmailSubject,
     panelIsBlockMode,
     panelEmailBlocks,
+    requiredEmailBodyBlockId,
     activeSelectedBlock,
     activeSelectedBlockMetrics,
     activeBlockId,
@@ -1334,6 +1608,8 @@ export const useCanvasController = () => {
     canGroupSelection,
     setRfInstance,
     setTool,
+    setEraserMode,
+    setEraserSize: setEraserBrushSize,
     setLinkPanelOpen,
     setLinkSearch,
     setDraftLinkedTicketIds,
@@ -1342,19 +1618,22 @@ export const useCanvasController = () => {
     commitShapeTextEdit,
     cancelShapeTextEdit,
     onNodesChange,
-    onEdgesChange,
-    onConnect,
     onPaneClick,
     onPencilPointerDown,
     onPencilPointerMove,
     onPencilPointerUp,
     onPencilPointerCancel,
+    onEraserPointerDown,
+    onEraserPointerMove,
+    onEraserPointerUp,
+    onEraserPointerCancel,
     onMoveEnd: onCanvasMoveEnd,
     undo,
     redo,
     removeSelection,
     groupSelectionIntoContainer,
     addEmailBlock,
+    updateEmailSubject,
     updateEmailBlock,
     deleteEmailBlock,
     handleEmailBlockUpload,

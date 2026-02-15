@@ -1,15 +1,16 @@
 import React, { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Handle, Node, NodeProps, NodeResizer, Position } from '@xyflow/react';
+import { Node, NodeProps, NodeResizer } from '@xyflow/react';
 import { DndContext, DragEndEvent, DragStartEvent, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { CanvasElement, CanvasEmailBlock } from '../../types';
 import { Icons } from '../../constants';
-import { getCanvasKindLabel } from './canvas-element-catalog';
+import { getCanvasKindLabel, getCanvasKindStyleDefaults } from './canvas-element-catalog';
 import {
   CANVAS_ELEMENT_MIN_HEIGHT,
   CANVAS_ELEMENT_MIN_WIDTH,
   CanvasNodeData,
+  ensureEmailTemplate,
   normalizeBlockMetrics,
   ResizeDimensions,
   toFiniteNumber
@@ -31,6 +32,7 @@ export type CanvasElementNodeProps = NodeProps<Node<CanvasNodeData>> & {
   editingCardId: string | null;
   activeBlockId: string | null;
   resizingBlockId: string | null;
+  onEmailSubjectChange: (cardId: string, value: string) => void;
   onEmailBlockSelect: (cardId: string, blockId: string) => void;
   onEmailBlockReorder: (cardId: string, sourceBlockId: string, targetBlockId: string) => void;
   onEmailBlockResizeStart: (cardId: string, blockId: string, clientY: number) => void;
@@ -56,6 +58,7 @@ type SortableEmailRowProps = {
 type ShapeStyleColors = {
   fill: string;
   stroke: string;
+  strokeWidth: number;
 };
 
 type ShapeTextLayerProps = {
@@ -245,10 +248,14 @@ const getHeadingWeightClass = (type: CanvasEmailBlock['type']): string => {
  * This centralizes color defaults so shape renderers stay consistent across kinds.
  * Tradeoff: shared defaults reduce per-shape palette flexibility unless extended later.
  */
-const getShapeStyleColors = (element: CanvasElement): ShapeStyleColors => ({
-  fill: element.style?.fill || '#f8fafc',
-  stroke: element.style?.stroke || '#64748b'
-});
+const getShapeStyleColors = (element: CanvasElement): ShapeStyleColors => {
+  const defaults = getCanvasKindStyleDefaults(element.kind);
+  return {
+    fill: element.style?.fill || defaults.fill,
+    stroke: element.style?.stroke || defaults.stroke,
+    strokeWidth: toFiniteNumber(element.style?.strokeWidth) ?? defaults.strokeWidth
+  };
+};
 
 /**
  * Determines whether the kind should use card-shell chrome.
@@ -279,7 +286,16 @@ const renderRectangleShapeNode = (element: CanvasElement, frameWidth: number, fr
   return (
     <div className="relative h-full w-full" data-testid="rectangle-shape">
       <svg className="h-full w-full" viewBox={`0 0 ${safeWidth} ${safeHeight}`}>
-        <rect x={1} y={1} width={safeWidth - 2} height={safeHeight - 2} rx={8} fill={colors.fill} stroke={colors.stroke} />
+        <rect
+          x={1}
+          y={1}
+          width={safeWidth - 2}
+          height={safeHeight - 2}
+          rx={10}
+          fill={colors.fill}
+          stroke={colors.stroke}
+          strokeWidth={colors.strokeWidth}
+        />
       </svg>
     </div>
   );
@@ -298,7 +314,15 @@ const renderEllipseShapeNode = (element: CanvasElement, frameWidth: number, fram
   return (
     <div className="relative h-full w-full" data-testid="ellipse-shape">
       <svg className="h-full w-full" viewBox={`0 0 ${safeWidth} ${safeHeight}`}>
-        <ellipse cx={safeWidth / 2} cy={safeHeight / 2} rx={(safeWidth - 2) / 2} ry={(safeHeight - 2) / 2} fill={colors.fill} stroke={colors.stroke} />
+        <ellipse
+          cx={safeWidth / 2}
+          cy={safeHeight / 2}
+          rx={(safeWidth - 2) / 2}
+          ry={(safeHeight - 2) / 2}
+          fill={colors.fill}
+          stroke={colors.stroke}
+          strokeWidth={colors.strokeWidth}
+        />
       </svg>
     </div>
   );
@@ -318,7 +342,12 @@ const renderDiamondShapeNode = (element: CanvasElement, frameWidth: number, fram
   return (
     <div className="relative h-full w-full" data-testid="diamond-shape">
       <svg className="h-full w-full" viewBox={`0 0 ${safeWidth} ${safeHeight}`}>
-        <polygon points={points} fill={colors.fill} stroke={colors.stroke} />
+        <polygon
+          points={points}
+          fill={colors.fill}
+          stroke={colors.stroke}
+          strokeWidth={colors.strokeWidth}
+        />
       </svg>
     </div>
   );
@@ -340,7 +369,6 @@ const renderPencilShapeNode = (
       <polyline
         points={strokePoints}
         fill="none"
-        
         vectorEffect="non-scaling-stroke"
         stroke={element.style?.stroke || '#334155'}
         strokeWidth={element.style?.strokeWidth || 2}
@@ -362,6 +390,17 @@ const renderTextShapeNode = (element: CanvasElement): React.ReactNode => (
     data-testid="text-shape"
   />
 );
+
+/**
+ * Returns the resize-handle class set for one email block row.
+ * This keeps handle discoverability predictable while preserving stronger emphasis for active rows.
+ * Tradeoff: non-active rows still show a subtle affordance which adds minor visual noise.
+ */
+const getEmailRowResizeHandleClassName = (isActive: boolean, isResizing: boolean): string => {
+  const baseClassName = 'nodrag nopan absolute left-2 right-2 bottom-0 h-2 cursor-ns-resize transition-opacity';
+  if (isResizing || isActive) return `${baseClassName} opacity-85`;
+  return `${baseClassName} opacity-20 hover:opacity-100`;
+};
 
 const SortableEmailRow: React.FC<SortableEmailRowProps> = ({
   cardId,
@@ -517,8 +556,10 @@ const SortableEmailRow: React.FC<SortableEmailRowProps> = ({
 
         {isEditingEmailCard && (
           <div
-            className="nodrag nopan absolute left-2 right-2 bottom-0 h-2 cursor-ns-resize opacity-0 hover:opacity-100 transition-opacity"
+            data-testid={`email-block-resize-handle-${block.id}`}
+            className={getEmailRowResizeHandleClassName(isActive, isResizing)}
             onMouseDown={event => {
+              event.preventDefault();
               event.stopPropagation();
               onEmailBlockResizeStart(cardId, block.id, event.clientY);
             }}
@@ -550,6 +591,7 @@ export const CanvasElementNode: React.FC<CanvasElementNodeProps> = ({
   editingCardId,
   activeBlockId,
   resizingBlockId,
+  onEmailSubjectChange,
   onEmailBlockSelect,
   onEmailBlockReorder,
   onEmailBlockResizeStart,
@@ -562,19 +604,30 @@ export const CanvasElementNode: React.FC<CanvasElementNodeProps> = ({
 }) => {
   const element = data.element;
   const isContainer = element.kind === 'CONTAINER';
-  const isGroupedChild = !!parentId && !isContainer;
   const isCardShell = isCardShellKind(element.kind);
   const isPrimitiveNode = isPrimitiveKind(element.kind);
   const supportsShapeRichTextEditing = isShapeRichTextEditableKind(element.kind);
   const isEditingShape = selected && supportsShapeRichTextEditing && editingShapeId === id;
   const frameWidth = toFiniteNumber(width) ?? element.width;
   const frameHeight = toFiniteNumber(height) ?? element.height;
-  const emailBlocks = element.kind === 'EMAIL_CARD' ? (element.emailTemplate?.blocks || []) : [];
+  const emailTemplate = element.kind === 'EMAIL_CARD' ? ensureEmailTemplate(element.emailTemplate) : undefined;
+  const emailSubject = emailTemplate?.subject || '';
+  const emailBlocks = emailTemplate?.blocks || [];
   const isEditingEmailCard = selected && element.kind === 'EMAIL_CARD' && editingCardId === id;
   const [draggingBlockId, setDraggingBlockId] = useState<string | null>(null);
+  const [draftEmailSubject, setDraftEmailSubject] = useState(emailSubject);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
   const blockIds = useMemo(() => emailBlocks.map(block => block.id), [emailBlocks]);
+
+  /**
+   * Synchronizes inline subject draft text with canonical template subject updates.
+   * This keeps node-local typing state aligned when selection or template source changes externally.
+   * Tradeoff: external updates intentionally replace any stale local draft value.
+   */
+  useEffect(() => {
+    setDraftEmailSubject(emailSubject);
+  }, [emailSubject, id]);
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
     if (!isEditingEmailCard) return;
@@ -596,6 +649,56 @@ export const CanvasElementNode: React.FC<CanvasElementNodeProps> = ({
   const handleDragCancel = useCallback(() => {
     setDraggingBlockId(null);
   }, []);
+
+  /**
+   * Routes subject/divider clicks to card-surface selection behavior.
+   * This keeps non-block email chrome interactions aligned with existing surface semantics.
+   * Tradeoff: clicking structure rows exits active block editing context.
+   */
+  const handleEmailStructureMouseDown = useCallback(() => {
+    onEmailCardSurfaceSelect(id);
+  }, [id, onEmailCardSurfaceSelect]);
+
+  /**
+   * Updates local inline-subject draft text without committing global scene state per keystroke.
+   * This matches block-row editing ergonomics to avoid frequent scene rerenders during typing.
+   * Tradeoff: subject persistence is deferred until a commit boundary event.
+   */
+  const handleEmailSubjectInputChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    setDraftEmailSubject(event.target.value);
+  }, []);
+
+  /**
+   * Commits the inline-subject draft to controller state on stable interaction boundaries.
+   * This keeps history updates intentional and avoids duplicate commits when no text changed.
+   * Tradeoff: subject preview is eventually consistent until blur/Enter commit occurs.
+   */
+  const commitEmailSubjectDraft = useCallback(() => {
+    if (draftEmailSubject === emailSubject) return;
+    onEmailSubjectChange(id, draftEmailSubject);
+  }, [draftEmailSubject, emailSubject, id, onEmailSubjectChange]);
+
+  /**
+   * Applies keyboard commit behavior for the inline subject input.
+   * Enter commits and blurs to mirror block heading edit ergonomics.
+   * Tradeoff: multiline subject entry is intentionally unsupported.
+   */
+  const handleEmailSubjectInputKeyDown = useCallback((event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    commitEmailSubjectDraft();
+    event.currentTarget.blur();
+  }, [commitEmailSubjectDraft]);
+
+  /**
+   * Routes subject-input pointer activation through card-surface selection semantics.
+   * This keeps inspector mode consistent while preventing parent drag/select handlers from intercepting input focus.
+   * Tradeoff: subject input mouse-down always clears active block selection context.
+   */
+  const handleEmailSubjectInputMouseDown = useCallback((event: ReactMouseEvent<HTMLInputElement>) => {
+    event.stopPropagation();
+    onEmailCardSurfaceSelect(id);
+  }, [id, onEmailCardSurfaceSelect]);
 
   const kindLabel = getCanvasKindLabel(element.kind);
   const strokePoints = toSvgPolylinePoints(element.stroke);
@@ -658,13 +761,13 @@ export const CanvasElementNode: React.FC<CanvasElementNodeProps> = ({
 
   return (
     <div
-      className={`h-full w-full ${isCardShell ? 'rounded-lg border shadow-sm overflow-hidden flex' : 'relative'} ${selected ? 'ring-2 ring-indigo-400' : ''} ${isGroupedChild && !selected ? 'ring-1 ring-indigo-300' : ''}`}
+      className={`h-full w-full ${isCardShell ? 'rounded-xl border shadow-sm overflow-hidden flex' : 'relative'} ${selected ? 'ring-2 ring-indigo-400 shadow-[0_10px_30px_-20px_rgba(37,99,235,0.8)]' : ''}`}
       style={{
         width: frameWidth,
         height: frameHeight,
         background: isCardShell ? (element.style?.fill || '#ffffff') : 'transparent',
         borderColor: isCardShell
-          ? (isGroupedChild ? '#6366f1' : (element.style?.stroke || '#d4d4d8'))
+          ? (element.style?.stroke || '#d4d4d8')
           : 'transparent',
         borderStyle: isCardShell ? (isContainer ? 'dashed' : 'solid') : 'none'
       }}
@@ -674,57 +777,84 @@ export const CanvasElementNode: React.FC<CanvasElementNodeProps> = ({
         isVisible={selected}
         minWidth={CANVAS_ELEMENT_MIN_WIDTH}
         minHeight={CANVAS_ELEMENT_MIN_HEIGHT}
-        lineStyle={{ borderColor: '#6366f1', zIndex: 40, pointerEvents: 'all' }}
+        lineStyle={{ borderColor: '#6366f1', zIndex: 40, pointerEvents: 'none' }}
         handleStyle={{ borderColor: '#6366f1', zIndex: 40, pointerEvents: 'all' }}
         onResize={(_, params) => onResizeLive(id, params)}
         onResizeEnd={(_, params) => onResizeDone(id, params)}
       />
-      <Handle type="target" position={Position.Top} style={{ width: 8, height: 8, zIndex: 40, pointerEvents: 'all' }} />
-      <Handle type="source" position={Position.Right} style={{ width: 8, height: 8, zIndex: 40, pointerEvents: 'all' }} />
-      <Handle type="target" position={Position.Bottom} style={{ width: 8, height: 8, zIndex: 40, pointerEvents: 'all' }} />
-      <Handle type="source" position={Position.Left} style={{ width: 8, height: 8, zIndex: 40, pointerEvents: 'all' }} />
 
       {isCardShell ? (
         <div className="h-full w-full p-3 flex flex-col min-h-0 min-w-0" data-testid="card-shell">
           <span className="text-[10px] uppercase tracking-[0.18em] font-bold text-zinc-500 mb-2">
             {kindLabel}
           </span>
-          {emailBlocks.length > 0 ? (
-            <div
-              className="flex-1 min-h-0 min-w-0 overflow-y-auto pr-1"
-              onMouseDown={event => {
-                const target = event.target as HTMLElement;
-                if (target.closest('.email-row')) return;
-                onEmailCardSurfaceSelect(id);
-              }}
-            >
-              <DndContext
-                sensors={sensors}
-                collisionDetection={closestCenter}
-                onDragStart={handleDragStart}
-                onDragEnd={handleDragEnd}
-                onDragCancel={handleDragCancel}
-              >
-                <SortableContext items={blockIds} strategy={verticalListSortingStrategy}>
-                  {emailBlocks.map(block => (
-                    <SortableEmailRow
-                      key={block.id}
-                      cardId={id}
-                      block={block}
-                      isEditingEmailCard={isEditingEmailCard}
-                      isActive={activeBlockId === block.id && isEditingEmailCard}
-                      isResizing={resizingBlockId === block.id && isEditingEmailCard}
-                      onEmailBlockSelect={onEmailBlockSelect}
-                      onEmailBlockResizeStart={onEmailBlockResizeStart}
-                      onEmailBlockTextChange={onEmailBlockTextChange}
-                    />
-                  ))}
-                </SortableContext>
-              </DndContext>
-              {draggingBlockId && (
-                <span className="sr-only">dragging-block:{draggingBlockId}</span>
+          {element.kind === 'EMAIL_CARD' ? (
+            <>
+              {isEditingEmailCard ? (
+                <input
+                  data-testid="email-subject-input"
+                  value={draftEmailSubject}
+                  placeholder="Subject line..."
+                  className="mb-2 nodrag nopan w-full rounded-md border border-transparent bg-zinc-50/70 px-2.5 py-1.5 text-sm font-semibold leading-snug text-zinc-800 outline-none transition focus:border-zinc-300 focus:bg-white focus:ring-2 focus:ring-zinc-200/70"
+                  onMouseDown={handleEmailSubjectInputMouseDown}
+                  onChange={handleEmailSubjectInputChange}
+                  onBlur={commitEmailSubjectDraft}
+                  onKeyDown={handleEmailSubjectInputKeyDown}
+                />
+              ) : (
+                <div
+                  data-testid="email-subject-row"
+                  className={`mb-2 rounded-md bg-zinc-50/60 px-2.5 py-1.5 text-sm font-semibold leading-snug ${emailSubject.trim().length > 0 ? 'text-zinc-800' : 'text-zinc-400'}`}
+                  onMouseDown={handleEmailStructureMouseDown}
+                >
+                  {emailSubject || 'Subject line...'}
+                </div>
               )}
-            </div>
+              <div
+                data-testid="email-line-break"
+                className="mb-2 flex select-none items-center gap-2 px-0.5"
+                onMouseDown={handleEmailStructureMouseDown}
+              >
+                <span className="h-px flex-1 bg-zinc-200" />
+                <span className="text-[9px] font-medium uppercase tracking-[0.16em] text-zinc-400">Line Break</span>
+                <span className="h-px flex-1 bg-zinc-200" />
+              </div>
+              <div
+                className="flex-1 min-h-0 min-w-0 overflow-y-auto pr-1"
+                onMouseDown={event => {
+                  const target = event.target as HTMLElement;
+                  if (target.closest('.email-row')) return;
+                  onEmailCardSurfaceSelect(id);
+                }}
+              >
+                <DndContext
+                  sensors={sensors}
+                  collisionDetection={closestCenter}
+                  onDragStart={handleDragStart}
+                  onDragEnd={handleDragEnd}
+                  onDragCancel={handleDragCancel}
+                >
+                  <SortableContext items={blockIds} strategy={verticalListSortingStrategy}>
+                    {emailBlocks.map(block => (
+                      <SortableEmailRow
+                        key={block.id}
+                        cardId={id}
+                        block={block}
+                        isEditingEmailCard={isEditingEmailCard}
+                        isActive={activeBlockId === block.id && isEditingEmailCard}
+                        isResizing={resizingBlockId === block.id && isEditingEmailCard}
+                        onEmailBlockSelect={onEmailBlockSelect}
+                        onEmailBlockResizeStart={onEmailBlockResizeStart}
+                        onEmailBlockTextChange={onEmailBlockTextChange}
+                      />
+                    ))}
+                  </SortableContext>
+                </DndContext>
+                {draggingBlockId && (
+                  <span className="sr-only">dragging-block:{draggingBlockId}</span>
+                )}
+              </div>
+            </>
           ) : (
             renderPrimitiveContent()
           )}

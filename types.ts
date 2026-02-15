@@ -32,7 +32,8 @@ export type CanvasTool =
   | 'ELLIPSE'
   | 'DIAMOND'
   | 'TEXT'
-  | 'PENCIL';
+  | 'PENCIL'
+  | 'ERASER';
 export type CanvasElementKind =
   | 'EMAIL_CARD'
   | 'CONTAINER'
@@ -41,7 +42,7 @@ export type CanvasElementKind =
   | 'DIAMOND'
   | 'TEXT'
   | 'PENCIL';
-export type CanvasRelationType = 'PARENT' | 'TICKET_LINK' | 'EDGE';
+export type CanvasRelationType = 'PARENT' | 'TICKET_LINK';
 export type ExecutionRowType = 'TASK' | 'TEXT';
 export type EmailBlockType = 'H1' | 'H2' | 'H3' | 'BODY' | 'IMAGE';
 export type EmailBlockAlign = 'left' | 'center' | 'right';
@@ -180,6 +181,7 @@ export interface CanvasEmailBlock {
 
 export interface CanvasEmailTemplate {
   version: 1;
+  subject: string;
   blocks: CanvasEmailBlock[];
 }
 

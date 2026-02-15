@@ -74,7 +74,7 @@ const createElementFixture = (kind: CanvasElement['kind']): CanvasElement => ({
     fontSize: 14,
     fontFamily: 'Inter'
   },
-  emailTemplate: kind === 'EMAIL_CARD' ? { version: 1, blocks: [] } : undefined,
+  emailTemplate: kind === 'EMAIL_CARD' ? { version: 1, subject: 'Subject line...', blocks: [] } : undefined,
   stroke: kind === 'PENCIL' ? { points: [{ x: 0, y: 0 }, { x: 12, y: 6 }] } : undefined
 });
 
@@ -90,10 +90,11 @@ const createControllerFixture = (overrides: ControllerFixtureOverrides = {}): Ca
   const controllerFixture = {
     campaign: createCampaignFixture(),
     nodes: [],
-    edges: [],
     nodeTypes: {},
     viewport: { x: 0, y: 0, zoom: 1 },
     tool: 'SELECT',
+    eraserMode: 'WHOLE_STROKE',
+    eraserSize: 16,
     spacePan: false,
     rfInstance: null,
     historyVersion: 0,
@@ -104,8 +105,10 @@ const createControllerFixture = (overrides: ControllerFixtureOverrides = {}): Ca
     selectedNode: undefined,
     selectedElement,
     selectedIsEmailCard,
+    selectedEmailSubject: '',
     panelIsBlockMode: false,
     panelEmailBlocks: [],
+    requiredEmailBodyBlockId: null,
     activeSelectedBlock: undefined,
     activeSelectedBlockMetrics: null,
     activeBlockId: null,
@@ -119,24 +122,29 @@ const createControllerFixture = (overrides: ControllerFixtureOverrides = {}): Ca
     canGroupSelection: false,
     setRfInstance: vi.fn(),
     setTool: vi.fn(),
+    setEraserMode: vi.fn(),
+    setEraserSize: vi.fn(),
     setLinkPanelOpen: vi.fn(),
     setLinkSearch: vi.fn(),
     setDraftLinkedTicketIds: vi.fn(),
     setActiveBlockId: vi.fn(),
     onNodesChange: vi.fn(),
-    onEdgesChange: vi.fn(),
-    onConnect: vi.fn(),
     onPaneClick: vi.fn(),
     onPencilPointerDown: vi.fn(),
     onPencilPointerMove: vi.fn(),
     onPencilPointerUp: vi.fn(),
     onPencilPointerCancel: vi.fn(),
+    onEraserPointerDown: vi.fn(),
+    onEraserPointerMove: vi.fn(),
+    onEraserPointerUp: vi.fn(),
+    onEraserPointerCancel: vi.fn(),
     onMoveEnd: vi.fn(),
     undo: vi.fn(),
     redo: vi.fn(),
     removeSelection: vi.fn(),
     groupSelectionIntoContainer: vi.fn(),
     addEmailBlock: vi.fn(),
+    updateEmailSubject: vi.fn(),
     updateEmailBlock: vi.fn(),
     deleteEmailBlock: vi.fn(),
     handleEmailBlockUpload: vi.fn(),
@@ -173,17 +181,17 @@ const renderWithControllerFixture = (controller: CanvasController): void => {
 };
 
 /**
- * Asserts that shape selections do not render the inspector panel.
- * The behavior protects primitive editing surfaces from email-only inspector controls.
- * Tradeoff: non-email selection editing must be handled through other UI affordances.
+ * Asserts that primitive shape selections render the inspector panel.
+ * This verifies shape styling controls are reachable without opening email-card mode.
+ * Tradeoff: behavior assumes inspector excludes only explicitly unsupported kinds.
  */
-const verifyRectangleSelectionHidesInspector = (): void => {
+const verifyRectangleSelectionShowsInspector = (): void => {
   renderWithControllerFixture(createControllerFixture({
     selectedElement: createElementFixture('RECTANGLE'),
     selectedIsEmailCard: false
   }));
 
-  expect(screen.queryByTestId('canvas-inspector-panel')).not.toBeInTheDocument();
+  expect(screen.getByTestId('canvas-inspector-panel')).toBeInTheDocument();
 };
 
 /**
@@ -254,15 +262,29 @@ const verifySelectModeHidesCaptureLayer = (): void => {
   expect(screen.queryByTestId('pencil-capture-layer')).not.toBeInTheDocument();
 };
 
+/**
+ * Asserts that eraser mode mounts the shared draw capture layer.
+ * This guards against regressions where erasing fails to capture pointer events over the full canvas.
+ * Tradeoff: test verifies mount state but not mode-specific pointer dispatching.
+ */
+const verifyEraserModeShowsCaptureLayer = (): void => {
+  const controller = createControllerFixture();
+  controller.tool = 'ERASER';
+
+  renderWithControllerFixture(controller);
+  expect(screen.getByTestId('pencil-capture-layer')).toBeInTheDocument();
+};
+
 describe('CanvasView inspector visibility', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('hides inspector for rectangle selections', verifyRectangleSelectionHidesInspector);
+  it('shows inspector for rectangle selections', verifyRectangleSelectionShowsInspector);
   it('hides inspector for pencil selections', verifyPencilSelectionHidesInspector);
   it('shows inspector for email-card selections', verifyEmailCardSelectionShowsInspector);
   it('hides inspector when there is no selection', verifyNoSelectionHidesInspector);
   it('shows capture layer in pencil mode', verifyPencilModeShowsCaptureLayer);
+  it('shows capture layer in eraser mode', verifyEraserModeShowsCaptureLayer);
   it('hides capture layer outside pencil mode', verifySelectModeHidesCaptureLayer);
 });

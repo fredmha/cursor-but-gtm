@@ -1,5 +1,5 @@
 import { MutableRefObject } from 'react';
-import { Edge, Node } from '@xyflow/react';
+import { Node } from '@xyflow/react';
 import {
   CanvasElement,
   CanvasElementKind,
@@ -71,8 +71,10 @@ export const EMAIL_BLOCK_MIN_FONT_SIZE = 10;
 export const EMAIL_BLOCK_MAX_FONT_SIZE = 48;
 export const EMAIL_BLOCK_MAX_PADDING = 24;
 export const EMAIL_BLOCK_MAX_MARGIN_BOTTOM = 48;
+export const DEFAULT_EMAIL_SUBJECT = 'Subject line...';
 
 const DEFAULT_CANVAS_VIEWPORT = { x: 0, y: 0, zoom: 1 };
+const REQUIRED_EMAIL_BODY_BLOCK_ID_BASE = 'required-body';
 
 // Numeric helpers
 
@@ -103,6 +105,75 @@ export const clampNumber = (value: number, minimum: number, maximum: number): nu
   Math.min(maximum, Math.max(minimum, value));
 
 // Email block helpers
+
+/**
+ * Derives a fallback subject from the first non-image text block.
+ * This preserves intent for legacy templates that predate dedicated subject storage.
+ * Tradeoff: fallback quality depends on existing block ordering and text hygiene.
+ */
+const getSubjectFallbackFromBlocks = (blocks: CanvasEmailBlock[]): string => {
+  const firstTextBlock = blocks.find(block => block.type !== 'IMAGE' && (block.text || '').trim().length > 0);
+  return (firstTextBlock?.text || '').trim();
+};
+
+/**
+ * Builds a deterministic id candidate for an injected required body block.
+ * This avoids random ids so temporary UI-only templates remain stable across renders.
+ * Tradeoff: generated ids are predictable and optimized for editor determinism over entropy.
+ */
+const getRequiredBodyBlockIdCandidate = (blocks: CanvasEmailBlock[]): string => {
+  const existingBlockIds = new Set(blocks.map(block => block.id));
+  let suffix = 1;
+  let candidateId = REQUIRED_EMAIL_BODY_BLOCK_ID_BASE;
+
+  while (existingBlockIds.has(candidateId)) {
+    suffix += 1;
+    candidateId = `${REQUIRED_EMAIL_BODY_BLOCK_ID_BASE}-${suffix}`;
+  }
+
+  return candidateId;
+};
+
+/**
+ * Creates an injected body block payload when templates are missing BODY content.
+ * This centralizes defaults so repair-path rows match user-added body rows.
+ * Tradeoff: injected copy uses a generic placeholder until users customize content.
+ */
+const createRequiredBodyBlock = (blockId: string): CanvasEmailBlock => ({
+  id: blockId,
+  order: 0,
+  type: 'BODY',
+  align: 'left',
+  text: 'Body copy...',
+  imageUrl: '',
+  ...getDefaultBlockMetrics('BODY')
+});
+
+/**
+ * Reindexes blocks while preserving current array order.
+ * This avoids accidental resorting when invariants intentionally reposition blocks.
+ * Tradeoff: caller must provide already-ordered arrays.
+ */
+const reindexBlocksInCurrentOrder = (blocks: CanvasEmailBlock[]): CanvasEmailBlock[] =>
+  blocks.map((block, index) => ({ ...block, order: index }));
+
+/**
+ * Ensures every template has at least one BODY block while preserving user order.
+ * This keeps BODY presence invariant without forcing BODY rows to the top.
+ * Tradeoff: legacy templates without BODY are repaired by appending a synthesized BODY row.
+ */
+const ensureAtLeastOneBodyBlock = (blocks: CanvasEmailBlock[]): CanvasEmailBlock[] => {
+  const orderedBlocks = normalizeEmailBlockOrder(blocks);
+  const hasBodyBlock = orderedBlocks.some(block => block.type === 'BODY');
+
+  if (!hasBodyBlock) {
+    const requiredBodyBlockId = getRequiredBodyBlockIdCandidate(orderedBlocks);
+    const appendedBlocks = [...orderedBlocks, createRequiredBodyBlock(requiredBodyBlockId)];
+    return reindexBlocksInCurrentOrder(appendedBlocks);
+  }
+
+  return orderedBlocks;
+};
 
 /**
  * Return default visual metrics for an email block type.
@@ -139,12 +210,18 @@ export const normalizeBlockMetrics = (block: CanvasEmailBlock): EmailBlockMetric
  * Ensure template has versioned, array-backed structure.
  * Inputs: optional template.
  * Output: template safe to mutate by copy.
- * Invariant: blocks is always an array.
+ * Invariant: subject is always populated and at least one BODY block exists.
  */
-export const ensureEmailTemplate = (template?: CanvasEmailTemplate): CanvasEmailTemplate => ({
-  version: 1,
-  blocks: normalizeEmailBlockOrder(template?.blocks || [])
-});
+export const ensureEmailTemplate = (template?: CanvasEmailTemplate): CanvasEmailTemplate => {
+  const normalizedInputBlocks = normalizeEmailBlockOrder(template?.blocks || []);
+  return {
+    version: 1,
+    subject: typeof template?.subject === 'string' && template.subject.trim().length > 0
+      ? template.subject
+      : (getSubjectFallbackFromBlocks(normalizedInputBlocks) || DEFAULT_EMAIL_SUBJECT),
+    blocks: ensureAtLeastOneBodyBlock(normalizedInputBlocks)
+  };
+};
 
 /**
  * Create a new email block with default content and metrics.
@@ -169,7 +246,9 @@ export const createEmailBlock = (blockType: EmailBlockType, createId: () => stri
  * Invariant: non-empty fallback is always returned.
  */
 export const deriveEmailCardLabel = (template?: CanvasEmailTemplate): string => {
-  if (!template || template.blocks.length === 0) return 'Email Card';
+  if (!template) return 'Email Card';
+  if ((template.subject || '').trim().length > 0) return (template.subject || '').trim().slice(0, 80);
+  if (template.blocks.length === 0) return 'Email Card';
 
   const firstTextBlock = template.blocks.find(block => block.type !== 'IMAGE' && (block.text || '').trim().length > 0);
   if (firstTextBlock) return (firstTextBlock.text || '').trim().slice(0, 80);
@@ -199,6 +278,18 @@ export const normalizeEmailBlockOrder = (blocks: CanvasEmailBlock[]): CanvasEmai
     })
     .map((block, index) => ({ ...block, order: index }))
 );
+
+/**
+ * Returns the protected-body block id from a normalized template.
+ * Inputs: template.
+ * Output: only BODY block id or null.
+ * Invariant: id is non-null only when deleting that BODY would violate BODY-exists invariant.
+ */
+export const getRequiredEmailBodyBlockId = (template: CanvasEmailTemplate): string | null => {
+  const bodyBlocks = template.blocks.filter(block => block.type === 'BODY');
+  if (bodyBlocks.length !== 1) return null;
+  return bodyBlocks[0].id;
+};
 
 /**
  * Move a block from one index to another and reindex.
@@ -274,12 +365,11 @@ const getParentMap = (relations: CanvasRelation[]): Map<string, string> => {
 /**
  * Map persisted scene into ReactFlow runtime state.
  * Inputs: scene.
- * Output: nodes, edges, ticket links, viewport.
+ * Output: nodes, ticket links, viewport.
  * Invariant: z-order and parenting are preserved.
  */
 export const mapSceneToState = (scene: CanvasScene): {
   nodes: Node<CanvasNodeData>[];
-  edges: Edge[];
   ticketLinks: CanvasRelation[];
   viewport: CanvasScene['viewport'];
 } => {
@@ -299,19 +389,8 @@ export const mapSceneToState = (scene: CanvasScene): {
       draggable: true
     }));
 
-  const edges: Edge[] = scene.relations
-    .filter(relation => relation.type === 'EDGE')
-    .map(relation => ({
-      id: relation.id,
-      source: relation.fromId,
-      target: relation.toId,
-      type: 'smoothstep',
-      markerEnd: { type: 'arrowclosed' }
-    }));
-
   return {
     nodes,
-    edges,
     ticketLinks: scene.relations.filter(relation => relation.type === 'TICKET_LINK'),
     viewport: scene.viewport
   };
@@ -319,13 +398,12 @@ export const mapSceneToState = (scene: CanvasScene): {
 
 /**
  * Rebuild scene from runtime ReactFlow state.
- * Inputs: nodes, edges, ticket links, viewport.
+ * Inputs: nodes, ticket links, viewport.
  * Output: persisted scene.
  * Invariant: invalid relations are dropped and ticket links deduped.
  */
 export const buildScene = (
   nodes: Node<CanvasNodeData>[],
-  edges: Edge[],
   ticketLinks: CanvasRelation[],
   viewport: CanvasScene['viewport']
 ): CanvasScene => {
@@ -344,12 +422,6 @@ export const buildScene = (
   nodes.forEach(node => {
     if (node.parentId && elementIds.has(node.parentId)) {
       relations.push({ id: `parent-${node.id}`, type: 'PARENT', fromId: node.id, toId: node.parentId });
-    }
-  });
-
-  edges.forEach(edge => {
-    if (elementIds.has(edge.source) && elementIds.has(edge.target)) {
-      relations.push({ id: edge.id, type: 'EDGE', fromId: edge.source, toId: edge.target });
     }
   });
 
@@ -474,6 +546,14 @@ export const toAbsolutePosition = (
   nodeId: string,
   nodeById: Map<string, Node<CanvasNodeData>>
 ): CanvasPoint => getAbsolutePosition(nodeId, nodeById);
+
+/**
+ * Determines whether dropped nodes should trigger container membership reconciliation.
+ * Single-node drops preserve auto-parenting while multi-node drags keep existing group topology stable.
+ * Tradeoff: multi-selection drops require explicit parent reassignment when users want reparenting.
+ */
+export const shouldReconcileContainerMembershipAfterDrop = (droppedNodeIds: Set<string>): boolean =>
+  droppedNodeIds.size === 1;
 
 const getNodeZIndex = (node: Node<CanvasNodeData>): number => {
   const nodeStyle = node.style as { zIndex?: unknown } | undefined;

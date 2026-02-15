@@ -4,19 +4,27 @@ import { describe, expect, it, vi } from 'vitest';
 import { CanvasElement, CanvasEmailBlock } from '../../types';
 import { CanvasElementNode, CanvasElementNodeProps } from './CanvasElementNode';
 
+type NodeResizerMockProps = {
+  isVisible: boolean;
+  lineStyle?: React.CSSProperties;
+  handleStyle?: React.CSSProperties;
+};
+
+let latestNodeResizerProps: NodeResizerMockProps | null = null;
+
+/**
+ * Captures the latest NodeResizer props while rendering a stable test marker.
+ * This enables assertions on resize hit-target behavior without real ReactFlow internals.
+ * Tradeoff: tests validate prop contracts rather than browser pointer behavior.
+ */
+function renderNodeResizerMock(props: NodeResizerMockProps): React.ReactElement | null {
+  latestNodeResizerProps = props;
+  if (!props.isVisible) return null;
+  return <div data-testid="node-resizer" />;
+}
+
 vi.mock('@xyflow/react', () => ({
-  Handle: ({ position, type }: { position: string; type: string }) => (
-    <div data-testid={`handle-${type}-${position}`} />
-  ),
-  NodeResizer: ({ isVisible }: { isVisible: boolean }) => (
-    isVisible ? <div data-testid="node-resizer" /> : null
-  ),
-  Position: {
-    Top: 'top',
-    Right: 'right',
-    Bottom: 'bottom',
-    Left: 'left'
-  }
+  NodeResizer: renderNodeResizerMock
 }));
 
 /**
@@ -105,6 +113,13 @@ const handleEmailBlockResizeStart = (_cardId: string, _blockId: string, _clientY
 const handleEmailCardSurfaceSelect = (_cardId: string): void => {};
 
 /**
+ * No-op email subject-change callback shared by test node props.
+ * The callback keeps node subject-edit behavior type-safe in renderer tests.
+ * Tradeoff: subject persistence side effects are asserted in dedicated interaction tests.
+ */
+const handleEmailSubjectChange = (_cardId: string, _value: string): void => {};
+
+/**
  * No-op email text-change callback shared by test node props.
  * The callback satisfies prop contracts while keeping tests focused on shape output.
  * Tradeoff: block text mutation flow is validated elsewhere.
@@ -155,6 +170,7 @@ const createNodeProps = (
   onEmailBlockReorder: handleEmailBlockReorder,
   onEmailBlockResizeStart: handleEmailBlockResizeStart,
   onEmailCardSurfaceSelect: handleEmailCardSurfaceSelect,
+  onEmailSubjectChange: handleEmailSubjectChange,
   onEmailBlockTextChange: handleEmailBlockTextChange,
   editingShapeId: null,
   onShapeTextEditStart: handleShapeTextEditStart,
@@ -163,20 +179,9 @@ const createNodeProps = (
   ...overrides
 } as unknown as CanvasElementNodeProps);
 
-/**
- * Asserts that all four connector handles are present for a rendered node.
- * Keeping this expectation centralized makes handle-regression tests easier to read.
- * Tradeoff: this helper assumes canonical top/right/bottom/left handle positions.
- */
-const expectAllConnectorHandles = (): void => {
-  expect(screen.getByTestId('handle-target-top')).toBeInTheDocument();
-  expect(screen.getByTestId('handle-source-right')).toBeInTheDocument();
-  expect(screen.getByTestId('handle-target-bottom')).toBeInTheDocument();
-  expect(screen.getByTestId('handle-source-left')).toBeInTheDocument();
-};
-
 describe('CanvasElementNode primitive rendering', () => {
   it('renders rectangle as a direct shape without card shell chrome', () => {
+    latestNodeResizerProps = null;
     const rectangle = createElementFixture('RECTANGLE', { text: 'Opportunity' });
     render(<CanvasElementNode {...createNodeProps(rectangle, { selected: true })} />);
 
@@ -184,10 +189,28 @@ describe('CanvasElementNode primitive rendering', () => {
     expect(screen.queryByTestId('card-shell')).not.toBeInTheDocument();
     expect(screen.queryByText('RECTANGLE')).not.toBeInTheDocument();
     expect(screen.getByTestId('node-resizer')).toBeInTheDocument();
-    expectAllConnectorHandles();
 
     const rectangleInteractionLayer = screen.getByTestId('rectangle-shape').parentElement;
     expect(rectangleInteractionLayer).toHaveClass('pointer-events-none');
+    expect(latestNodeResizerProps?.lineStyle?.pointerEvents).toBe('none');
+    expect(latestNodeResizerProps?.handleStyle?.pointerEvents).toBe('all');
+  });
+
+  it('applies persisted primitive stroke width values to shape geometry', () => {
+    const rectangle = createElementFixture('RECTANGLE', {
+      style: {
+        fill: '#dbeafe',
+        stroke: '#1d4ed8',
+        strokeWidth: 4,
+        fontSize: 14,
+        fontFamily: 'Inter'
+      }
+    });
+
+    const { container } = render(<CanvasElementNode {...createNodeProps(rectangle)} />);
+    const rectangleNode = container.querySelector('rect');
+
+    expect(rectangleNode?.getAttribute('stroke-width')).toBe('4');
   });
 
   it('renders pencil as a direct stroke without card shell chrome', () => {
@@ -199,7 +222,6 @@ describe('CanvasElementNode primitive rendering', () => {
 
     expect(screen.getByTestId('pencil-shape')).toBeInTheDocument();
     expect(screen.queryByTestId('card-shell')).not.toBeInTheDocument();
-    expectAllConnectorHandles();
   });
 
   it('starts inline shape editing on double click', () => {
@@ -239,6 +261,7 @@ describe('CanvasElementNode email-card regression', () => {
       text: 'Email Card',
       emailTemplate: {
         version: 1,
+        subject: 'Quarterly update',
         blocks: [createBodyBlock('block-1', 'Body block content')]
       }
     });
@@ -255,7 +278,39 @@ describe('CanvasElementNode email-card regression', () => {
 
     expect(screen.getByTestId('card-shell')).toBeInTheDocument();
     expect(screen.getByText('Email Card')).toBeInTheDocument();
+    expect(screen.getByTestId('email-subject-input')).toHaveValue('Quarterly update');
+    expect(screen.getByTestId('email-line-break')).toBeInTheDocument();
     expect(screen.getByDisplayValue('Body block content')).toBeInTheDocument();
+  });
+
+  it('uses local draft subject typing and commits on blur', () => {
+    const emailCard = createElementFixture('EMAIL_CARD', {
+      text: 'Email Card',
+      emailTemplate: {
+        version: 1,
+        subject: 'Initial subject',
+        blocks: [createBodyBlock('block-1', 'Body block content')]
+      }
+    });
+    const commitSpy = vi.fn();
+
+    render(
+      <CanvasElementNode
+        {...createNodeProps(emailCard, {
+          selected: true,
+          editingCardId: emailCard.id,
+          activeBlockId: null,
+          onEmailSubjectChange: commitSpy
+        })}
+      />
+    );
+
+    const subjectInput = screen.getByTestId('email-subject-input');
+    fireEvent.change(subjectInput, { target: { value: 'Updated subject copy' } });
+    expect(screen.getByDisplayValue('Updated subject copy')).toBeInTheDocument();
+
+    fireEvent.blur(subjectInput);
+    expect(commitSpy).toHaveBeenCalledWith(emailCard.id, 'Updated subject copy');
   });
 
   it('uses local draft text for email block typing and commits on blur', () => {
@@ -263,6 +318,7 @@ describe('CanvasElementNode email-card regression', () => {
       text: 'Email Card',
       emailTemplate: {
         version: 1,
+        subject: 'Launch follow-up',
         blocks: [createBodyBlock('block-1', 'H1 copy', 'H1')]
       }
     });
@@ -285,5 +341,49 @@ describe('CanvasElementNode email-card regression', () => {
 
     fireEvent.blur(headingInput);
     expect(commitSpy).toHaveBeenCalledWith(emailCard.id, 'block-1', 'Updated heading text');
+  });
+
+  it('shows an active resize handle and forwards resize-start pointer data', () => {
+    const emailCard = createElementFixture('EMAIL_CARD', {
+      text: 'Email Card',
+      emailTemplate: {
+        version: 1,
+        subject: 'Resize scenario',
+        blocks: [createBodyBlock('block-1', 'Body block content')]
+      }
+    });
+    const resizeStartSpy = vi.fn();
+
+    render(
+      <CanvasElementNode
+        {...createNodeProps(emailCard, {
+          selected: true,
+          editingCardId: emailCard.id,
+          activeBlockId: 'block-1',
+          onEmailBlockResizeStart: resizeStartSpy
+        })}
+      />
+    );
+
+    const resizeHandle = screen.getByTestId('email-block-resize-handle-block-1');
+    expect(resizeHandle).toHaveClass('opacity-85');
+
+    fireEvent.mouseDown(resizeHandle, { clientY: 260 });
+    expect(resizeStartSpy).toHaveBeenCalledWith(emailCard.id, 'block-1', 260);
+  });
+
+  it('does not apply grouped-child idle blue ring styling', () => {
+    const emailCard = createElementFixture('EMAIL_CARD', { text: 'Email Card' });
+    render(
+      <CanvasElementNode
+        {...createNodeProps(emailCard, {
+          parentId: 'container-1',
+          selected: false
+        })}
+      />
+    );
+
+    const root = screen.getByTestId('card-shell').parentElement;
+    expect(root).not.toHaveClass('ring-indigo-300');
   });
 });

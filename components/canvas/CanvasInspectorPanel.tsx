@@ -7,15 +7,24 @@ import {
   EMAIL_BLOCK_TYPES,
   TicketRef
 } from './canvas-core';
-import { canAssignParentForKind, supportsPlainTextEditing } from './canvas-element-catalog';
+import { canAssignParentForKind, getCanvasKindStyleDefaults, supportsPlainTextEditing } from './canvas-element-catalog';
+import {
+  getFloatingPanelClassName,
+  isPrimitiveShapeKind,
+  PRIMITIVE_FILL_PALETTE,
+  PRIMITIVE_STROKE_PALETTE,
+  SHAPE_STROKE_WIDTH_OPTIONS
+} from './canvas-theme';
 import { ContainerOption } from './useCanvasController';
 
 type CanvasInspectorPanelProps = {
   selectedElement: CanvasElement;
   selectedNodeParentId?: string;
   selectedIsEmailCard: boolean;
+  emailSubject: string;
   panelIsBlockMode: boolean;
   panelEmailBlocks: CanvasEmailBlock[];
+  requiredEmailBodyBlockId: string | null;
   activeBlockId: string | null;
   activeSelectedBlock: CanvasEmailBlock | undefined;
   activeSelectedBlockMetrics: EmailBlockMetrics | null;
@@ -35,12 +44,236 @@ type CanvasInspectorPanelProps = {
   onSetActiveBlockId: (blockId: string | null) => void;
   onSelectPanelBlock: (blockId: string) => void;
   onAddEmailBlock: (type: EmailBlockType) => void;
+  onUpdateEmailSubject: (subject: string) => void;
   onUpdateEmailBlock: (blockId: string, updater: (block: CanvasEmailBlock) => CanvasEmailBlock) => void;
   onDeleteEmailBlock: (blockId: string) => void;
   onHandleEmailBlockUpload: (blockId: string, file: File) => void;
   onUpdateSelectedElement: (updater: (element: CanvasElement) => CanvasElement) => void;
   onAssignSelectedParent: (parentId?: string) => void;
   onOpenLinkPanel: () => void;
+};
+
+type PrimitiveShapeStyleControlsProps = {
+  selectedElement: CanvasElement;
+  onUpdateSelectedElement: (updater: (element: CanvasElement) => CanvasElement) => void;
+};
+
+/**
+ * Validates whether a string can be consumed by `input[type="color"]`.
+ * This prevents invalid persisted colors from breaking native color picker controls.
+ * Tradeoff: only hex notation is accepted for picker fallback compatibility.
+ */
+const isHexColorValue = (value: string): boolean => /^#[0-9a-f]{6}$/i.test(value);
+
+/**
+ * Resolves a stable hex color value for native color picker controls.
+ * Invalid or missing values fall back to the provided default color.
+ * Tradeoff: shorthand hex and non-hex color strings are normalized by fallback.
+ */
+const toColorPickerValue = (value: string | undefined, fallback: string): string =>
+  value && isHexColorValue(value) ? value : fallback;
+
+/**
+ * Applies a fill-color update to the selected element style.
+ * Keeping style updates in named helpers avoids duplicated updater closures.
+ * Tradeoff: helper assumes caller already validated target element scope.
+ */
+const updateSelectedFillColor = (
+  nextFill: string,
+  onUpdateSelectedElement: (updater: (element: CanvasElement) => CanvasElement) => void
+): void => {
+  onUpdateSelectedElement(element => ({
+    ...element,
+    style: { ...(element.style || {}), fill: nextFill }
+  }));
+};
+
+/**
+ * Applies a stroke-color update to the selected element style.
+ * Centralizing this logic keeps color controls and picker input behavior aligned.
+ * Tradeoff: updater always preserves existing stroke width and typography values.
+ */
+const updateSelectedStrokeColor = (
+  nextStroke: string,
+  onUpdateSelectedElement: (updater: (element: CanvasElement) => CanvasElement) => void
+): void => {
+  onUpdateSelectedElement(element => ({
+    ...element,
+    style: { ...(element.style || {}), stroke: nextStroke }
+  }));
+};
+
+/**
+ * Applies a stroke-width update to the selected element style.
+ * Explicit clamping keeps persisted style values within a usable range for shapes.
+ * Tradeoff: widths outside the supported range are coerced to nearest bounds.
+ */
+const updateSelectedStrokeWidth = (
+  nextWidth: number,
+  onUpdateSelectedElement: (updater: (element: CanvasElement) => CanvasElement) => void
+): void => {
+  const boundedWidth = clampNumber(nextWidth, 1, 12);
+  onUpdateSelectedElement(element => ({
+    ...element,
+    style: { ...(element.style || {}), strokeWidth: boundedWidth }
+  }));
+};
+
+/**
+ * Renders one palette chip button for color controls.
+ * A named helper keeps chip rendering deterministic across fill and stroke rows.
+ * Tradeoff: chip visuals are intentionally compact and rely on tooltip text for clarity.
+ */
+const ColorChipButton: React.FC<{
+  color: string;
+  selected: boolean;
+  onClick: () => void;
+  title: string;
+}> = ({ color, selected, onClick, title }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    title={title}
+    className={`h-6 w-6 rounded-md border transition-shadow ${selected ? 'border-indigo-500 ring-2 ring-indigo-200 shadow-sm' : 'border-zinc-200 hover:ring-1 hover:ring-zinc-300'}`}
+    style={{ backgroundColor: color }}
+  />
+);
+
+/**
+ * Primitive shape style controls for fill, stroke, and stroke width.
+ * This mirrors modern board tooling with quick chips plus custom picker precision.
+ * Tradeoff: controls are intentionally limited to primitive shapes for scope safety.
+ */
+const PrimitiveShapeStyleControls: React.FC<PrimitiveShapeStyleControlsProps> = ({
+  selectedElement,
+  onUpdateSelectedElement
+}) => {
+  const styleDefaults = getCanvasKindStyleDefaults(selectedElement.kind);
+  const fillColor = toColorPickerValue(selectedElement.style?.fill, styleDefaults.fill);
+  const strokeColor = toColorPickerValue(selectedElement.style?.stroke, styleDefaults.stroke);
+  const strokeWidth = selectedElement.style?.strokeWidth ?? styleDefaults.strokeWidth;
+
+  /**
+   * Applies one of the preset fill colors from the quick palette.
+   * The preset path optimizes for fast iteration while preserving a coherent board palette.
+   * Tradeoff: chips are opinionated and may not match every brand palette exactly.
+   */
+  const applyPresetFillColor = (nextColor: string): void =>
+    updateSelectedFillColor(nextColor, onUpdateSelectedElement);
+
+  /**
+   * Applies one of the preset stroke colors from the quick palette.
+   * This keeps outline styling in lockstep with fill-color iteration workflow.
+   * Tradeoff: stroke palette remains finite unless user switches to custom picker input.
+   */
+  const applyPresetStrokeColor = (nextColor: string): void =>
+    updateSelectedStrokeColor(nextColor, onUpdateSelectedElement);
+
+  /**
+   * Applies custom fill color from native picker input.
+   * Native color picking offers precision while still funneling through shared update helpers.
+   * Tradeoff: browser picker UX differs slightly between operating systems.
+   */
+  const handleFillColorPickerChange = (event: React.ChangeEvent<HTMLInputElement>): void =>
+    updateSelectedFillColor(event.target.value, onUpdateSelectedElement);
+
+  /**
+   * Applies custom stroke color from native picker input.
+   * Shared updater logic keeps picker and chip interactions behaviorally identical.
+   * Tradeoff: input accepts only hex output from the native picker.
+   */
+  const handleStrokeColorPickerChange = (event: React.ChangeEvent<HTMLInputElement>): void =>
+    updateSelectedStrokeColor(event.target.value, onUpdateSelectedElement);
+
+  /**
+   * Applies stroke width updates from numeric input.
+   * Explicit parsing and clamping avoid invalid persisted style payloads.
+   * Tradeoff: fractional widths are rounded by browser numeric input semantics.
+   */
+  const handleStrokeWidthInputChange = (event: React.ChangeEvent<HTMLInputElement>): void => {
+    const parsedWidth = Number(event.target.value) || 1;
+    updateSelectedStrokeWidth(parsedWidth, onUpdateSelectedElement);
+  };
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <label className="block text-[11px] font-semibold text-zinc-500 mb-1">Fill</label>
+        <div className="flex items-center gap-1.5 flex-wrap mb-2">
+          {PRIMITIVE_FILL_PALETTE.map(color => (
+            <ColorChipButton
+              key={`fill-${color}`}
+              color={color}
+              selected={fillColor.toLowerCase() === color.toLowerCase()}
+              onClick={() => applyPresetFillColor(color)}
+              title={`Fill ${color}`}
+            />
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="color"
+            value={fillColor}
+            data-testid="shape-fill-picker"
+            className="h-8 w-10 rounded border border-zinc-200 bg-white p-0.5"
+            onChange={handleFillColorPickerChange}
+          />
+          <span className="text-[11px] font-mono text-zinc-500">{fillColor}</span>
+        </div>
+      </div>
+
+      <div>
+        <label className="block text-[11px] font-semibold text-zinc-500 mb-1">Stroke</label>
+        <div className="flex items-center gap-1.5 flex-wrap mb-2">
+          {PRIMITIVE_STROKE_PALETTE.map(color => (
+            <ColorChipButton
+              key={`stroke-${color}`}
+              color={color}
+              selected={strokeColor.toLowerCase() === color.toLowerCase()}
+              onClick={() => applyPresetStrokeColor(color)}
+              title={`Stroke ${color}`}
+            />
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="color"
+            value={strokeColor}
+            data-testid="shape-stroke-picker"
+            className="h-8 w-10 rounded border border-zinc-200 bg-white p-0.5"
+            onChange={handleStrokeColorPickerChange}
+          />
+          <span className="text-[11px] font-mono text-zinc-500">{strokeColor}</span>
+        </div>
+      </div>
+
+      <div>
+        <label className="block text-[11px] font-semibold text-zinc-500 mb-1">Stroke Width</label>
+        <div className="grid grid-cols-5 gap-1 mb-2">
+          {SHAPE_STROKE_WIDTH_OPTIONS.map(widthOption => (
+            <button
+              key={`stroke-width-${widthOption}`}
+              type="button"
+              onClick={() => updateSelectedStrokeWidth(widthOption, onUpdateSelectedElement)}
+              className={`h-7 rounded border text-[11px] font-semibold ${strokeWidth === widthOption ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-zinc-200 text-zinc-600 hover:bg-zinc-50'}`}
+            >
+              {widthOption}
+            </button>
+          ))}
+        </div>
+        <input
+          type="number"
+          min={1}
+          max={12}
+          step={1}
+          data-testid="shape-stroke-width-input"
+          value={strokeWidth}
+          className="w-full rounded border border-zinc-200 px-2 py-1 text-sm"
+          onChange={handleStrokeWidthInputChange}
+        />
+      </div>
+    </div>
+  );
 };
 
 /**
@@ -55,6 +288,7 @@ export const CanvasInspectorPanel: React.FC<CanvasInspectorPanelProps> = ({
   selectedIsEmailCard,
   panelIsBlockMode,
   panelEmailBlocks,
+  requiredEmailBodyBlockId,
   activeBlockId,
   activeSelectedBlock,
   activeSelectedBlockMetrics,
@@ -69,19 +303,24 @@ export const CanvasInspectorPanel: React.FC<CanvasInspectorPanelProps> = ({
   onAddEmailBlock,
   onUpdateEmailBlock,
   onDeleteEmailBlock,
-  onHandleEmailBlockUpload,
   onUpdateSelectedElement,
   onAssignSelectedParent,
   onOpenLinkPanel
-}) => (
-  <div className="absolute top-4 right-4 z-20 w-[300px] bg-white border border-zinc-200 rounded-xl shadow-xl p-3 space-y-3">
+}) => {
+  const primitiveShapeSelection = isPrimitiveShapeKind(selectedElement.kind);
+  const selectedProtectedBodyBlock = !!activeSelectedBlock
+    && !!requiredEmailBodyBlockId
+    && activeSelectedBlock.id === requiredEmailBodyBlockId;
+
+  return (
+  <div className={`absolute top-4 right-4 z-20 w-[320px] rounded-2xl p-3.5 space-y-3 ${getFloatingPanelClassName()}`}>
     <div className="flex items-center justify-between">
       <span className="text-[10px] uppercase tracking-[0.18em] font-bold text-zinc-500">Selection</span>
       <button onClick={onDeleteSelection} className="text-xs text-red-600 hover:text-red-700">Delete</button>
     </div>
 
     {selectedIsEmailCard ? (
-      panelIsBlockMode && activeSelectedBlock && activeSelectedBlockMetrics ? (
+      panelIsBlockMode && activeSelectedBlock ? (
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <label className="block text-[11px] font-semibold text-zinc-500">Block Editor</label>
@@ -107,120 +346,32 @@ export const CanvasInspectorPanel: React.FC<CanvasInspectorPanelProps> = ({
             ))}
           </div>
 
-          {activeSelectedBlock.type === 'IMAGE' ? (
-            <div className="space-y-1.5">
+          {activeSelectedBlock.type !== 'IMAGE' && (
+            <div>
+              <label className="block text-[10px] font-semibold text-zinc-500 mb-1">Font Size</label>
               <input
-                value={activeSelectedBlock.imageUrl || ''}
-                placeholder="https://image-url..."
+                data-testid="email-block-font-size-input"
+                type="number"
+                value={activeSelectedBlockMetrics?.fontSizePx ?? blockLimits.minFontSize}
                 className="w-full rounded border border-zinc-200 px-2 py-1 text-xs"
-                onChange={event => onUpdateEmailBlock(activeSelectedBlock.id, current => ({ ...current, imageUrl: event.target.value }))}
+                onChange={event => {
+                  const value = clampNumber(Number(event.target.value) || blockLimits.minFontSize, blockLimits.minFontSize, blockLimits.maxFontSize);
+                  onUpdateEmailBlock(activeSelectedBlock.id, block => ({ ...block, fontSizePx: value }));
+                }}
               />
-              <label className="inline-flex items-center gap-2 rounded border border-zinc-200 px-2 py-1 text-[11px] font-semibold text-zinc-600 hover:bg-zinc-50 cursor-pointer">
-                Upload
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={event => {
-                    const file = event.target.files?.[0];
-                    if (!file) return;
-                    onHandleEmailBlockUpload(activeSelectedBlock.id, file);
-                    event.target.value = '';
-                  }}
-                />
-              </label>
             </div>
-          ) : activeSelectedBlock.type === 'BODY' ? (
-            <textarea
-              value={activeSelectedBlock.text || ''}
-              rows={3}
-              className="w-full rounded border border-zinc-200 px-2 py-1.5 text-xs text-zinc-800"
-              onChange={event => onUpdateEmailBlock(activeSelectedBlock.id, current => ({ ...current, text: event.target.value }))}
-            />
-          ) : (
-            <input
-              value={activeSelectedBlock.text || ''}
-              className="w-full rounded border border-zinc-200 px-2 py-1 text-xs text-zinc-800"
-              onChange={event => onUpdateEmailBlock(activeSelectedBlock.id, current => ({ ...current, text: event.target.value }))}
-            />
           )}
-
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="block text-[10px] font-semibold text-zinc-500 mb-1">Height</label>
-              <input
-                type="number"
-                value={activeSelectedBlockMetrics.heightPx}
-                className="w-full rounded border border-zinc-200 px-2 py-1 text-xs"
-                onChange={event => {
-                  const value = clampNumber(Number(event.target.value) || blockLimits.minHeight, blockLimits.minHeight, blockLimits.maxHeight);
-                  onUpdateEmailBlock(activeSelectedBlock.id, block => ({ ...block, heightPx: value }));
-                }}
-              />
-            </div>
-            {activeSelectedBlock.type !== 'IMAGE' && (
-              <div>
-                <label className="block text-[10px] font-semibold text-zinc-500 mb-1">Font Size</label>
-                <input
-                  type="number"
-                  value={activeSelectedBlockMetrics.fontSizePx}
-                  className="w-full rounded border border-zinc-200 px-2 py-1 text-xs"
-                  onChange={event => {
-                    const value = clampNumber(Number(event.target.value) || blockLimits.minFontSize, blockLimits.minFontSize, blockLimits.maxFontSize);
-                    onUpdateEmailBlock(activeSelectedBlock.id, block => ({ ...block, fontSizePx: value }));
-                  }}
-                />
-              </div>
-            )}
-          </div>
-
-          <div className="grid grid-cols-3 gap-2">
-            <div>
-              <label className="block text-[10px] font-semibold text-zinc-500 mb-1">Pad X</label>
-              <input
-                type="number"
-                value={activeSelectedBlockMetrics.paddingX}
-                className="w-full rounded border border-zinc-200 px-2 py-1 text-xs"
-                onChange={event => {
-                  const value = clampNumber(Number(event.target.value) || 0, 0, blockLimits.maxPadding);
-                  onUpdateEmailBlock(activeSelectedBlock.id, block => ({ ...block, paddingX: value }));
-                }}
-              />
-            </div>
-            <div>
-              <label className="block text-[10px] font-semibold text-zinc-500 mb-1">Pad Y</label>
-              <input
-                type="number"
-                value={activeSelectedBlockMetrics.paddingY}
-                className="w-full rounded border border-zinc-200 px-2 py-1 text-xs"
-                onChange={event => {
-                  const value = clampNumber(Number(event.target.value) || 0, 0, blockLimits.maxPadding);
-                  onUpdateEmailBlock(activeSelectedBlock.id, block => ({ ...block, paddingY: value }));
-                }}
-              />
-            </div>
-            <div>
-              <label className="block text-[10px] font-semibold text-zinc-500 mb-1">Spacing</label>
-              <input
-                type="number"
-                value={activeSelectedBlockMetrics.marginBottomPx}
-                className="w-full rounded border border-zinc-200 px-2 py-1 text-xs"
-                onChange={event => {
-                  const value = clampNumber(Number(event.target.value) || 0, 0, blockLimits.maxMarginBottom);
-                  onUpdateEmailBlock(activeSelectedBlock.id, block => ({ ...block, marginBottomPx: value }));
-                }}
-              />
-            </div>
-          </div>
 
           <button
             onClick={() => {
+              if (selectedProtectedBodyBlock) return;
               onDeleteEmailBlock(activeSelectedBlock.id);
               onSetActiveBlockId(null);
             }}
-            className="w-full rounded border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-600 hover:bg-red-100"
+            disabled={selectedProtectedBodyBlock}
+            className={`w-full rounded border px-2 py-1 text-[11px] font-semibold ${selectedProtectedBodyBlock ? 'border-zinc-200 bg-zinc-100 text-zinc-400 cursor-not-allowed' : 'border-red-200 bg-red-50 text-red-600 hover:bg-red-100'}`}
           >
-            Delete Block
+            {selectedProtectedBodyBlock ? 'Last BODY Block (Cannot Delete)' : 'Delete Block'}
           </button>
         </div>
       ) : (
@@ -255,7 +406,9 @@ export const CanvasInspectorPanel: React.FC<CanvasInspectorPanelProps> = ({
                 onClick={() => onSelectPanelBlock(block.id)}
                 className={`w-full rounded border px-2 py-1.5 text-left text-xs ${activeBlockId === block.id ? 'border-indigo-300 bg-indigo-50/40' : 'border-zinc-200 hover:bg-zinc-50'}`}
               >
-                <span className="text-[10px] uppercase tracking-[0.18em] font-bold text-zinc-500">{block.type} #{block.order + 1}</span>
+                <span className="text-[10px] uppercase tracking-[0.18em] font-bold text-zinc-500">
+                  {block.type} #{block.order + 1}{requiredEmailBodyBlockId === block.id ? ' (Last BODY)' : ''}
+                </span>
                 <div className="truncate text-zinc-600 mt-1">
                   {block.type === 'IMAGE'
                     ? (block.imageUrl ? 'Image block' : 'Image placeholder')
@@ -282,70 +435,81 @@ export const CanvasInspectorPanel: React.FC<CanvasInspectorPanelProps> = ({
       </div>
     )}
 
-    <div className="grid grid-cols-2 gap-2">
-      <div>
-        <label className="block text-[11px] font-semibold text-zinc-500 mb-1">Fill</label>
-        <input
-          type="text"
-          value={selectedElement.style?.fill || ''}
-          placeholder="#ffffff"
-          className="w-full rounded border border-zinc-200 px-2 py-1 text-sm"
-          onChange={event => onUpdateSelectedElement(element => ({
-            ...element,
-            style: { ...(element.style || {}), fill: event.target.value || undefined }
-          }))}
-        />
-      </div>
-      <div>
-        <label className="block text-[11px] font-semibold text-zinc-500 mb-1">Stroke</label>
-        <input
-          type="text"
-          value={selectedElement.style?.stroke || ''}
-          placeholder="#334155"
-          className="w-full rounded border border-zinc-200 px-2 py-1 text-sm"
-          onChange={event => onUpdateSelectedElement(element => ({
-            ...element,
-            style: { ...(element.style || {}), stroke: event.target.value || undefined }
-          }))}
-        />
-      </div>
-    </div>
+    {!selectedIsEmailCard && (
+      <>
+        {primitiveShapeSelection ? (
+          <PrimitiveShapeStyleControls
+            selectedElement={selectedElement}
+            onUpdateSelectedElement={onUpdateSelectedElement}
+          />
+        ) : (
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-[11px] font-semibold text-zinc-500 mb-1">Fill</label>
+              <input
+                type="text"
+                value={selectedElement.style?.fill || ''}
+                placeholder="#ffffff"
+                className="w-full rounded border border-zinc-200 px-2 py-1 text-sm"
+                onChange={event => onUpdateSelectedElement(element => ({
+                  ...element,
+                  style: { ...(element.style || {}), fill: event.target.value || undefined }
+                }))}
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold text-zinc-500 mb-1">Stroke</label>
+              <input
+                type="text"
+                value={selectedElement.style?.stroke || ''}
+                placeholder="#334155"
+                className="w-full rounded border border-zinc-200 px-2 py-1 text-sm"
+                onChange={event => onUpdateSelectedElement(element => ({
+                  ...element,
+                  style: { ...(element.style || {}), stroke: event.target.value || undefined }
+                }))}
+              />
+            </div>
+          </div>
+        )}
 
-    <div className="grid grid-cols-2 gap-2">
-      <div>
-        <label className="block text-[11px] font-semibold text-zinc-500 mb-1">Width</label>
-        <input
-          type="number"
-          value={selectedElement.width}
-          className="w-full rounded border border-zinc-200 px-2 py-1 text-sm"
-          onChange={event => onUpdateSelectedElement(element => ({ ...element, width: Math.max(120, Number(event.target.value) || 120) }))}
-        />
-      </div>
-      <div>
-        <label className="block text-[11px] font-semibold text-zinc-500 mb-1">Height</label>
-        <input
-          type="number"
-          value={selectedElement.height}
-          className="w-full rounded border border-zinc-200 px-2 py-1 text-sm"
-          onChange={event => onUpdateSelectedElement(element => ({ ...element, height: Math.max(80, Number(event.target.value) || 80) }))}
-        />
-      </div>
-    </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="block text-[11px] font-semibold text-zinc-500 mb-1">Width</label>
+            <input
+              type="number"
+              value={selectedElement.width}
+              className="w-full rounded border border-zinc-200 px-2 py-1 text-sm"
+              onChange={event => onUpdateSelectedElement(element => ({ ...element, width: Math.max(120, Number(event.target.value) || 120) }))}
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] font-semibold text-zinc-500 mb-1">Height</label>
+            <input
+              type="number"
+              value={selectedElement.height}
+              className="w-full rounded border border-zinc-200 px-2 py-1 text-sm"
+              onChange={event => onUpdateSelectedElement(element => ({ ...element, height: Math.max(80, Number(event.target.value) || 80) }))}
+            />
+          </div>
+        </div>
 
-    <div className="grid grid-cols-2 gap-2">
-      <button
-        onClick={() => onUpdateSelectedElement(element => ({ ...element, zIndex: Math.max(0, element.zIndex - 1) }))}
-        className="rounded border border-zinc-200 px-2 py-1 text-xs font-semibold text-zinc-600 hover:bg-zinc-50"
-      >
-        Back
-      </button>
-      <button
-        onClick={() => onUpdateSelectedElement(element => ({ ...element, zIndex: element.zIndex + 1 }))}
-        className="rounded border border-zinc-200 px-2 py-1 text-xs font-semibold text-zinc-600 hover:bg-zinc-50"
-      >
-        Front
-      </button>
-    </div>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            onClick={() => onUpdateSelectedElement(element => ({ ...element, zIndex: Math.max(0, element.zIndex - 1) }))}
+            className="rounded border border-zinc-200 px-2 py-1 text-xs font-semibold text-zinc-600 hover:bg-zinc-50"
+          >
+            Back
+          </button>
+          <button
+            onClick={() => onUpdateSelectedElement(element => ({ ...element, zIndex: element.zIndex + 1 }))}
+            className="rounded border border-zinc-200 px-2 py-1 text-xs font-semibold text-zinc-600 hover:bg-zinc-50"
+          >
+            Front
+          </button>
+        </div>
+      </>
+    )}
 
     {canAssignParentForKind(selectedElement.kind) && (
       <div>
@@ -390,4 +554,5 @@ export const CanvasInspectorPanel: React.FC<CanvasInspectorPanelProps> = ({
       </div>
     </div>
   </div>
-);
+  );
+};
