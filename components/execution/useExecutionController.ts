@@ -7,6 +7,7 @@ import { getTaskLabel } from './execution-core';
 import { useExecutionCellEditor } from './useExecutionCellEditor';
 import { ExecutionElementOption } from './executionTable.types';
 import { getCanvasKindLabel } from '../canvas/canvas-element-catalog';
+import { extractPlainTextFromRichText } from '../canvas/canvas-rich-text';
 
 /**
  * Purpose:
@@ -60,7 +61,7 @@ export const useExecutionController = () => {
   const canvasElementOptions = useMemo<ExecutionElementOption[]>(() => {
     return (campaign?.canvasScene?.elements || []).map(element => ({
       id: element.id,
-      label: element.text || `${getCanvasKindLabel(element.kind)} ${element.id.slice(0, 6)}`,
+      label: extractPlainTextFromRichText(element.text || '').trim() || `${getCanvasKindLabel(element.kind)} ${element.id.slice(0, 6)}`,
       kind: getCanvasKindLabel(element.kind)
     }));
   }, [campaign?.canvasScene?.elements]);

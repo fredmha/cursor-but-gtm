@@ -4,7 +4,7 @@ import { TicketRef } from './canvas-core';
 
 type CanvasTicketLinkModalProps = {
   open: boolean;
-  hasSelectedNode: boolean;
+  hasSelectedLinkOwner: boolean;
   search: string;
   tickets: TicketRef[];
   draftLinkedTicketIds: string[];
@@ -15,14 +15,14 @@ type CanvasTicketLinkModalProps = {
 };
 
 /**
- * Ticket linking modal for selected canvas element.
+ * Ticket linking modal for the selected container owner.
  * Inputs: open state, filtered ticket list, selection draft, handlers.
  * Output: modal UI or null.
  * Invariant: emits changes through callbacks only.
  */
 export const CanvasTicketLinkModal: React.FC<CanvasTicketLinkModalProps> = ({
   open,
-  hasSelectedNode,
+  hasSelectedLinkOwner,
   search,
   tickets,
   draftLinkedTicketIds,
@@ -31,14 +31,14 @@ export const CanvasTicketLinkModal: React.FC<CanvasTicketLinkModalProps> = ({
   onToggleTicket,
   onSave
 }) => {
-  if (!open || !hasSelectedNode) return null;
+  if (!open || !hasSelectedLinkOwner) return null;
 
   return (
     <div className="fixed inset-0 z-[220] flex items-center justify-center bg-black/20 backdrop-blur-sm">
       <div className="absolute inset-0" onClick={onClose} />
       <div className="relative z-10 w-[520px] max-h-[70vh] bg-white border border-zinc-200 rounded-xl shadow-2xl p-4 flex flex-col">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-zinc-900">Link Selected Element to Tickets</h3>
+          <h3 className="text-sm font-semibold text-zinc-900">Link Selected Container to Tickets</h3>
           <button onClick={onClose} className="text-zinc-400 hover:text-zinc-600">
             <Icons.XCircle className="w-4 h-4" />
           </button>

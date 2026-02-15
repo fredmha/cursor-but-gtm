@@ -5,6 +5,7 @@ const MIN_POINT_DISTANCE = 2;
 const STROKE_PADDING = 6;
 const MIN_STROKE_WIDTH = 12;
 const MIN_STROKE_HEIGHT = 12;
+const DOT_HALF_SIZE = 1;
 
 export type FreehandDraft = {
   points: CanvasStrokePoint[];
@@ -45,6 +46,22 @@ export const appendFreehandPoint = (
 };
 
 /**
+ * Converts raw draft points into a persistable stroke point list.
+ * Single-point input expands into a tiny segment so click-only input still produces a visible dot.
+ * Tradeoff: dot rendering is approximated as a short line segment to keep storage schema unchanged.
+ */
+const getPersistedStrokePoints = (points: CanvasStrokePoint[]): CanvasStrokePoint[] => {
+  if (points.length === 0) return [];
+  if (points.length > 1) return points;
+
+  const [point] = points;
+  return [
+    { x: point.x - DOT_HALF_SIZE, y: point.y },
+    { x: point.x + DOT_HALF_SIZE, y: point.y }
+  ];
+};
+
+/**
  * Converts unknown stroke payloads into safe finite points.
  * This protects canvas migration from malformed historical data.
  * Tradeoff: invalid points are dropped rather than repaired heuristically.
@@ -72,14 +89,15 @@ export const finalizeFreehandElement = (
   zIndex: number,
   createId: () => string
 ): CanvasElement | null => {
-  if (draft.points.length < 2) return null;
+  const persistedPoints = getPersistedStrokePoints(draft.points);
+  if (persistedPoints.length < 2) return null;
 
-  const bounds = getStrokeBounds(draft.points);
+  const bounds = getStrokeBounds(persistedPoints);
   const width = Math.max(MIN_STROKE_WIDTH, bounds.maxX - bounds.minX + STROKE_PADDING * 2);
   const height = Math.max(MIN_STROKE_HEIGHT, bounds.maxY - bounds.minY + STROKE_PADDING * 2);
 
   const baseElement = createDefaultElementForKind('PENCIL', bounds.minX - STROKE_PADDING, bounds.minY - STROKE_PADDING, zIndex, createId);
-  const localPoints = draft.points.map(point => ({
+  const localPoints = persistedPoints.map(point => ({
     x: point.x - bounds.minX + STROKE_PADDING,
     y: point.y - bounds.minY + STROKE_PADDING
   }));

@@ -21,6 +21,7 @@ type CanvasInspectorPanelProps = {
   activeSelectedBlockMetrics: EmailBlockMetrics | null;
   containerOptions: ContainerOption[];
   linkedTicketIdsForSelection: string[];
+  hasTicketLinkOwnerForSelection: boolean;
   ticketById: Map<string, TicketRef>;
   blockLimits: {
     minHeight: number;
@@ -59,6 +60,7 @@ export const CanvasInspectorPanel: React.FC<CanvasInspectorPanelProps> = ({
   activeSelectedBlockMetrics,
   containerOptions,
   linkedTicketIdsForSelection,
+  hasTicketLinkOwnerForSelection,
   ticketById,
   blockLimits,
   onDeleteSelection,
@@ -364,8 +366,17 @@ export const CanvasInspectorPanel: React.FC<CanvasInspectorPanelProps> = ({
     <div className="border-t border-zinc-100 pt-2">
       <div className="flex items-center justify-between mb-2">
         <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Ticket Links</span>
-        <button onClick={onOpenLinkPanel} className="text-xs text-indigo-600 hover:text-indigo-700">Manage</button>
+        <button
+          onClick={onOpenLinkPanel}
+          disabled={!hasTicketLinkOwnerForSelection}
+          className={`text-xs ${hasTicketLinkOwnerForSelection ? 'text-indigo-600 hover:text-indigo-700' : 'text-zinc-300 cursor-not-allowed'}`}
+        >
+          Manage
+        </button>
       </div>
+      {!hasTicketLinkOwnerForSelection && (
+        <div className="text-[11px] text-zinc-400 mb-1">Assign this element to a container to link tickets.</div>
+      )}
       <div className="flex flex-wrap gap-1">
         {linkedTicketIdsForSelection.length === 0 && <span className="text-xs text-zinc-400">No links</span>}
         {linkedTicketIdsForSelection.map(ticketId => {

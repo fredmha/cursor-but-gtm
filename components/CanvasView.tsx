@@ -12,6 +12,14 @@ type FreehandDraftOverlayProps = {
   viewport: CanvasViewport;
 };
 
+type PencilCaptureLayerProps = {
+  enabled: boolean;
+  onPointerDown: (event: React.PointerEvent<HTMLDivElement>) => void;
+  onPointerMove: (event: React.PointerEvent<HTMLDivElement>) => void;
+  onPointerUp: (event: React.PointerEvent<HTMLDivElement>) => void;
+  onPointerCancel: (event: React.PointerEvent<HTMLDivElement>) => void;
+};
+
 /**
  * Converts a flow-space point into screen-space point for draft stroke preview.
  * Keeping conversion isolated avoids repeating viewport math around canvas render code.
@@ -34,15 +42,38 @@ const toDraftPolylinePoints = (points: CanvasStrokePoint[], viewport: CanvasView
   }).join(' ');
 
 /**
+ * Builds draft-circle props for one-point freehand previews.
+ * This keeps click-only pencil input visually responsive before stroke commit.
+ * Tradeoff: preview circle radius is fixed and not pressure-sensitive.
+ */
+const toDraftCircle = (
+  points: CanvasStrokePoint[],
+  viewport: CanvasViewport
+): { cx: number; cy: number; r: number } | null => {
+  if (points.length !== 1) return null;
+  const screenPoint = toScreenPoint(points[0], viewport);
+  return { cx: screenPoint.x, cy: screenPoint.y, r: 1.25 };
+};
+
+/**
  * Visualizes in-progress freehand drawing above the ReactFlow pane.
  * This preserves immediate drawing feedback before the stroke is persisted as a node.
  * Tradeoff: draft overlay is not part of scene history until stroke commit.
  */
 const FreehandDraftOverlay: React.FC<FreehandDraftOverlayProps> = ({ points, viewport }) => {
-  if (points.length < 2) return null;
+  if (points.length === 0) return null;
+  const circleDraft = toDraftCircle(points, viewport);
 
   return (
     <svg className="absolute inset-0 z-10 pointer-events-none">
+      {circleDraft && (
+        <circle
+          cx={circleDraft.cx}
+          cy={circleDraft.cy}
+          r={circleDraft.r}
+          fill="#334155"
+        />
+      )}
       <polyline
         points={toDraftPolylinePoints(points, viewport)}
         fill="none"
@@ -52,6 +83,75 @@ const FreehandDraftOverlay: React.FC<FreehandDraftOverlayProps> = ({ points, vie
         strokeLinejoin="round"
       />
     </svg>
+  );
+};
+
+/**
+ * Releases pointer capture when this layer currently owns the pointer.
+ * This keeps capture lifecycle balanced and avoids leaking capture ownership between strokes.
+ * Tradeoff: explicit release is defensive because browsers also release on pointer up.
+ */
+const releasePointerCaptureIfHeld = (
+  event: React.PointerEvent<HTMLDivElement>
+): void => {
+  const currentTarget = event.currentTarget;
+  if (!currentTarget.hasPointerCapture(event.pointerId)) return;
+  currentTarget.releasePointerCapture(event.pointerId);
+};
+
+/**
+ * Provides a full-canvas pointer capture surface while pencil mode is active.
+ * This ensures strokes remain continuous over nodes, edges, and pane background.
+ * Tradeoff: while enabled, normal node interaction is intentionally blocked in favor of drawing.
+ */
+const PencilCaptureLayer: React.FC<PencilCaptureLayerProps> = ({
+  enabled,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+  onPointerCancel
+}) => {
+  if (!enabled) return null;
+
+  /**
+   * Captures pointer ownership before delegating draw-start handling to controller logic.
+   * Capture guarantees move/up delivery even when the pointer leaves underlying canvas content.
+   * Tradeoff: capture setup adds a small pointerdown cost to improve draw reliability.
+   */
+  const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>): void => {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    onPointerDown(event);
+  };
+
+  /**
+   * Releases pointer capture after draw-end dispatch.
+   * This prevents stale ownership from blocking later pointer interactions.
+   * Tradeoff: explicit release duplicates browser defaults for robustness.
+   */
+  const handlePointerUp = (event: React.PointerEvent<HTMLDivElement>): void => {
+    onPointerUp(event);
+    releasePointerCaptureIfHeld(event);
+  };
+
+  /**
+   * Releases pointer capture after draw-cancel dispatch.
+   * This aligns cancel cleanup semantics with normal pointer-up completion flow.
+   * Tradeoff: cancel and end paths both perform release checks for deterministic cleanup.
+   */
+  const handlePointerCancel = (event: React.PointerEvent<HTMLDivElement>): void => {
+    onPointerCancel(event);
+    releasePointerCaptureIfHeld(event);
+  };
+
+  return (
+    <div
+      data-testid="pencil-capture-layer"
+      className="absolute inset-0 z-[15] cursor-crosshair touch-none"
+      onPointerDown={handlePointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerCancel}
+    />
   );
 };
 
@@ -101,8 +201,6 @@ const CanvasWorkspace: React.FC = () => {
         onEdgesChange={controller.onEdgesChange}
         onConnect={controller.onConnect}
         onPaneClick={controller.onPaneClick}
-        onPaneMouseMove={controller.onPaneMouseMove}
-        onPaneMouseLeave={controller.onPaneMouseLeave}
         onInit={controller.setRfInstance}
         onMoveEnd={controller.onMoveEnd}
         defaultViewport={controller.viewport}
@@ -116,9 +214,17 @@ const CanvasWorkspace: React.FC = () => {
         <Background gap={24} color="#e4e4e7" />
       </ReactFlow>
 
+      <PencilCaptureLayer
+        enabled={controller.tool === 'PENCIL'}
+        onPointerDown={controller.onPencilPointerDown}
+        onPointerMove={controller.onPencilPointerMove}
+        onPointerUp={controller.onPencilPointerUp}
+        onPointerCancel={controller.onPencilPointerCancel}
+      />
+
       <FreehandDraftOverlay points={controller.freehandDraft?.points || []} viewport={controller.viewport} />
 
-      {controller.selectedElement && !controller.selectedIsEmailCard && (
+      {controller.selectedElement && controller.selectedIsEmailCard && (
         <CanvasInspectorPanel
           selectedElement={controller.selectedElement}
           selectedNodeParentId={controller.selectedNode?.parentId}
@@ -130,6 +236,7 @@ const CanvasWorkspace: React.FC = () => {
           activeSelectedBlockMetrics={controller.activeSelectedBlockMetrics}
           containerOptions={controller.containerOptions}
           linkedTicketIdsForSelection={controller.linkedTicketIdsForSelection}
+          hasTicketLinkOwnerForSelection={controller.hasTicketLinkOwnerForSelection}
           ticketById={controller.ticketById}
           blockLimits={controller.blockLimits}
           onDeleteSelection={controller.removeSelection}
@@ -162,7 +269,7 @@ const CanvasWorkspace: React.FC = () => {
 
       <CanvasTicketLinkModal
         open={controller.linkPanelOpen}
-        hasSelectedNode={!!controller.selectedNode}
+        hasSelectedLinkOwner={controller.hasTicketLinkOwnerForSelection}
         search={controller.linkSearch}
         tickets={controller.filteredTickets}
         draftLinkedTicketIds={controller.draftLinkedTicketIds}

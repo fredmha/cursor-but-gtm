@@ -1,4 +1,4 @@
-import { MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   addEdge,
   applyEdgeChanges,
@@ -49,6 +49,7 @@ import {
   VIEWPORT_COMMIT_MS
 } from './canvas-core';
 import { appendFreehandPoint, createFreehandDraft, finalizeFreehandElement, FreehandDraft } from './canvas-freehand';
+import { extractPlainTextFromRichText, isShapeRichTextEditableKind, sanitizeShapeRichText } from './canvas-rich-text';
 
 export type ContainerOption = {
   id: string;
@@ -71,6 +72,55 @@ const getDroppedNodeIds = (changes: NodeChange<Node<CanvasNodeData>>[]): Set<str
   });
 
   return droppedNodeIds;
+};
+
+/**
+ * Builds a stable id lookup map for runtime canvas nodes.
+ * Inputs: current ReactFlow nodes.
+ * Output: map keyed by node id.
+ * Invariant: each id resolves to the latest node snapshot for this render frame.
+ */
+const getNodeLookup = (nodes: Node<CanvasNodeData>[]): Map<string, Node<CanvasNodeData>> =>
+  new Map(nodes.map(node => [node.id, node] as [string, Node<CanvasNodeData>]));
+
+/**
+ * Resolves which container owns ticket links for the current selection.
+ * Inputs: selected node and node lookup map.
+ * Output: container node id or null when selection is ungrouped.
+ * Invariant: ticket links are container-owned only.
+ */
+const getTicketLinkOwnerIdForSelection = (
+  selectedNode: Node<CanvasNodeData> | undefined,
+  nodeLookup: Map<string, Node<CanvasNodeData>>
+): string | null => {
+  if (!selectedNode) return null;
+  if (selectedNode.data.element.kind === 'CONTAINER') return selectedNode.id;
+  if (!selectedNode.parentId) return null;
+
+  const parentNode = nodeLookup.get(selectedNode.parentId);
+  if (!parentNode || parentNode.data.element.kind !== 'CONTAINER') return null;
+  return parentNode.id;
+};
+
+/**
+ * Determines whether a pointer event should be accepted as a drawing source.
+ * This gates freehand sessions to primary pointers and left-button mouse input.
+ * Tradeoff: secondary mouse buttons are ignored to avoid accidental context-menu drawing.
+ */
+const canStartDrawingFromPointer = (event: ReactPointerEvent<HTMLDivElement>): boolean => {
+  if (!event.isPrimary) return false;
+  if (event.pointerType !== 'mouse') return true;
+  return event.button === 0;
+};
+
+/**
+ * Checks whether the primary draw button remains active for a pointer move event.
+ * This provides a cross-device guard before appending high-frequency draft points.
+ * Tradeoff: mouse semantics are strict while touch/pen rely on browser pointer state.
+ */
+const isDrawButtonActive = (event: ReactPointerEvent<HTMLDivElement>): boolean => {
+  if (event.pointerType !== 'mouse') return true;
+  return (event.buttons & 1) === 1;
 };
 
 /**
@@ -101,6 +151,7 @@ export const useCanvasController = () => {
   const [clipboardNodes, setClipboardNodes] = useState<Node<CanvasNodeData>[]>([]);
   const [historyVersion, setHistoryVersion] = useState(0);
   const [editingCardId, setEditingCardId] = useState<string | null>(null);
+  const [editingShapeId, setEditingShapeId] = useState<string | null>(null);
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
   const [resizeState, setResizeState] = useState<BlockResizeState | null>(null);
   const [freehandDraft, setFreehandDraft] = useState<FreehandDraft | null>(null);
@@ -111,6 +162,7 @@ export const useCanvasController = () => {
   const ticketLinksRef = useRef(ticketLinks);
   const viewportRef = useRef(viewport);
   const freehandDraftRef = useRef<FreehandDraft | null>(freehandDraft);
+  const activeFreehandPointerIdRef = useRef<number | null>(null);
   const commitTimerRef = useRef<number | null>(null);
   const viewportCommitTimerRef = useRef<number | null>(null);
   const historyRef = useRef<CanvasScene[]>([initialScene]);
@@ -243,6 +295,7 @@ export const useCanvasController = () => {
   const selectedNodes = useMemo(() => nodes.filter(node => node.selected), [nodes]);
   const selectedNode = selectedNodes.length === 1 ? selectedNodes[0] : undefined;
   const selectedEdgeIds = useMemo(() => new Set(edges.filter(edge => edge.selected).map(edge => edge.id)), [edges]);
+  const nodeLookup = useMemo(() => getNodeLookup(nodes), [nodes]);
 
   useEffect(() => {
     if (!selectedNode || selectedNode.data.element.kind !== 'EMAIL_CARD') {
@@ -263,6 +316,13 @@ export const useCanvasController = () => {
     setActiveBlockId(previousBlockId => (previousBlockId && blocks.some(block => block.id === previousBlockId)) ? previousBlockId : blocks[0].id);
   }, [selectedNode]);
 
+  useEffect(() => {
+    if (!editingShapeId) return;
+    if (!selectedNode || selectedNode.id !== editingShapeId || !isShapeRichTextEditableKind(selectedNode.data.element.kind)) {
+      setEditingShapeId(null);
+    }
+  }, [editingShapeId, selectedNode]);
+
   const allTickets = useMemo<TicketRef[]>(() => {
     if (!campaign) return [];
 
@@ -282,7 +342,15 @@ export const useCanvasController = () => {
       parentId: project.id
     })));
 
-    return [...channelTickets, ...projectTickets];
+    const standaloneTickets = (campaign.standaloneTickets || []).map(ticket => ({
+      id: ticket.id,
+      shortId: ticket.shortId,
+      title: ticket.title,
+      parentType: 'STANDALONE' as const,
+      parentId: 'standalone'
+    }));
+
+    return [...channelTickets, ...projectTickets, ...standaloneTickets];
   }, [campaign]);
 
   const ticketById = useMemo(() => new Map(allTickets.map(ticket => [ticket.id, ticket])), [allTickets]);
@@ -299,13 +367,24 @@ export const useCanvasController = () => {
     if (!selectedNode) return [];
     return nodes
       .filter(node => node.data.element.kind === 'CONTAINER' && node.id !== selectedNode.id)
-      .map(node => ({ id: node.id, label: node.data.element.text || `${getCanvasKindLabel('CONTAINER')} ${node.id.slice(0, 6)}` }));
+      .map(node => {
+        const plainTextLabel = extractPlainTextFromRichText(node.data.element.text || '').trim();
+        const fallbackLabel = `${getCanvasKindLabel('CONTAINER')} ${node.id.slice(0, 6)}`;
+        return { id: node.id, label: plainTextLabel || fallbackLabel };
+      });
   }, [nodes, selectedNode]);
 
+  const selectedTicketLinkOwnerId = useMemo(
+    () => getTicketLinkOwnerIdForSelection(selectedNode, nodeLookup),
+    [nodeLookup, selectedNode]
+  );
+
   const linkedTicketIdsForSelection = useMemo(() => {
-    if (!selectedNode) return [];
-    return ticketLinks.filter(link => link.fromId === selectedNode.id).map(link => link.toId);
-  }, [selectedNode, ticketLinks]);
+    if (!selectedTicketLinkOwnerId) return [];
+    return ticketLinks.filter(link => link.fromId === selectedTicketLinkOwnerId).map(link => link.toId);
+  }, [selectedTicketLinkOwnerId, ticketLinks]);
+
+  const hasTicketLinkOwnerForSelection = selectedTicketLinkOwnerId !== null;
 
   const canUndo = historyIndexRef.current > 0;
   const canRedo = historyIndexRef.current < historyRef.current.length - 1;
@@ -686,21 +765,21 @@ export const useCanvasController = () => {
   }, [scheduleCommit]);
 
   const openLinkPanel = useCallback(() => {
-    if (!selectedNode) return;
+    if (!selectedTicketLinkOwnerId) return;
     setDraftLinkedTicketIds(linkedTicketIdsForSelection);
     setLinkSearch('');
     setLinkPanelOpen(true);
-  }, [linkedTicketIdsForSelection, selectedNode]);
+  }, [linkedTicketIdsForSelection, selectedTicketLinkOwnerId]);
 
   const saveTicketLinks = useCallback(() => {
-    if (!selectedNode) return;
+    if (!selectedTicketLinkOwnerId) return;
 
     setTicketLinks(previousLinks => {
-      const withoutSelected = previousLinks.filter(link => !(link.type === 'TICKET_LINK' && link.fromId === selectedNode.id));
+      const withoutSelected = previousLinks.filter(link => !(link.type === 'TICKET_LINK' && link.fromId === selectedTicketLinkOwnerId));
       const next = draftLinkedTicketIds.map(ticketId => ({
         id: generateId(),
         type: 'TICKET_LINK' as const,
-        fromId: selectedNode.id,
+        fromId: selectedTicketLinkOwnerId,
         toId: ticketId
       }));
       return [...withoutSelected, ...next];
@@ -708,7 +787,7 @@ export const useCanvasController = () => {
 
     setLinkPanelOpen(false);
     scheduleCommit();
-  }, [draftLinkedTicketIds, scheduleCommit, selectedNode]);
+  }, [draftLinkedTicketIds, scheduleCommit, selectedTicketLinkOwnerId]);
 
   const undo = useCallback(() => {
     if (historyIndexRef.current <= 0) return;
@@ -806,12 +885,11 @@ export const useCanvasController = () => {
   /**
    * Commits an in-progress freehand draft into a persisted pencil element.
    * This separates high-frequency pointer updates from store/history writes for better responsiveness.
-   * Tradeoff: unfinished drafts are discarded when fewer than two points exist.
+   * Tradeoff: single-click input is converted into a short segment so it remains visible.
    */
   const finishFreehandDraw = useCallback(() => {
-    if (tool !== 'PENCIL') return;
-
     const currentDraft = freehandDraftRef.current;
+    activeFreehandPointerIdRef.current = null;
     setFreehandDraft(null);
     if (!currentDraft) return;
 
@@ -823,39 +901,109 @@ export const useCanvasController = () => {
     });
 
     scheduleCommit();
-  }, [createNodeFromElement, getNextZIndex, scheduleCommit, tool]);
+  }, [createNodeFromElement, getNextZIndex, scheduleCommit]);
 
   /**
-   * Handles pane pointer movement while pencil mode is active.
-   * The handler creates or extends drafts using the primary mouse button state.
-   * Tradeoff: touch/pen pressure input is not modeled in this V1 implementation.
+   * Discards the active freehand draft and clears pointer-session state.
+   * This provides a deterministic cancel path for pointer-cancel and tool-switch events.
+   * Tradeoff: canceled drafts are intentionally not persisted to history.
    */
-  const onPaneMouseMove = useCallback((event: ReactMouseEvent) => {
+  const cancelFreehandDraw = useCallback(() => {
+    activeFreehandPointerIdRef.current = null;
+    setFreehandDraft(null);
+  }, []);
+
+  /**
+   * Starts a new freehand draft for an accepted pointer source.
+   * The pointer id is tracked to keep one active stroke session at a time.
+   * Tradeoff: concurrent multi-pointer drawing is intentionally unsupported.
+   */
+  const startFreehandDraw = useCallback((point: CanvasStrokePoint, pointerId: number) => {
     if (tool !== 'PENCIL') return;
+    activeFreehandPointerIdRef.current = pointerId;
+    setFreehandDraft(createFreehandDraft(point));
+  }, [tool]);
 
-    if (event.buttons !== 1) {
-      if (freehandDraftRef.current) finishFreehandDraw();
-      return;
-    }
+  /**
+   * Appends a point into the active freehand draft for the tracked pointer.
+   * This keeps draw updates constrained to the pointer that started the stroke.
+   * Tradeoff: stale pointer updates are ignored instead of merged.
+   */
+  const extendFreehandDraw = useCallback((point: CanvasStrokePoint, pointerId: number) => {
+    if (tool !== 'PENCIL') return;
+    if (activeFreehandPointerIdRef.current !== pointerId) return;
 
-    const point = toFlowPoint(event.clientX, event.clientY);
     setFreehandDraft(previousDraft => (
       previousDraft
         ? appendFreehandPoint(previousDraft, point)
         : createFreehandDraft(point)
     ));
-  }, [finishFreehandDraw, toFlowPoint, tool]);
+  }, [tool]);
 
   /**
-   * Finalizes drawing when pointer leaves the pane during pencil mode.
-   * This prevents orphan drafts when mouseup happens outside the canvas surface.
-   * Tradeoff: leaving the pane always commits current stroke instead of canceling it.
+   * Finalizes the active freehand draft for the tracked pointer.
+   * This commits exactly one history entry per completed stroke session.
+   * Tradeoff: pointer-up for non-active pointers is ignored.
    */
-  const onPaneMouseLeave = useCallback(() => {
-    if (tool !== 'PENCIL') return;
-    if (!freehandDraftRef.current) return;
+  const endFreehandDraw = useCallback((pointerId: number) => {
+    if (activeFreehandPointerIdRef.current !== pointerId) return;
     finishFreehandDraw();
-  }, [finishFreehandDraw, tool]);
+  }, [finishFreehandDraw]);
+
+  /**
+   * Begins pencil drawing from the capture layer pointer-down event.
+   * Drawing starts only for supported primary pointers to prevent accidental secondary input.
+   * Tradeoff: right-click/aux-click never initiate drawing.
+   */
+  const onPencilPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (tool !== 'PENCIL') return;
+    if (activeFreehandPointerIdRef.current !== null) return;
+    if (!canStartDrawingFromPointer(event)) return;
+
+    event.preventDefault();
+    const point = toFlowPoint(event.clientX, event.clientY);
+    startFreehandDraw(point, event.pointerId);
+  }, [startFreehandDraw, toFlowPoint, tool]);
+
+  /**
+   * Extends active pencil drawing during pointer movement.
+   * A button-state guard prevents orphan move events from creating unexpected trailing segments.
+   * Tradeoff: pointer streams with missing button state terminate the stroke early.
+   */
+  const onPencilPointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (tool !== 'PENCIL') return;
+    if (activeFreehandPointerIdRef.current !== event.pointerId) return;
+
+    if (!isDrawButtonActive(event)) {
+      endFreehandDraw(event.pointerId);
+      return;
+    }
+
+    event.preventDefault();
+    const point = toFlowPoint(event.clientX, event.clientY);
+    extendFreehandDraw(point, event.pointerId);
+  }, [endFreehandDraw, extendFreehandDraw, toFlowPoint, tool]);
+
+  /**
+   * Completes pencil drawing when the active pointer is released.
+   * This closes the stroke even when release happens outside underlying flow nodes.
+   * Tradeoff: up events for inactive pointers are ignored as safe no-ops.
+   */
+  const onPencilPointerUp = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    endFreehandDraw(event.pointerId);
+  }, [endFreehandDraw]);
+
+  /**
+   * Cancels pencil drawing when the browser aborts the pointer session.
+   * This avoids dangling draft overlays after interrupted pointer lifecycles.
+   * Tradeoff: canceled in-progress strokes are discarded instead of partially committed.
+   */
+  const onPencilPointerCancel = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (activeFreehandPointerIdRef.current !== event.pointerId) return;
+    event.preventDefault();
+    cancelFreehandDraw();
+  }, [cancelFreehandDraw]);
 
   /**
    * Creates a new element for click-based creation tools.
@@ -863,6 +1011,7 @@ export const useCanvasController = () => {
    * Tradeoff: pencil creation uses move-driven drafting and is excluded from click creation.
    */
   const onPaneClick = useCallback((event: ReactMouseEvent) => {
+    setEditingShapeId(null);
     const kind = getElementKindForTool(tool);
     if (!kind || kind === 'PENCIL') return;
 
@@ -870,6 +1019,50 @@ export const useCanvasController = () => {
     createElementFromTool(kind, flowPosition.x, flowPosition.y);
     setTool('SELECT');
   }, [createElementFromTool, toFlowPoint, tool]);
+
+  /**
+   * Starts inline text editing for a shape node.
+   * This keeps edit-session ownership in the controller so keyboard shortcuts stay coordinated.
+   * Tradeoff: editor lifecycle adds one more transient state branch to canvas interaction logic.
+   */
+  const startShapeTextEdit = useCallback((shapeId: string) => {
+    setEditingShapeId(shapeId);
+  }, []);
+
+  /**
+   * Persists sanitized rich text for a shape and exits edit mode.
+   * This centralizes shape text commits so node rendering and history snapshots stay in sync.
+   * Tradeoff: committing through controller adds one extra callback hop from node component events.
+   */
+  const commitShapeTextEdit = useCallback((shapeId: string, nextText: string) => {
+    const sanitizedText = sanitizeShapeRichText(nextText);
+
+    setNodes(previousNodes => previousNodes.map(node => {
+      if (node.id !== shapeId) return node;
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          element: {
+            ...node.data.element,
+            text: sanitizedText
+          }
+        }
+      };
+    }));
+
+    setEditingShapeId(currentEditingShapeId => (currentEditingShapeId === shapeId ? null : currentEditingShapeId));
+    scheduleCommit();
+  }, [scheduleCommit]);
+
+  /**
+   * Cancels active shape text editing without mutating persisted shape content.
+   * This provides a deterministic Escape-path that avoids accidental partial commits.
+   * Tradeoff: cancel semantics rely on local draft ownership in the node renderer.
+   */
+  const cancelShapeTextEdit = useCallback(() => {
+    setEditingShapeId(null);
+  }, []);
 
   const onEmailBlockSelect = useCallback((cardId: string, blockId: string) => {
     setEditingCardId(cardId);
@@ -968,6 +1161,10 @@ export const useCanvasController = () => {
         onEmailBlockResizeStart={onEmailBlockResizeStart}
         onEmailCardSurfaceSelect={onEmailCardSurfaceSelect}
         onEmailBlockTextChange={onEmailBlockTextChange}
+        editingShapeId={editingShapeId}
+        onShapeTextEditStart={startShapeTextEdit}
+        onShapeTextCommit={commitShapeTextEdit}
+        onShapeTextCancel={cancelShapeTextEdit}
       />
     )
   }), [
@@ -978,6 +1175,10 @@ export const useCanvasController = () => {
     onEmailBlockSelect,
     onEmailCardSurfaceSelect,
     onEmailBlockTextChange,
+    editingShapeId,
+    startShapeTextEdit,
+    commitShapeTextEdit,
+    cancelShapeTextEdit,
     resizeState?.blockId,
     scheduleCommit,
     syncNodeDimensions
@@ -986,7 +1187,7 @@ export const useCanvasController = () => {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
 
       if (event.code === 'Space') setSpacePan(true);
 
@@ -1041,21 +1242,21 @@ export const useCanvasController = () => {
   }, [clipboardNodes, duplicateSelection, groupSelectionIntoContainer, redo, removeSelection, selectedNodes, undo]);
 
   useEffect(() => {
-    const handleMouseUp = () => {
+    const handleWindowBlur = () => {
       if (tool !== 'PENCIL') return;
-      if (!freehandDraftRef.current) return;
+      if (activeFreehandPointerIdRef.current === null) return;
       finishFreehandDraw();
     };
 
-    window.addEventListener('mouseup', handleMouseUp);
-    return () => window.removeEventListener('mouseup', handleMouseUp);
+    window.addEventListener('blur', handleWindowBlur);
+    return () => window.removeEventListener('blur', handleWindowBlur);
   }, [finishFreehandDraw, tool]);
 
   useEffect(() => {
     if (tool === 'PENCIL') return;
-    if (!freehandDraftRef.current) return;
-    setFreehandDraft(null);
-  }, [tool]);
+    if (activeFreehandPointerIdRef.current === null && !freehandDraftRef.current) return;
+    cancelFreehandDraw();
+  }, [cancelFreehandDraw, tool]);
 
   const selectedElement = selectedNode?.data.element;
   const selectedIsEmailCard = selectedElement?.kind === 'EMAIL_CARD';
@@ -1122,9 +1323,11 @@ export const useCanvasController = () => {
     activeSelectedBlock,
     activeSelectedBlockMetrics,
     activeBlockId,
+    editingShapeId,
     freehandDraft,
     containerOptions,
     linkedTicketIdsForSelection,
+    hasTicketLinkOwnerForSelection,
     ticketById,
     canUndo,
     canRedo,
@@ -1135,12 +1338,17 @@ export const useCanvasController = () => {
     setLinkSearch,
     setDraftLinkedTicketIds,
     setActiveBlockId,
+    startShapeTextEdit,
+    commitShapeTextEdit,
+    cancelShapeTextEdit,
     onNodesChange,
     onEdgesChange,
     onConnect,
     onPaneClick,
-    onPaneMouseMove,
-    onPaneMouseLeave,
+    onPencilPointerDown,
+    onPencilPointerMove,
+    onPencilPointerUp,
+    onPencilPointerCancel,
     onMoveEnd: onCanvasMoveEnd,
     undo,
     redo,

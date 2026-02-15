@@ -45,7 +45,7 @@ export type TicketRef = {
   id: string;
   shortId: string;
   title: string;
-  parentType: 'CHANNEL' | 'PROJECT';
+  parentType: 'CHANNEL' | 'PROJECT' | 'STANDALONE';
   parentId: string;
 };
 

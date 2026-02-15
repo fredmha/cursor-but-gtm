@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Handle, Node, NodeProps, NodeResizer, Position } from '@xyflow/react';
 import { DndContext, DragEndEvent, DragStartEvent, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -15,6 +15,15 @@ import {
   toFiniteNumber
 } from './canvas-core';
 import { toSvgPolylinePoints } from './canvas-freehand';
+import {
+  indentSelectionLines,
+  insertSoftLineBreak,
+  isShapeRichTextEditableKind,
+  outdentSelectionLines,
+  sanitizeShapeRichText,
+  toRenderableShapeHtml,
+  toggleInlineStyle
+} from './canvas-rich-text';
 
 export type CanvasElementNodeProps = NodeProps<Node<CanvasNodeData>> & {
   onResizeLive: (id: string, dimensions: ResizeDimensions) => void;
@@ -27,6 +36,10 @@ export type CanvasElementNodeProps = NodeProps<Node<CanvasNodeData>> & {
   onEmailBlockResizeStart: (cardId: string, blockId: string, clientY: number) => void;
   onEmailCardSurfaceSelect: (cardId: string) => void;
   onEmailBlockTextChange: (cardId: string, blockId: string, value: string) => void;
+  editingShapeId: string | null;
+  onShapeTextEditStart: (shapeId: string) => void;
+  onShapeTextCommit: (shapeId: string, nextText: string) => void;
+  onShapeTextCancel: () => void;
 };
 
 type SortableEmailRowProps = {
@@ -43,7 +56,176 @@ type SortableEmailRowProps = {
 type ShapeStyleColors = {
   fill: string;
   stroke: string;
-  text: string;
+};
+
+type ShapeTextLayerProps = {
+  elementId: string;
+  elementText: string | undefined;
+  fallbackText: string;
+  isEditing: boolean;
+  fontSize: number;
+  fontFamily: string;
+  textClassName: string;
+  onCommit: (nextHtml: string) => void;
+  onCancel: () => void;
+};
+
+/**
+ * Places the caret at the end of a contentEditable container.
+ * This provides predictable typing behavior when entering inline shape edit mode.
+ * Tradeoff: caret always starts at the end instead of restoring prior selection.
+ */
+const placeCaretAtEnd = (element: HTMLDivElement): void => {
+  const selection = window.getSelection();
+  if (!selection) return;
+
+  const range = document.createRange();
+  range.selectNodeContents(element);
+  range.collapse(false);
+  selection.removeAllRanges();
+  selection.addRange(range);
+};
+
+/**
+ * Renders static or editable rich text for primitive shape labels.
+ * This isolates contentEditable behavior so shape geometry renderers stay focused on layout.
+ * Tradeoff: HTML rendering requires strict sanitization before persistence and display.
+ */
+const ShapeTextLayer: React.FC<ShapeTextLayerProps> = ({
+  elementId,
+  elementText,
+  fallbackText,
+  isEditing,
+  fontSize,
+  fontFamily,
+  textClassName,
+  onCommit,
+  onCancel
+}) => {
+  const editorRef = useRef<HTMLDivElement | null>(null);
+  const draftHtmlRef = useRef<string>('');
+  const cancelEditRef = useRef(false);
+
+  /**
+   * Applies keyboard semantics for inline shape text editing.
+   * This captures rich-text shortcuts and commit/cancel keys within the editor.
+   * Tradeoff: browser command support varies slightly across environments.
+   */
+  const handleEditorKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const isMetaModifier = event.metaKey || event.ctrlKey;
+    const normalizedKey = event.key.toLowerCase();
+
+    if (isMetaModifier && normalizedKey === 'b') {
+      event.preventDefault();
+      toggleInlineStyle('bold');
+      return;
+    }
+
+    if (isMetaModifier && normalizedKey === 'i') {
+      event.preventDefault();
+      toggleInlineStyle('italic');
+      return;
+    }
+
+    if (event.key === 'Tab') {
+      event.preventDefault();
+      if (event.shiftKey) outdentSelectionLines(); else indentSelectionLines();
+      const editorElement = editorRef.current;
+      if (editorElement) draftHtmlRef.current = editorElement.innerHTML;
+      return;
+    }
+
+    if (event.key === 'Enter' && event.shiftKey) {
+      event.preventDefault();
+      insertSoftLineBreak();
+      const editorElement = editorRef.current;
+      if (editorElement) draftHtmlRef.current = editorElement.innerHTML;
+      return;
+    }
+
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      onCommit(draftHtmlRef.current);
+      return;
+    }
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      cancelEditRef.current = true;
+      onCancel();
+    }
+  }, [onCancel, onCommit]);
+
+  /**
+   * Captures live HTML draft updates from contentEditable input events.
+   * This keeps local editor state in sync before commit sanitization runs.
+   * Tradeoff: browser-generated markup can include extra tags that are later sanitized.
+   */
+  const handleEditorInput = useCallback((event: React.FormEvent<HTMLDivElement>) => {
+    draftHtmlRef.current = event.currentTarget.innerHTML;
+  }, []);
+
+  /**
+   * Commits editor content when focus leaves the inline editor.
+   * This ensures click-away saves edits while preserving Escape cancel semantics.
+   * Tradeoff: blur-driven commit can feel eager for users expecting explicit save actions only.
+   */
+  const handleEditorBlur = useCallback(() => {
+    if (cancelEditRef.current) {
+      cancelEditRef.current = false;
+      return;
+    }
+    onCommit(draftHtmlRef.current);
+  }, [onCommit]);
+
+  /**
+   * Blocks ReactFlow drag/select pointer handling while editing text.
+   * This keeps text selection interactions from being interpreted as node drags.
+   * Tradeoff: node drag is temporarily unavailable until editing exits.
+   */
+  const handleEditorMouseDown = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    event.stopPropagation();
+  }, []);
+
+  useEffect(() => {
+    if (!isEditing) return;
+    const editorElement = editorRef.current;
+    if (!editorElement) return;
+    const initialHtml = sanitizeShapeRichText(elementText || '');
+    draftHtmlRef.current = initialHtml;
+    editorElement.innerHTML = initialHtml;
+    editorElement.focus();
+    placeCaretAtEnd(editorElement);
+  }, [elementText, isEditing]);
+
+  if (isEditing) {
+    return (
+      <div
+        ref={editorRef}
+        contentEditable
+        suppressContentEditableWarning
+        role="textbox"
+        data-testid={`shape-editor-${elementId}`}
+        className={`nodrag nopan h-full w-full rounded border border-indigo-300 bg-white/95 px-2 py-1 outline-none whitespace-pre-wrap ${textClassName}`}
+        dir="ltr"
+        style={{ fontSize, fontFamily, direction: 'ltr' }}
+        onMouseDown={handleEditorMouseDown}
+        onInput={handleEditorInput}
+        onKeyDown={handleEditorKeyDown}
+        onBlur={handleEditorBlur}
+      />
+    );
+  }
+
+  const renderableHtml = toRenderableShapeHtml(elementText, fallbackText);
+  return (
+    <div
+      className={`pointer-events-none h-full w-full whitespace-pre-wrap ${textClassName}`}
+      dir="ltr"
+      style={{ fontSize, fontFamily, direction: 'ltr' }}
+      dangerouslySetInnerHTML={{ __html: renderableHtml }}
+    />
+  );
 };
 
 /**
@@ -65,8 +247,7 @@ const getHeadingWeightClass = (type: CanvasEmailBlock['type']): string => {
  */
 const getShapeStyleColors = (element: CanvasElement): ShapeStyleColors => ({
   fill: element.style?.fill || '#f8fafc',
-  stroke: element.style?.stroke || '#64748b',
-  text: '#334155'
+  stroke: element.style?.stroke || '#64748b'
 });
 
 /**
@@ -92,7 +273,6 @@ const isPrimitiveKind = (kind: CanvasElement['kind']): boolean =>
  */
 const renderRectangleShapeNode = (element: CanvasElement, frameWidth: number, frameHeight: number): React.ReactNode => {
   const colors = getShapeStyleColors(element);
-  const label = (element.text || getCanvasKindLabel(element.kind)).trim();
   const safeWidth = Math.max(frameWidth, 1);
   const safeHeight = Math.max(frameHeight, 1);
 
@@ -101,9 +281,6 @@ const renderRectangleShapeNode = (element: CanvasElement, frameWidth: number, fr
       <svg className="h-full w-full" viewBox={`0 0 ${safeWidth} ${safeHeight}`}>
         <rect x={1} y={1} width={safeWidth - 2} height={safeHeight - 2} rx={8} fill={colors.fill} stroke={colors.stroke} />
       </svg>
-      <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-3">
-        <span className="text-sm font-semibold text-center break-words" style={{ color: colors.text }}>{label}</span>
-      </div>
     </div>
   );
 };
@@ -115,7 +292,6 @@ const renderRectangleShapeNode = (element: CanvasElement, frameWidth: number, fr
  */
 const renderEllipseShapeNode = (element: CanvasElement, frameWidth: number, frameHeight: number): React.ReactNode => {
   const colors = getShapeStyleColors(element);
-  const label = (element.text || getCanvasKindLabel(element.kind)).trim();
   const safeWidth = Math.max(frameWidth, 1);
   const safeHeight = Math.max(frameHeight, 1);
 
@@ -124,9 +300,6 @@ const renderEllipseShapeNode = (element: CanvasElement, frameWidth: number, fram
       <svg className="h-full w-full" viewBox={`0 0 ${safeWidth} ${safeHeight}`}>
         <ellipse cx={safeWidth / 2} cy={safeHeight / 2} rx={(safeWidth - 2) / 2} ry={(safeHeight - 2) / 2} fill={colors.fill} stroke={colors.stroke} />
       </svg>
-      <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-3">
-        <span className="text-sm font-semibold text-center break-words" style={{ color: colors.text }}>{label}</span>
-      </div>
     </div>
   );
 };
@@ -138,7 +311,6 @@ const renderEllipseShapeNode = (element: CanvasElement, frameWidth: number, fram
  */
 const renderDiamondShapeNode = (element: CanvasElement, frameWidth: number, frameHeight: number): React.ReactNode => {
   const colors = getShapeStyleColors(element);
-  const label = (element.text || getCanvasKindLabel(element.kind)).trim();
   const safeWidth = Math.max(frameWidth, 1);
   const safeHeight = Math.max(frameHeight, 1);
   const points = `${safeWidth / 2},1 ${safeWidth - 1},${safeHeight / 2} ${safeWidth / 2},${safeHeight - 1} 1,${safeHeight / 2}`;
@@ -148,9 +320,6 @@ const renderDiamondShapeNode = (element: CanvasElement, frameWidth: number, fram
       <svg className="h-full w-full" viewBox={`0 0 ${safeWidth} ${safeHeight}`}>
         <polygon points={points} fill={colors.fill} stroke={colors.stroke} />
       </svg>
-      <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-6">
-        <span className="text-sm font-semibold text-center break-words" style={{ color: colors.text }}>{label}</span>
-      </div>
     </div>
   );
 };
@@ -183,21 +352,15 @@ const renderPencilShapeNode = (
 );
 
 /**
- * Renders a text-only canvas node without card chrome.
- * Direct text rendering mirrors whiteboard text-box behavior for fast annotation workflows.
- * Tradeoff: rich-text features are intentionally deferred to keep surface-level complexity low.
+ * Renders the text-node base layer without card chrome.
+ * The rich-text overlay is rendered separately so edit/view behavior stays consistent with other shapes.
+ * Tradeoff: text node display now relies on the shared overlay pipeline instead of standalone markup.
  */
 const renderTextShapeNode = (element: CanvasElement): React.ReactNode => (
   <div
-    className="h-full w-full text-zinc-800 leading-snug whitespace-pre-wrap"
+    className="h-full w-full"
     data-testid="text-shape"
-    style={{
-      fontSize: element.style?.fontSize || 16,
-      fontFamily: element.style?.fontFamily || 'Inter'
-    }}
-  >
-    {element.text || 'Type here...'}
-  </div>
+  />
 );
 
 const SortableEmailRow: React.FC<SortableEmailRowProps> = ({
@@ -227,6 +390,46 @@ const SortableEmailRow: React.FC<SortableEmailRowProps> = ({
   const headingWeightClass = getHeadingWeightClass(block.type);
   const showDropTarget = isEditingEmailCard && isOver && active?.id !== block.id;
   const contentMinHeight = Math.max(24, metrics.heightPx - (metrics.paddingY * 2));
+  const [draftBlockText, setDraftBlockText] = useState(block.text || '');
+
+  /**
+   * Syncs local draft text from canonical block data when row identity changes.
+   * This mirrors execution-table draft editing to avoid per-keystroke store churn.
+   * Tradeoff: external updates overwrite local draft when block text changes upstream.
+   */
+  useEffect(() => {
+    setDraftBlockText(block.text || '');
+  }, [block.id, block.text]);
+
+  /**
+   * Persists the local email block text draft through controller callbacks.
+   * This keeps typing responsive while committing changes at stable interaction boundaries.
+   * Tradeoff: parent state is eventually consistent during active typing.
+   */
+  const commitBlockDraftText = useCallback(() => {
+    onEmailBlockTextChange(cardId, block.id, draftBlockText);
+  }, [block.id, cardId, draftBlockText, onEmailBlockTextChange]);
+
+  /**
+   * Updates local text draft on each keystroke without touching global canvas state.
+   * This prevents the recurrent single-character input regression caused by rapid rerenders.
+   * Tradeoff: draft state is local and must be explicitly committed on blur.
+   */
+  const handleDraftBlockTextChange = useCallback((event: React.ChangeEvent<HTMLTextAreaElement | HTMLInputElement>) => {
+    setDraftBlockText(event.target.value);
+  }, []);
+
+  /**
+   * Commits heading-row input on Enter to match table-style inline editor ergonomics.
+   * Body rows keep multiline Enter behavior and rely on blur to commit.
+   * Tradeoff: Enter-to-commit is limited to single-line heading inputs.
+   */
+  const handleHeadingInputKeyDown = useCallback((event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    commitBlockDraftText();
+    event.currentTarget.blur();
+  }, [commitBlockDraftText]);
 
   return (
     <div
@@ -284,20 +487,23 @@ const SortableEmailRow: React.FC<SortableEmailRowProps> = ({
         ) : isActive ? (
           block.type === 'BODY' ? (
             <textarea
-              value={block.text || ''}
+              value={draftBlockText}
               rows={3}
               className={`nodrag nopan min-w-0 w-full box-border rounded border border-indigo-200 bg-white px-2 py-1.5 text-zinc-800 leading-snug ${align === 'center' ? 'text-center' : align === 'right' ? 'text-right' : 'text-left'}`}
               style={{ fontSize: metrics.fontSizePx, minHeight: Math.max(36, contentMinHeight) }}
               onMouseDown={event => event.stopPropagation()}
-              onChange={event => onEmailBlockTextChange(cardId, block.id, event.target.value)}
+              onChange={handleDraftBlockTextChange}
+              onBlur={commitBlockDraftText}
             />
           ) : (
             <input
-              value={block.text || ''}
+              value={draftBlockText}
               className={`nodrag nopan min-w-0 w-full box-border rounded border border-indigo-200 bg-white px-2 py-1 text-zinc-800 leading-snug ${headingWeightClass} ${align === 'center' ? 'text-center' : align === 'right' ? 'text-right' : 'text-left'}`}
               style={{ fontSize: metrics.fontSizePx, minHeight: contentMinHeight }}
               onMouseDown={event => event.stopPropagation()}
-              onChange={event => onEmailBlockTextChange(cardId, block.id, event.target.value)}
+              onChange={handleDraftBlockTextChange}
+              onBlur={commitBlockDraftText}
+              onKeyDown={handleHeadingInputKeyDown}
             />
           )
         ) : (
@@ -348,13 +554,19 @@ export const CanvasElementNode: React.FC<CanvasElementNodeProps> = ({
   onEmailBlockReorder,
   onEmailBlockResizeStart,
   onEmailCardSurfaceSelect,
-  onEmailBlockTextChange
+  onEmailBlockTextChange,
+  editingShapeId,
+  onShapeTextEditStart,
+  onShapeTextCommit,
+  onShapeTextCancel
 }) => {
   const element = data.element;
   const isContainer = element.kind === 'CONTAINER';
   const isGroupedChild = !!parentId && !isContainer;
   const isCardShell = isCardShellKind(element.kind);
   const isPrimitiveNode = isPrimitiveKind(element.kind);
+  const supportsShapeRichTextEditing = isShapeRichTextEditableKind(element.kind);
+  const isEditingShape = selected && supportsShapeRichTextEditing && editingShapeId === id;
   const frameWidth = toFiniteNumber(width) ?? element.width;
   const frameHeight = toFiniteNumber(height) ?? element.height;
   const emailBlocks = element.kind === 'EMAIL_CARD' ? (element.emailTemplate?.blocks || []) : [];
@@ -387,6 +599,37 @@ export const CanvasElementNode: React.FC<CanvasElementNodeProps> = ({
 
   const kindLabel = getCanvasKindLabel(element.kind);
   const strokePoints = toSvgPolylinePoints(element.stroke);
+  const shapeFallbackLabel = element.kind === 'TEXT' ? 'Type here...' : kindLabel;
+
+  /**
+   * Starts inline editing for supported shape nodes on double click.
+   * This mirrors common whiteboard behavior where shape labels are edited in place.
+   * Tradeoff: double click is an extra gesture compared with single-click edit activation.
+   */
+  const handleShapeDoubleClick = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!supportsShapeRichTextEditing) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onShapeTextEditStart(id);
+  }, [id, onShapeTextEditStart, supportsShapeRichTextEditing]);
+
+  /**
+   * Commits local shape rich-text draft through controller persistence callbacks.
+   * This keeps node-local edit buffering decoupled from scene update scheduling.
+   * Tradeoff: commit path depends on shape id identity provided by parent controller.
+   */
+  const commitShapeDraft = useCallback((nextHtml: string) => {
+    onShapeTextCommit(id, nextHtml);
+  }, [id, onShapeTextCommit]);
+
+  /**
+   * Cancels active shape editing and clears local cancel-intent state.
+   * This supports Escape behavior without persisting transient draft markup.
+   * Tradeoff: cancel handling assumes controller owns canonical persisted value.
+   */
+  const cancelShapeDraft = useCallback(() => {
+    onShapeTextCancel();
+  }, [onShapeTextCancel]);
 
   /**
    * Renders primitive nodes directly as geometry without card wrappers.
@@ -425,6 +668,7 @@ export const CanvasElementNode: React.FC<CanvasElementNodeProps> = ({
           : 'transparent',
         borderStyle: isCardShell ? (isContainer ? 'dashed' : 'solid') : 'none'
       }}
+      onDoubleClick={handleShapeDoubleClick}
     >
       <NodeResizer
         isVisible={selected}
@@ -486,7 +730,24 @@ export const CanvasElementNode: React.FC<CanvasElementNodeProps> = ({
           )}
         </div>
       ) : (
-        <div className={`h-full w-full ${isPrimitiveNode ? 'pointer-events-none' : ''}`}>{renderPrimitiveContent()}</div>
+        <div className={`h-full w-full relative ${isPrimitiveNode && !isEditingShape ? 'pointer-events-none' : ''}`}>
+          {renderPrimitiveContent()}
+          {supportsShapeRichTextEditing && (
+            <div className="absolute inset-0 flex items-center justify-center px-3">
+              <ShapeTextLayer
+                elementId={id}
+                elementText={element.text}
+                fallbackText={shapeFallbackLabel}
+                isEditing={isEditingShape}
+                fontSize={element.style?.fontSize || (element.kind === 'TEXT' ? 16 : 14)}
+                fontFamily={element.style?.fontFamily || 'Inter'}
+                textClassName="text-zinc-800 leading-snug text-center break-words font-semibold"
+                onCommit={commitShapeDraft}
+                onCancel={cancelShapeDraft}
+              />
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

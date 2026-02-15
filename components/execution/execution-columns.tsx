@@ -81,14 +81,14 @@ export const buildExecutionColumns = ({
         const value = ticket.description || '';
 
         return isEditing ? (
-          <textarea
+          <input
             autoFocus
-            rows={2}
             value={draftValue}
-            className="w-full rounded border border-zinc-300 px-2 py-1 text-sm resize-none"
+            className="w-full rounded border border-zinc-300 px-2 py-1 text-sm"
             onChange={event => setDraftValue(event.target.value)}
             onBlur={commitDraft}
             onKeyDown={event => {
+              if (event.key === 'Enter') commitDraft();
               if (event.key === 'Escape') cancelEditing();
             }}
           />

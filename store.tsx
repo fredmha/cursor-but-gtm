@@ -353,6 +353,58 @@ const removeTicketLinksFromScene = (scene: CanvasScene, ticketId: string): Canva
   relations: scene.relations.filter(relation => !(relation.type === 'TICKET_LINK' && relation.toId === ticketId))
 });
 
+/**
+ * Builds a child->container parent lookup from scene relations.
+ * Inputs: scene and known container ids.
+ * Output: map where child ids resolve to their container parent id.
+ * Invariant: only parent relations targeting container ids are included.
+ */
+const getParentContainerByChildId = (scene: CanvasScene, containerIds: Set<string>): Map<string, string> => {
+  const parentContainerByChildId = new Map<string, string>();
+
+  scene.relations.forEach(relation => {
+    if (relation.type !== 'PARENT') return;
+    if (!containerIds.has(relation.toId)) return;
+    parentContainerByChildId.set(relation.fromId, relation.toId);
+  });
+
+  return parentContainerByChildId;
+};
+
+/**
+ * Canonicalizes canvas element ids into container link-owner ids.
+ * Inputs: current scene and requested element ids from UI payloads.
+ * Output: deduped container ids that are valid ticket-link owners.
+ * Invariant: only container ids are returned; ungrouped non-container ids are dropped.
+ */
+const toContainerTicketLinkOwnerIds = (scene: CanvasScene, requestedElementIds: string[]): string[] => {
+  const elementById = new Map(scene.elements.map(element => [element.id, element] as [string, CanvasElement]));
+  const containerIds = new Set(
+    scene.elements
+      .filter(element => element.kind === 'CONTAINER')
+      .map(element => element.id)
+  );
+  const parentContainerByChildId = getParentContainerByChildId(scene, containerIds);
+
+  const dedupedOwnerIds: string[] = [];
+  const seenOwnerIds = new Set<string>();
+
+  requestedElementIds.forEach(elementId => {
+    const element = elementById.get(elementId);
+    if (!element) return;
+
+    const ownerId = element.kind === 'CONTAINER'
+      ? element.id
+      : parentContainerByChildId.get(element.id);
+
+    if (!ownerId || seenOwnerIds.has(ownerId)) return;
+    seenOwnerIds.add(ownerId);
+    dedupedOwnerIds.push(ownerId);
+  });
+
+  return dedupedOwnerIds;
+};
+
 interface StoreState {
   currentView: ViewMode;
   setCurrentView: (view: ViewMode) => void;
@@ -909,13 +961,12 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (updates.canvasItemIds && campaign.canvasScene) {
       // Canvas link sync path:
       // - Remove previous ticket links for this ticket id.
-      // - Rebuild with validated element ids only.
-      const allowedElementIds = new Set(campaign.canvasScene.elements.map(element => element.id));
-      const nextElementIds = updates.canvasItemIds.filter(id => allowedElementIds.has(id));
+      // - Rebuild with validated container owner ids only.
+      const nextOwnerElementIds = toContainerTicketLinkOwnerIds(campaign.canvasScene, updates.canvasItemIds);
       const nonTicketRelations = campaign.canvasScene.relations.filter(
         relation => !(relation.type === 'TICKET_LINK' && relation.toId === ticketId)
       );
-      const nextLinks = nextElementIds.map(elementId => ({
+      const nextLinks = nextOwnerElementIds.map(elementId => ({
         id: generateId(),
         type: 'TICKET_LINK' as const,
         fromId: elementId,
@@ -1023,8 +1074,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const getCanvasTicketLinks = (elementId: string): string[] => {
     if (!campaign?.canvasScene) return [];
+    const [ownerId] = toContainerTicketLinkOwnerIds(campaign.canvasScene, [elementId]);
+    if (!ownerId) return [];
     return campaign.canvasScene.relations
-      .filter(relation => relation.type === 'TICKET_LINK' && relation.fromId === elementId)
+      .filter(relation => relation.type === 'TICKET_LINK' && relation.fromId === ownerId)
       .map(relation => relation.toId);
   };
 
